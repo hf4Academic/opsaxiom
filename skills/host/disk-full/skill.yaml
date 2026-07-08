@@ -1,0 +1,242 @@
+# ============================================================================
+# 金标准 Skill 样例 #1 —— 磁盘空间耗尽
+# 本文件是 few-shot 教材：批量生成 Skill 时以本文件为模板与质量基准。
+# 它刻意覆盖了 schema 的全部要素：多分支 check、ask、隔离区改造（R1 §2）、
+# snapshot/inverse/service_restore 三种回滚、preflight 简报、cautions 写法。
+# ============================================================================
+apiVersion: skill/v0.1
+kind: Hybrid
+metadata:
+  id: host.storage.capacity.disk-full
+  name: 磁盘空间耗尽排查与处置
+  taxonomy: host/storage/capacity/disk-full
+  version: 0.1.0
+  maturity: draft
+  platforms:
+    - {os: linux, family: [debian, rhel, suse]}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-fable-5
+    reviewed_by: []
+  expires_review: 2027-07-01
+
+requirements:
+  capability_level: high_risk_write
+  connectors: [ssh]
+  facts: [os.family, fs.mounts]
+
+discovery:
+  - id: df_usage
+    run: {linux: "df -B1 --output=target,size,used,avail,pcent | grep -v tmpfs"}
+    parser: table/df-v1
+  - id: df_inode
+    run: {linux: "df -i --output=target,itotal,iused,ipcent | grep -v tmpfs"}
+    parser: table/df-inode-v1
+
+tree:
+  entry: locate_mount
+  nodes:
+
+  # ---- 定位与分类 ----------------------------------------------------------
+  - id: locate_mount
+    type: check
+    title: 确认告警挂载点与真实使用率
+    run: {linux: "df -B1 --output=target,pcent,avail {{mount}}"}
+    parser: table/df-v1
+    branch:
+      - when: "rows[0].pcent >= 90"
+        goto: check_inode
+      - when: "rows[0].pcent < 90"
+        goto: false_alarm
+    otherwise: escalate
+    cautions:
+      - "先确认监控与 df 一致：告警可能来自采集延迟，先看现值再动手"
+      - "overlay/nfs 挂载的使用率语义不同，本 Skill 只处理本地文件系统"
+
+  - id: false_alarm
+    type: done
+    title: 使用率已低于阈值
+    summary: "当前使用率 {{rows[0].pcent}}%，低于告警阈值。可能为瞬时写入或告警延迟，建议观察告警是否自动恢复。"
+
+  - id: check_inode
+    type: check
+    title: 区分空间耗尽与 inode 耗尽
+    run: {linux: "df -i --output=ipcent {{mount}}"}
+    parser: table/df-inode-v1
+    branch:
+      - when: "rows[0].ipcent >= 95"
+        goto: inode_exhaustion
+      - when: "rows[0].ipcent < 95"
+        goto: check_deleted_open
+    otherwise: escalate
+    cautions:
+      - "df 显示有空间但应用报 No space left 时，几乎总是 inode 耗尽——这是本步骤存在的原因"
+
+  # ---- 分支 A：已删除但被进程占用 -------------------------------------------
+  - id: check_deleted_open
+    type: check
+    title: 检查已删除但仍被进程打开的文件
+    run: {linux: "lsof +L1 {{mount}} 2>/dev/null | awk '{sum+=$7} END {print sum+0}'"}
+    branch:
+      - when: "output.value > mount.size * 0.2"
+        goto: ask_restart_holder
+      - when: "output.value <= mount.size * 0.2"
+        goto: find_big_files
+    otherwise: find_big_files
+    cautions:
+      - "典型元凶：日志被 rm 但进程未 reopen。rm 不释放空间，重启/reload 持有进程才释放"
+
+  - id: ask_restart_holder
+    type: ask
+    title: 确认是否可以重启/重载占用进程
+    question: "以下进程持有已删除文件共 {{human_size}}（详单见上）。重载/重启它们会释放空间但有短暂服务影响，是否处置？"
+    options:
+      - {label: "可以，先尝试 reload（影响最小）", goto: reload_holder}
+      - {label: "不可以，改为清理其他大文件", goto: find_big_files}
+
+  - id: reload_holder
+    type: action
+    title: 重载持有已删除文件的进程
+    risk: medium
+    preflight:
+      blast_radius: "仅目标服务 {{svc}}；reload 通常不断连接，但取决于服务实现"
+      watch:
+        - {run: {linux: "systemctl is-active {{svc}}"}, expect: "active", interval: 5s}
+        - {run: {linux: "df -B1 --output=pcent {{mount}}"}, expect: "使用率下降"}
+      abort_if:
+        - "服务状态离开 active 超过 30 秒"
+      approval: required
+      est_downtime: "预期 0；最坏情况为该服务一次重启时长"
+    dryrun:
+      run: {linux: "systemctl show {{svc}} -p CanReload"}
+      interpret: "CanReload=yes 才走 reload，否则回到 ask 节点改用 restart 并重新简报"
+    run: {linux: "systemctl reload {{svc}}"}
+    rollback:
+      type: service_restore
+      run: {linux: "systemctl restart {{svc}}"}
+    verify:
+      run: {linux: "systemctl is-active {{svc}} && df -B1 --output=pcent {{mount}}"}
+      expect: "服务 active 且使用率较执行前下降"
+      on_fail: rollback
+    goto: final_check
+
+  # ---- 分支 B：大文件清理（不可逆操作的隔离区改造，见 02-rollback §2）--------
+  - id: find_big_files
+    type: check
+    title: 定位可疑大文件与增长目录
+    run: {linux: "du -xB1 {{mount}} --max-depth=3 2>/dev/null | sort -rn | head -20"}
+    parser: table/du-v1
+    branch:
+      - when: "count(rows[].path matches '/var/log') >= 1"
+        goto: compress_old_logs
+      - when: "count(rows) > 0"
+        goto: ask_quarantine
+    otherwise: escalate
+    cautions:
+      - "只看不删。任何删除决定都必须经过人（ask 节点），Agent 无权判断业务文件价值"
+
+  - id: compress_old_logs
+    type: action
+    title: 压缩 7 天前的历史日志（完全可逆）
+    risk: low
+    preflight:
+      blast_radius: "仅 {{mount}} 下 mtime>7d 的 *.log 历史文件；不触碰当前打开的日志"
+      watch:
+        - {run: {linux: "df -B1 --output=pcent {{mount}}"}, expect: "使用率下降"}
+      abort_if: ["任一文件正被进程写入（fuser 非空）"]
+      approval: required
+    dryrun:
+      run: {linux: "find {{mount}} -name '*.log' -mtime +7 -size +100M ! -exec fuser -s {} \\; -print | head -50"}
+    run: {linux: "find {{mount}} -name '*.log' -mtime +7 -size +100M ! -exec fuser -s {} \\; -exec gzip {} \\;"}
+    rollback:
+      type: inverse
+      run: {linux: "find {{mount}} -name '*.log.gz' -newer /var/lib/opsagent/session/{{sid}}/start -exec gunzip {} \\;"}
+    verify:
+      run: {linux: "df -B1 --output=pcent {{mount}}"}
+      expect: "rows[0].pcent < 90"
+      on_fail: escalate    # 压缩不够说明另有元凶，继续排查而非回滚
+    goto: final_check
+
+  - id: ask_quarantine
+    type: ask
+    title: 人工确认可移出的文件
+    question: "以上是最大的 20 个文件/目录。哪些业务上确认不再需要？（将移入隔离区保留 7 天，随时可恢复，不会直接删除）"
+    options:
+      - {label: "选定文件，移入隔离区", goto: quarantine_files}
+      - {label: "都不能动，升级处理", goto: escalate}
+
+  - id: quarantine_files
+    type: action
+    title: 移动选定文件到隔离区（删除的可逆改造）
+    risk: high
+    preflight:
+      blast_radius: "选定文件在原路径不可见；已打开这些文件的进程不受影响（fd 仍有效）"
+      watch:
+        - {run: {linux: "df -B1 --output=pcent {{mount}}"}, expect: "使用率下降"}
+      abort_if: ["任一相关业务健康检查失败"]
+      approval: required
+    dryrun:
+      run: {linux: "du -shc {{files}}"}
+      interpret: "确认释放量与文件清单"
+    run: {linux: "opsagent-quarantine move --session {{sid}} {{files}}"}
+    rollback:
+      type: inverse
+      run: {linux: "opsagent-quarantine restore --session {{sid}}"}
+    verify:
+      run: {linux: "df -B1 --output=pcent {{mount}}"}
+      expect: "rows[0].pcent < 90"
+      on_fail: escalate
+    cautions:
+      - "隔离区在同一文件系统时 mv 是 O(1)；隔离区规划必须与业务盘同 FS，否则大文件移动本身会加剧写入"
+      - "7 天后 Agent 会提示确认清理——最终删除永远是人的动作（R1）"
+    goto: final_check
+
+  # ---- 分支 C：inode 耗尽 ---------------------------------------------------
+  - id: inode_exhaustion
+    type: check
+    title: 定位海量小文件目录
+    run: {linux: "find {{mount}} -xdev -type d -exec sh -c 'echo \"$(ls -a \"$1\" | wc -l) $1\"' _ {} \\; 2>/dev/null | sort -rn | head -10"}
+    branch:
+      - when: "count(rows) > 0"
+        goto: ask_quarantine
+    otherwise: escalate
+    cautions:
+      - "典型元凶：sessions 目录、mail 队列、未清理的临时文件。处置同样走隔离区，不直接删"
+
+  # ---- 收尾 -----------------------------------------------------------------
+  - id: final_check
+    type: check
+    title: 复核使用率并给出防复发建议
+    run: {linux: "df -B1 --output=pcent,avail {{mount}}"}
+    parser: table/df-v1
+    branch:
+      - when: "rows[0].pcent < 85"
+        goto: done_ok
+      - when: "rows[0].pcent >= 85"
+        goto: escalate
+    otherwise: escalate
+
+  - id: done_ok
+    type: done
+    summary: >-
+      使用率已降至 {{rows[0].pcent}}%。防复发建议：为元凶目录配置 logrotate/定期清理；
+      为该挂载点设置 85% 预警（早于 90% 告警）；若隔离区有文件，7 天后需人工确认清理。
+
+  - id: escalate
+    type: escalate
+    summary: "已采集的事实与走过的路径将打包升级。常见的树外原因：配额（quota）、reserved blocks、文件系统错误。"
+
+tests:
+  - scenario: tests/log-growth.yaml          # 日志膨胀：期望走压缩分支
+    expect_path: [locate_mount, check_inode, check_deleted_open, find_big_files, compress_old_logs, final_check, done_ok]
+    rollback_assert: true
+  - scenario: tests/deleted-open-fd.yaml     # rm 后未释放：期望走 reload 分支
+    expect_path: [locate_mount, check_inode, check_deleted_open, ask_restart_holder, reload_holder, final_check, done_ok]
+    rollback_assert: true
+  - scenario: tests/inode-exhaustion.yaml    # inode 耗尽
+    expect_path: [locate_mount, check_inode, inode_exhaustion, ask_quarantine, quarantine_files, final_check, done_ok]
+    rollback_assert: true
+
+feedback:
+  ask: "磁盘问题解决了吗？"

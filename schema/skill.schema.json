@@ -1,0 +1,235 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opsagent.dev/schema/skill-v0.1.json",
+  "title": "OpsAgent Skill v0.1",
+  "description": "结构校验层。语义规则 S1-S10 见 docs/03-skill-schema.md §4，由 tools/validate 实现。",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "requirements", "tree"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": { "const": "skill/v0.1" },
+    "kind": { "enum": ["Diagnostic", "Change", "Hybrid"] },
+    "metadata": {
+      "type": "object",
+      "required": ["id", "name", "taxonomy", "version", "maturity", "platforms", "provenance"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9]+(\\.[a-z0-9-]+)+$" },
+        "name": { "type": "string", "maxLength": 120 },
+        "taxonomy": { "type": "string", "pattern": "^[a-z0-9-]+(/[a-z0-9-]+)+$" },
+        "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+        "maturity": { "enum": ["draft", "sim_verified", "field_verified", "certified"] },
+        "platforms": { "type": "array", "minItems": 1, "items": { "type": "object" } },
+        "authors": { "type": "array", "items": { "type": "string" } },
+        "license": { "type": "string" },
+        "provenance": {
+          "type": "object",
+          "required": ["generated_by"],
+          "properties": {
+            "generated_by": { "type": "string" },
+            "reviewed_by": { "type": "array", "items": { "type": "string" } },
+            "source_trace": { "type": "string" }
+          }
+        },
+        "expires_review": { "type": "string", "format": "date" }
+      }
+    },
+    "requirements": {
+      "type": "object",
+      "required": ["capability_level", "connectors"],
+      "additionalProperties": false,
+      "properties": {
+        "capability_level": { "enum": ["read", "low_risk_write", "high_risk_write", "destructive"] },
+        "connectors": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "facts": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "discovery": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "run"],
+        "properties": {
+          "id": { "type": "string" },
+          "run": { "$ref": "#/$defs/platformCommand" },
+          "parser": { "type": "string" }
+        }
+      }
+    },
+    "tree": {
+      "type": "object",
+      "required": ["entry", "nodes"],
+      "additionalProperties": false,
+      "properties": {
+        "entry": { "type": "string" },
+        "nodes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/checkNode" },
+              { "$ref": "#/$defs/actionNode" },
+              { "$ref": "#/$defs/askNode" },
+              { "$ref": "#/$defs/terminalNode" }
+            ]
+          }
+        }
+      }
+    },
+    "tests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["scenario", "expect_path"],
+        "properties": {
+          "scenario": { "type": "string" },
+          "expect_path": { "type": "array", "items": { "type": "string" } },
+          "rollback_assert": { "type": "boolean" }
+        }
+      }
+    },
+    "feedback": {
+      "type": "object",
+      "properties": { "ask": { "type": "string" } }
+    }
+  },
+  "$defs": {
+    "platformCommand": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "键为平台标识（linux/cisco_ios/huawei_vrp/junos/kubectl...），值为命令模板",
+      "additionalProperties": { "type": "string" }
+    },
+    "nodeCommon": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+        "title": { "type": "string" },
+        "cautions": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "checkNode": {
+      "allOf": [{ "$ref": "#/$defs/nodeCommon" }],
+      "type": "object",
+      "required": ["run", "branch", "otherwise"],
+      "properties": {
+        "type": { "const": "check" },
+        "run": { "$ref": "#/$defs/platformCommand" },
+        "parser": { "type": "string" },
+        "branch": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["when", "goto"],
+            "properties": {
+              "when": { "type": "string", "description": "受限表达式语言，编译期静态检查" },
+              "goto": { "type": "string" }
+            }
+          }
+        },
+        "otherwise": { "type": "string", "description": "兜底跳转，通常为 escalate 节点 id 或字面 escalate" }
+      }
+    },
+    "actionNode": {
+      "allOf": [{ "$ref": "#/$defs/nodeCommon" }],
+      "type": "object",
+      "required": ["risk", "run", "rollback", "verify"],
+      "properties": {
+        "type": { "const": "action" },
+        "risk": { "enum": ["low", "medium", "high", "critical"] },
+        "human_only": { "type": "boolean", "description": "true 时 Agent 任何档位都不执行，仅指导" },
+        "preflight": {
+          "type": "object",
+          "required": ["blast_radius", "watch", "abort_if", "approval"],
+          "properties": {
+            "blast_radius": { "type": "string" },
+            "watch": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["run", "expect"],
+                "properties": {
+                  "run": { "$ref": "#/$defs/platformCommand" },
+                  "expect": { "type": "string" },
+                  "interval": { "type": "string" }
+                }
+              }
+            },
+            "abort_if": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+            "approval": { "enum": ["required", "auto"] },
+            "est_downtime": { "type": "string" }
+          }
+        },
+        "dryrun": {
+          "type": "object",
+          "required": ["run"],
+          "properties": { "run": { "$ref": "#/$defs/platformCommand" }, "interpret": { "type": "string" } }
+        },
+        "run": { "$ref": "#/$defs/platformCommand" },
+        "rollback": {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": { "enum": ["inverse", "snapshot", "transaction", "service_restore"] },
+            "run": { "$ref": "#/$defs/platformCommand" },
+            "snapshot": {
+              "type": "object",
+              "required": ["run"],
+              "properties": { "run": { "$ref": "#/$defs/platformCommand" } }
+            },
+            "window": { "type": "string", "description": "transaction 型的确认窗口，如 10m" },
+            "confirm": {
+              "type": "object",
+              "properties": { "run": { "$ref": "#/$defs/platformCommand" } }
+            }
+          },
+          "allOf": [
+            { "if": { "properties": { "type": { "const": "inverse" } } }, "then": { "required": ["run"] } },
+            { "if": { "properties": { "type": { "const": "snapshot" } } }, "then": { "required": ["snapshot", "run"] } },
+            { "if": { "properties": { "type": { "const": "transaction" } } }, "then": { "required": ["window", "confirm"] } }
+          ]
+        },
+        "verify": {
+          "type": "object",
+          "required": ["run", "expect", "on_fail"],
+          "properties": {
+            "run": { "$ref": "#/$defs/platformCommand" },
+            "parser": { "type": "string" },
+            "expect": { "type": "string" },
+            "on_fail": { "enum": ["rollback", "escalate"] }
+          }
+        },
+        "goto": { "type": "string" }
+      }
+    },
+    "askNode": {
+      "allOf": [{ "$ref": "#/$defs/nodeCommon" }],
+      "type": "object",
+      "required": ["question", "options"],
+      "properties": {
+        "type": { "const": "ask" },
+        "question": { "type": "string" },
+        "options": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "required": ["label", "goto"],
+            "properties": { "label": { "type": "string" }, "goto": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "terminalNode": {
+      "allOf": [{ "$ref": "#/$defs/nodeCommon" }],
+      "type": "object",
+      "properties": {
+        "type": { "enum": ["escalate", "done"] },
+        "summary": { "type": "string" }
+      }
+    }
+  }
+}

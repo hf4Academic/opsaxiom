@@ -1,0 +1,225 @@
+# ============================================================================
+# 金标准 Skill 样例 #2 —— BGP 邻居 Down
+# 教材要点（与样例 #1 互补）：多厂商命令并列写法、网络设备命令必须过语法树校验（S6）、
+# transaction 型回滚（commit confirmed）、诊断为主 + 单个高危 action 的 Hybrid 结构。
+# ============================================================================
+apiVersion: skill/v0.1
+kind: Hybrid
+metadata:
+  id: network.routing.bgp.neighbor-down
+  name: BGP 邻居中断排查与恢复
+  taxonomy: network/routing/bgp-neighbor-down
+  version: 0.1.0
+  maturity: draft
+  platforms:
+    - {device: cisco_ios}
+    - {device: huawei_vrp}
+    - {device: junos}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-fable-5
+    reviewed_by: []
+  expires_review: 2027-07-01
+
+requirements:
+  capability_level: high_risk_write
+  connectors: [network-cli]        # Netmiko/NETCONF 封装，凭据由堡垒机代持（R11）
+  facts: [device.platform, device.version, bgp.local_as]
+
+discovery:
+  - id: bgp_summary
+    run:
+      cisco_ios: "show ip bgp summary"
+      huawei_vrp: "display bgp peer"
+      junos: "show bgp summary"
+    parser: ntc/{{device.platform}}/bgp-summary
+
+tree:
+  entry: peer_state
+  nodes:
+
+  - id: peer_state
+    type: check
+    title: 确认邻居当前状态
+    run:
+      cisco_ios: "show ip bgp neighbors {{peer_ip}}"
+      huawei_vrp: "display bgp peer {{peer_ip}} verbose"
+      junos: "show bgp neighbor {{peer_ip}}"
+    parser: ntc/{{device.platform}}/bgp-neighbor
+    branch:
+      - {when: "state == 'Idle' and admin_state == 'shutdown'", goto: admin_shutdown_found}
+      - {when: "state == 'Idle'", goto: check_reachability}
+      - {when: "state == 'Active' or state == 'Connect'", goto: check_reachability}
+      - {when: "state == 'OpenSent' or state == 'OpenConfirm'", goto: check_session_params}
+      - {when: "state == 'Established'", goto: flapping_check}
+    otherwise: escalate
+    cautions:
+      - "Idle 和 Active 的含义与直觉相反：Active 表示正在主动尝试 TCP 连接，不是'正常'"
+      - "先看状态机卡在哪一层再动手：TCP 层问题查连通性，OPEN 层问题查参数"
+
+  - id: admin_shutdown_found
+    type: done
+    summary: "邻居处于管理性 shutdown（人为关闭）。这是配置意图而非故障——请先与变更记录/同事核实关闭原因，不要擅自 no shutdown。"
+
+  - id: check_reachability
+    type: check
+    title: 检查到邻居的 TCP/IP 可达性
+    run:
+      cisco_ios: "ping {{peer_ip}} source {{update_source|local_bgp_ip}} repeat 5"
+      huawei_vrp: "ping -a {{update_source|local_bgp_ip}} -c 5 {{peer_ip}}"
+      junos: "ping {{peer_ip}} source {{update_source|local_bgp_ip}} count 5"
+    branch:
+      - {when: "loss_pct == 100", goto: check_interface}
+      - {when: "loss_pct == 0", goto: check_tcp_179}
+      - {when: "loss_pct > 0 and loss_pct < 100", goto: escalate}   # 间歇丢包另有专门 Skill
+    otherwise: escalate
+    cautions:
+      - "必须指定 source 为 BGP update-source 地址——默认出接口 ping 通不代表 BGP 会话路径通"
+
+  - id: check_interface
+    type: check
+    title: 检查物理接口与直连
+    run:
+      cisco_ios: "show interface {{intf}} | include line protocol|error"
+      huawei_vrp: "display interface {{intf}} | include current state|error"
+      junos: "show interfaces {{intf}} extensive | match \"Physical link|error\""
+    parser: ntc/{{device.platform}}/interface
+    branch:
+      - {when: "link_state != 'up'", goto: physical_layer_exit}
+      - {when: "link_state == 'up' and delta(input_errors, 60s) > 0", goto: physical_layer_exit}
+      - {when: "link_state == 'up'", goto: escalate}   # 接口好但 ping 不通 → 中间路径问题，转 reachability 域
+    otherwise: escalate
+
+  - id: physical_layer_exit
+    type: done
+    summary: "根因在物理层/链路层（接口 down 或错包增长）。请转入 network/physical 域的对应 Skill（光模块/线缆排查），BGP 会话会在链路恢复后自愈。"
+
+  - id: check_tcp_179
+    type: check
+    title: ICMP 通但会话不建立——检查 TCP 179 与控制面策略
+    run:
+      cisco_ios: "show ip access-lists | include 179"
+      huawei_vrp: "display acl all | include 179"
+      junos: "show configuration firewall | display set | match 179"
+    branch:
+      - {when: "count(lines) > 0", goto: acl_suspect}
+      - {when: "count(lines) == 0", goto: check_session_params}
+    otherwise: check_session_params
+    cautions:
+      - "还要考虑对端防火墙与 GTSM/TTL 安全（ebgp-multihop / ttl-security 配置不对称）"
+
+  - id: acl_suspect
+    type: done
+    summary: "存在涉及 TCP/179 的过滤策略（详单见上）。修改 ACL 属于安全策略变更，超出本 Skill 授权范围——请走 network/security-policy 域流程，并与安全团队确认该条目意图。"
+
+  - id: check_session_params
+    type: check
+    title: 会话参数核对（AS 号 / 认证 / 能力协商）
+    run:
+      cisco_ios: "show logging | include %BGP.*{{peer_ip}}"
+      huawei_vrp: "display logbuffer | include BGP.*{{peer_ip}}"
+      junos: "show log messages | match \"bgp.*{{peer_ip}}\" | last 20"
+    branch:
+      - {when: "any(lines[] matches 'bad AS|OPEN.*error|AS number')", goto: config_mismatch_exit}
+      - {when: "any(lines[] matches 'MD5|authentication|TCP.*fail')", goto: config_mismatch_exit}
+      - {when: "any(lines[] matches 'notification|hold time|Cease')", goto: ask_soft_reset}
+    otherwise: ask_soft_reset
+
+  - id: config_mismatch_exit
+    type: done
+    summary: "日志显示会话参数不匹配（AS 号/认证/能力，证据见上）。这需要和对端管理员核对预期配置后走变更流程修正——单侧盲改无意义且危险。已生成核对清单。"
+
+  - id: ask_soft_reset
+    type: ask
+    title: 是否尝试软复位会话
+    question: "各项检查未见硬性故障，可能是会话卡死。软复位（不撤路由通告的前提下重协商）通常无损，是否执行？"
+    options:
+      - {label: "执行软复位", goto: soft_reset}
+      - {label: "不执行，升级人工", goto: escalate}
+
+  - id: soft_reset
+    type: action
+    title: BGP 会话软复位
+    risk: high
+    preflight:
+      blast_radius: >-
+        仅该邻居会话。若该邻居是唯一上联，复位期间其承载的路由将短暂重收敛；
+        执行前已确认存在备份路径的证据将附在简报中。
+      watch:
+        - run:
+            cisco_ios: "show ip bgp summary | include {{peer_ip}}"
+            huawei_vrp: "display bgp peer {{peer_ip}}"
+            junos: "show bgp summary | match {{peer_ip}}"
+          expect: "状态回到 Established 且前缀数恢复到基线 ±10%"
+          interval: 15s
+      abort_if:
+        - "复位后 5 分钟未回到 Established"
+        - "全局路由条目数较基线下降超过 5%"
+      approval: required
+      est_downtime: "会话重协商期间该邻居路由短暂重收敛（通常 <60s）"
+    dryrun:
+      run:
+        cisco_ios: "show ip bgp neighbors {{peer_ip}} | include prefixes"
+        huawei_vrp: "display bgp peer {{peer_ip}} verbose | include Received"
+        junos: "show bgp neighbor {{peer_ip}} | match \"Active prefixes\""
+      interpret: "记录复位前的前缀基线，供 verify 对比"
+    run:
+      cisco_ios: "clear ip bgp {{peer_ip}} soft"
+      huawei_vrp: "refresh bgp {{peer_ip}} import"
+      junos: "clear bgp neighbor {{peer_ip}} soft"
+    rollback:
+      # 软复位本身无状态可回滚；风险控制靠 abort_if + 升级。
+      # 教材要点：service_restore 型 = "无法撤销动作，但定义了恢复服务的手段与判据"。
+      type: service_restore
+      run:
+        cisco_ios: "clear ip bgp {{peer_ip}}"      # 硬复位作为最后恢复手段，将再次触发审批
+        huawei_vrp: "reset bgp {{peer_ip}}"
+        junos: "clear bgp neighbor {{peer_ip}}"
+    verify:
+      run:
+        cisco_ios: "show ip bgp summary | include {{peer_ip}}"
+        huawei_vrp: "display bgp peer {{peer_ip}}"
+        junos: "show bgp summary | match {{peer_ip}}"
+      parser: ntc/{{device.platform}}/bgp-summary
+      expect: "state == 'Established' and prefixes >= baseline * 0.9"
+      on_fail: escalate
+    goto: done_ok
+
+  - id: flapping_check
+    type: check
+    title: 当前 Established——判断是否抖动（flapping）
+    run:
+      cisco_ios: "show ip bgp neighbors {{peer_ip}} | include Last reset|up for"
+      huawei_vrp: "display bgp peer {{peer_ip}} verbose | include Up for|reset"
+      junos: "show bgp neighbor {{peer_ip}} | match \"Last State|Flaps\""
+    branch:
+      - {when: "flap_count_24h >= 3", goto: escalate}   # 抖动根因树另立 Skill
+      - {when: "flap_count_24h < 3", goto: done_recovered}
+    otherwise: done_recovered
+
+  - id: done_recovered
+    type: done
+    summary: "会话当前 Established 且无频繁抖动记录，可能在你介入前已自愈。建议保留本次采集的日志证据，观察 24h。"
+
+  - id: done_ok
+    type: done
+    summary: "软复位后会话恢复 Established，前缀数回到基线。建议：记录本次根因证据链；若同一邻居 7 天内再次中断，直接走升级路径。"
+
+  - id: escalate
+    type: escalate
+    summary: "打包升级：设备型号/版本、状态机卡点、可达性结论、日志证据、已走路径。"
+
+tests:
+  - scenario: tests/idle-acl-block.yaml
+    expect_path: [peer_state, check_reachability, check_tcp_179, acl_suspect]
+    rollback_assert: false
+  - scenario: tests/stuck-session-soft-reset.yaml
+    expect_path: [peer_state, check_session_params, ask_soft_reset, soft_reset, done_ok]
+    rollback_assert: true
+  - scenario: tests/admin-shutdown.yaml
+    expect_path: [peer_state, admin_shutdown_found]
+    rollback_assert: false
+
+feedback:
+  ask: "BGP 邻居问题解决了吗？"
