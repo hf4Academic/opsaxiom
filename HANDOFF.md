@@ -51,6 +51,6 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
   - Opus 任务书（TODO-opus.md，7 个条目）
 - **交接给**：Opus 4.8 —— 从 `TODO-opus.md` 的 O-1 开始，按序执行
 - **未决问题**（Opus 无需处理，留给 Fable/人）：
-  - 项目命名未定（见 README）
+  - ~~项目命名未定~~ → 已定名 **OpsAxiom**（2026-07-08）；内部 `opsagent-*` 标识符在 O-6 统一更名 `opsaxiom-*`
   - 受限表达式语言的正式文法（当前只有 docs/03 §5 的描述性定义，O-2 会先实现一个保守子集）
-  - `opsagent-quarantine` / `opsagent-restore` 工具本身尚不存在（O-6）
+  - `opsagent-quarantine` / `opsagent-restore` 工具本身尚不存在（O-6，实现时用 `opsaxiom-` 前缀）

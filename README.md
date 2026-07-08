@@ -1,4 +1,4 @@
-# OpsAgent（工作代号，正式命名待定）
+# OpsAxiom
 
 > 一个面向运维人员的开源智能体：把运维专家的判断编译成**可验证、可回滚、可认证**的
 > Skill 资产，让任何模型——包括跑在你内网的本地小模型——都能安全地使用它。
@@ -39,9 +39,8 @@
 
 设计阶段完成（Fable 5 产出），首轮批量执行待启动（Opus 4.8，见 TODO-opus.md）。
 
-## 候选名（待定）
-
-OpsAxiom / Rollbackable / SafeOps / 揽辔（lǎn pèi，"揽辔澄清"）——欢迎补充。
+> 命名说明：项目名 **OpsAxiom**（axiom = 公理，呼应"黄金准则"与"Schema 是法律"的设计哲学）。
+> 仓库内部标识符（`opsagent-*` CLI 工具名、schema $id）在 O-6 实现工具时统一改为 `opsaxiom-*`。
 
 ## License
 
