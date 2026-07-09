@@ -2,4 +2,4 @@
 pyyaml>=6.0
 jsonschema>=4.20
 pytest>=8.0
-# ntc-templates 在 O-5 接入（解析器库）
+ntc-templates>=4.0   # 网络设备 CLI 解析（可选，未装时优雅降级）

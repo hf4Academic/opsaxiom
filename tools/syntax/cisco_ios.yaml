@@ -1,0 +1,25 @@
+# Cisco IOS/IOS-XE 合法命令前缀树（O-5 起步集，覆盖网络金标准 + 常用只读命令）
+# 校验规则：命令归一后（截到首个 | / ; 前、去 {{模板}} 与引号）token 序列必须以某前缀开头。
+# 目的：拦截跨平台混用与不存在的命令动词（CLI 幻觉，见 R10）。前缀不区分参数正确性。
+platform: cisco_ios
+kind: network
+prefixes:
+  - show ip bgp
+  - show bgp
+  - show ip route
+  - show ip interface
+  - show interface
+  - show interfaces
+  - show ip access-lists
+  - show access-lists
+  - show logging
+  - show running-config
+  - show version
+  - show ip ospf
+  - show cdp neighbors
+  - show mac address-table
+  - show spanning-tree
+  - ping
+  - traceroute
+  - clear ip bgp
+  - clear bgp

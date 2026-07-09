@@ -1,0 +1,21 @@
+# 华为 VRP（Comware 之外）合法命令前缀树。VRP 用 display/refresh/reset，与 Cisco 的 show/clear 不同——
+# 这正是大模型最容易混淆之处，本树的核心价值就是拦住"在华为设备上敲 show ip bgp"这类幻觉。
+platform: huawei_vrp
+kind: network
+prefixes:
+  - display bgp peer
+  - display bgp routing-table
+  - display bgp
+  - display ip routing-table
+  - display interface
+  - display acl
+  - display logbuffer
+  - display current-configuration
+  - display version
+  - display ospf peer
+  - display mac-address
+  - display stp
+  - ping
+  - tracert
+  - refresh bgp
+  - reset bgp

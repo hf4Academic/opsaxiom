@@ -65,14 +65,28 @@ def _platform_keys(run):
 
 
 def _iter_commands(node):
-    """产出 (platform, command) 供 S6。"""
-    for key in ("run", "dryrun"):
-        obj = node.get(key)
-        if isinstance(obj, dict):
-            run = obj.get("run") if key == "dryrun" else obj
-            if isinstance(run, dict):
-                for p, c in run.items():
+    """产出 (platform, command) 供 S6：覆盖 run/dryrun/verify/preflight.watch/rollback。"""
+    def emit(run):
+        if isinstance(run, dict):
+            for p, c in run.items():
+                if isinstance(c, str):
                     yield p, c
+    yield from emit(node.get("run"))
+    if isinstance(node.get("dryrun"), dict):
+        yield from emit(node["dryrun"].get("run"))
+    if isinstance(node.get("verify"), dict):
+        yield from emit(node["verify"].get("run"))
+    if isinstance(node.get("preflight"), dict):
+        for w in node["preflight"].get("watch", []) or []:
+            if isinstance(w, dict):
+                yield from emit(w.get("run"))
+    rb = node.get("rollback")
+    if isinstance(rb, dict):
+        yield from emit(rb.get("run"))
+        if isinstance(rb.get("snapshot"), dict):
+            yield from emit(rb["snapshot"].get("run"))
+        if isinstance(rb.get("confirm"), dict):
+            yield from emit(rb["confirm"].get("run"))
 
 
 def _collect_template_vars(obj, acc):
@@ -211,9 +225,26 @@ def semantic_checks(skill, rep):
                 f"模板变量无显式来源（facts/discovery/builtin）：{unsourced}  "
                 f"— 本轮不阻断，schema 待补 params 声明")
 
-    # ---- S6 语法树（延后）----
-    if syntax_check.is_deferred():
-        rep.add(INFO, "S6", "命令语法树校验已延后至 O-5")
+    # ---- S6 命令语法树（O-5：网络平台强制，其他平台跳过）----
+    checked_net = 0
+    all_nodes = list(nodes.values())
+    for d in skill.get("discovery", []) or []:
+        all_nodes.append(d)
+    for n in all_nodes:
+        for platform, cmd in _iter_commands(n):
+            for level, msg in syntax_check.check_command(platform, cmd):
+                rep.add(level, "S6", f"[{n.get('id', 'discovery')}] {msg}")
+            if platform in syntax_check.covered_platforms():
+                checked_net += 1
+    # ---- S9-parser：discovery/check 引用的 parser 是否存在（本轮 INFO）----
+    try:
+        import parsers
+        for n in all_nodes:
+            pname = n.get("parser")
+            if pname and parsers.get_parser(pname) is None:
+                rep.add(INFO, "PARSER", f"[{n.get('id', 'discovery')}] 解析器 '{pname}' 尚未实现（O-5 起逐步补齐）")
+    except Exception:
+        pass
 
 
 def _default_validator():
