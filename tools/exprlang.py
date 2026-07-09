@@ -172,6 +172,190 @@ def validate_when(expr):
         return False, str(e)
 
 
+# ============================================================================
+# 求值器（Evaluator）—— 运行时引擎核心，供仿真执行器(O-6)与未来运行时使用。
+# 与验证器共用 tokenizer；这里是第二遍递归下降，返回实际值。
+# 语义：标量比较返回 bool；列表 vs 标量的比较/matches 逐元素返回 bool 列表；
+# count(列表)=真值元素个数，max/min 取数值极值，any/all 对布尔列表求逻辑。
+# ============================================================================
+class EvalError(Exception):
+    pass
+
+
+def _truthy(v):
+    return bool(v) and v is not None
+
+
+def _cmp(op, a, b):
+    import operator
+    fn = {"==": operator.eq, "!=": operator.ne, ">": operator.gt,
+          "<": operator.lt, ">=": operator.ge, "<=": operator.le}[op]
+
+    def one(x, y):
+        if x is None or y is None:
+            return False
+        try:
+            return fn(x, y)
+        except TypeError:
+            return fn(str(x), str(y))
+    if isinstance(a, list):
+        return [one(x, b) for x in a]
+    return one(a, b)
+
+
+class _Eval:
+    def __init__(self, toks, ctx):
+        self.toks, self.i, self.ctx = toks, 0, ctx
+
+    @property
+    def cur(self):
+        return self.toks[self.i]
+
+    def eat(self, kind=None, val=None):
+        t = self.cur
+        if kind and t.kind != kind:
+            raise EvalError(f"期望 {kind}，得到 {t}")
+        if val and t.val != val:
+            raise EvalError(f"期望 {val!r}，得到 {t.val!r}")
+        self.i += 1
+        return t
+
+    def run(self):
+        v = self.e_or()
+        if self.cur.kind != "EOF":
+            raise EvalError(f"多余 token: {self.cur}")
+        return v
+
+    def e_or(self):
+        v = self.e_and()
+        while self.cur.kind == "KW" and self.cur.val == "or":
+            self.eat(); v = _truthy(v) or _truthy(self.e_and())
+        return v
+
+    def e_and(self):
+        v = self.e_not()
+        while self.cur.kind == "KW" and self.cur.val == "and":
+            self.eat(); r = self.e_not(); v = _truthy(v) and _truthy(r)
+        return v
+
+    def e_not(self):
+        if self.cur.kind == "KW" and self.cur.val == "not":
+            self.eat(); return not _truthy(self.e_not())
+        return self.e_cmp()
+
+    def e_cmp(self):
+        v = self.e_add()
+        if self.cur.kind == "OP2" or (self.cur.kind == "OP1" and self.cur.val in "><"):
+            op = self.eat().val
+            return _cmp(op, v, self.e_add())
+        if self.cur.kind == "KW" and self.cur.val == "matches":
+            self.eat()
+            pat = self.eat("STRING").val[1:-1]
+            rx = re.compile(pat)
+            if isinstance(v, list):
+                return [bool(rx.search(str(x))) for x in v if x is not None]
+            return bool(rx.search(str(v)))
+        return v
+
+    def e_add(self):
+        v = self.e_mul()
+        while self.cur.kind == "OP1" and self.cur.val in "+-":
+            op = self.eat().val
+            r = self.e_mul()
+            if isinstance(v, list) and isinstance(r, list):
+                v = [(a or 0) + (b or 0) if op == "+" else (a or 0) - (b or 0)
+                     for a, b in zip(v, r)]
+            else:
+                v = (v or 0) + (r or 0) if op == "+" else (v or 0) - (r or 0)
+        return v
+
+    def e_mul(self):
+        v = self.e_unary()
+        while self.cur.kind == "OP1" and self.cur.val in "*/":
+            op = self.eat().val
+            r = self.e_unary()
+            v = (v or 0) * (r or 0) if op == "*" else (v or 0) / (r or 1)
+        return v
+
+    def e_unary(self):
+        if self.cur.kind == "OP1" and self.cur.val == "-":
+            self.eat(); return -(self.e_unary() or 0)
+        return self.e_atom()
+
+    def e_atom(self):
+        t = self.cur
+        if t.kind == "NUMBER":
+            self.eat(); return float(t.val) if "." in t.val else int(t.val)
+        if t.kind == "DURATION":
+            self.eat(); return int(t.val[:-1])   # 秒/分/时的数值部分，sim 里按同单位处理
+        if t.kind == "STRING":
+            self.eat(); return t.val[1:-1]
+        if t.kind == "OP1" and t.val == "(":
+            self.eat(); v = self.e_or(); self.eat("OP1", ")"); return v
+        if t.kind == "NAME":
+            self.eat()
+            if self.cur.kind == "OP1" and self.cur.val == "(":
+                return self._func(t.val)
+            return self._fieldref(t.val)
+        raise EvalError(f"意外 token: {t}")
+
+    def _func(self, name):
+        self.eat("OP1", "(")
+        args = [self.e_or()]
+        while self.cur.kind == "OP1" and self.cur.val == ",":
+            self.eat(); args.append(self.e_or())
+        self.eat("OP1", ")")
+        x = args[0]
+        if name == "count":
+            return sum(1 for e in x if _truthy(e)) if isinstance(x, list) else (1 if _truthy(x) else 0)
+        if name in ("max", "min"):
+            xs = [e for e in (x if isinstance(x, list) else [x]) if e is not None]
+            if not xs:
+                return None
+            return max(xs) if name == "max" else min(xs)
+        if name in ("any", "all"):
+            xs = x if isinstance(x, list) else [x]
+            return (any if name == "any" else all)(_truthy(e) for e in xs)
+        if name == "delta":
+            # sim：从 ctx['__delta__'][field] 读预置增量；缺省 0
+            key = self._last_field
+            return (self.ctx.get("__delta__", {}) or {}).get(key, 0)
+        raise EvalError(f"未知函数 {name}")
+
+    def _fieldref(self, name):
+        self._last_field = name
+        if name not in self.ctx:
+            # 未知字段 → None（sim 视为该分支不成立，走 otherwise）
+            val = None
+        else:
+            val = self.ctx[name]
+        while True:
+            if self.cur.kind == "OP1" and self.cur.val == ".":
+                self.eat(); f = self.eat("NAME").val
+                self._last_field = f
+                if isinstance(val, list):
+                    val = [(e.get(f) if isinstance(e, dict) else None) for e in val]
+                elif isinstance(val, dict):
+                    val = val.get(f)
+                else:
+                    val = None
+            elif self.cur.kind == "OP1" and self.cur.val == "[":
+                self.eat("OP1", "[")
+                if self.cur.kind == "NUMBER":
+                    idx = int(self.eat("NUMBER").val)
+                    val = val[idx] if isinstance(val, list) and -len(val) <= idx < len(val) else None
+                # else []：投影模式，保持 val 为列表，后续 .field 会逐元素取
+                self.eat("OP1", "]")
+            else:
+                break
+        return val
+
+
+def evaluate(expr, ctx):
+    """对表达式求值，ctx 为变量字典。解析/求值出错抛 EvalError。"""
+    return _Eval(_tokenize(expr), ctx).run()
+
+
 if __name__ == "__main__":
     import sys
     for e in sys.argv[1:]:

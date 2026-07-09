@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+"""
+opsaxiom-quarantine —— 不可逆删除的可逆改造工具（黄金准则 R1 §2）。
+
+删除大文件的处置一律走隔离区：move 到会话隔离目录并记 MANIFEST，随时可 restore；
+最终 purge（真正删除）永远是人的显式动作。
+
+子命令：
+  move    --session <sid> <path>...     移动文件到隔离区，记录原路径
+  restore --session <sid>               按 MANIFEST 把文件移回原位
+  purge   --session <sid> [--yes]       真正删除隔离区（危险，需 --yes）
+  list    --session <sid>               查看隔离区内容
+
+隔离根目录：环境变量 OPSAXIOM_QUARANTINE_ROOT，默认 /var/lib/opsaxiom/quarantine
+（测试时指向临时目录）。同文件系统内 move 为 O(1)。
+"""
+import argparse
+import json
+import os
+import pathlib
+import shutil
+import sys
+
+ROOT = pathlib.Path(os.environ.get("OPSAXIOM_QUARANTINE_ROOT", "/var/lib/opsaxiom/quarantine"))
+
+
+def _qdir(sid):
+    return ROOT / sid
+
+
+def _manifest(sid):
+    return _qdir(sid) / "MANIFEST.json"
+
+
+def _load(sid):
+    m = _manifest(sid)
+    if m.exists():
+        return json.loads(m.read_text())
+    return {"session": sid, "entries": []}
+
+
+def _save(sid, data):
+    _manifest(sid).write_text(json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def cmd_move(args):
+    sid = args.session
+    qd = _qdir(sid)
+    qd.mkdir(parents=True, exist_ok=True)
+    data = _load(sid)
+    moved = 0
+    for p in args.paths:
+        src = pathlib.Path(p).resolve()
+        if not src.exists():
+            print(f"跳过(不存在): {src}", file=sys.stderr)
+            continue
+        # 用序号命名，避免同名冲突；记录原始绝对路径以便恢复
+        idx = len(data["entries"])
+        dst = qd / f"{idx:04d}_{src.name}"
+        shutil.move(str(src), str(dst))
+        data["entries"].append({"orig": str(src), "stored": dst.name})
+        moved += 1
+    _save(sid, data)
+    print(f"已隔离 {moved} 项到 {qd}")
+    return 0
+
+
+def cmd_restore(args):
+    sid = args.session
+    data = _load(sid)
+    restored, failed = 0, 0
+    for e in list(data["entries"]):
+        stored = _qdir(sid) / e["stored"]
+        orig = pathlib.Path(e["orig"])
+        if not stored.exists():
+            print(f"缺失隔离文件，无法恢复: {stored}", file=sys.stderr)
+            failed += 1
+            continue
+        orig.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(stored), str(orig))
+        restored += 1
+    if failed == 0:
+        _save(sid, {"session": sid, "entries": []})
+    print(f"已恢复 {restored} 项" + (f"，{failed} 项失败" if failed else ""))
+    return 1 if failed else 0
+
+
+def cmd_list(args):
+    data = _load(args.session)
+    for e in data["entries"]:
+        print(f"{e['stored']}  <-  {e['orig']}")
+    print(f"共 {len(data['entries'])} 项")
+    return 0
+
+
+def cmd_purge(args):
+    if not args.yes:
+        print("purge 是真正删除，不可恢复。确认请加 --yes（此动作应由人执行）", file=sys.stderr)
+        return 2
+    qd = _qdir(args.session)
+    if qd.exists():
+        shutil.rmtree(qd)
+    print(f"已清空隔离区 {qd}")
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="opsaxiom-quarantine")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    for name in ("move", "restore", "list", "purge"):
+        sp = sub.add_parser(name)
+        sp.add_argument("--session", required=True)
+        if name == "move":
+            sp.add_argument("paths", nargs="+")
+        if name == "purge":
+            sp.add_argument("--yes", action="store_true")
+    args = ap.parse_args()
+    return {"move": cmd_move, "restore": cmd_restore,
+            "list": cmd_list, "purge": cmd_purge}[args.cmd](args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

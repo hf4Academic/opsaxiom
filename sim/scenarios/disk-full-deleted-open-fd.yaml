@@ -1,0 +1,10 @@
+skill: skills/host/disk-full/skill.yaml
+scenario: rm 后进程未释放 → reload 持有进程分支
+expect_path: [locate_mount, check_inode, check_deleted_open, ask_restart_holder, reload_holder, final_check, done_ok]
+answers:
+  ask_restart_holder: reload_holder
+node_ctx:
+  locate_mount:      {rows: [{target: "/", pcent: 96, avail: 400000000}]}
+  check_inode:       {rows: [{ipcent: 20}]}
+  check_deleted_open: {output: {value: 5000}, mount: {size: 10000}}   # 5000 > 2000 → 有大量已删除占用
+  final_check:       {rows: [{pcent: 78, avail: 6000000000}]}

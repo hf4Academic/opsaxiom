@@ -1,0 +1,9 @@
+skill: skills/host/disk-full/skill.yaml
+scenario: 日志膨胀 → 压缩历史日志分支
+expect_path: [locate_mount, check_inode, check_deleted_open, find_big_files, compress_old_logs, final_check, done_ok]
+node_ctx:
+  locate_mount:      {rows: [{target: "/", pcent: 95, avail: 500000000}]}
+  check_inode:       {rows: [{ipcent: 20}]}
+  check_deleted_open: {output: {value: 100}, mount: {size: 10000}}   # 100 <= 2000 → 走大文件排查
+  find_big_files:    {rows: [{path: "/var/log/app.log.1", size: 8000000000}]}
+  final_check:       {rows: [{pcent: 80, avail: 5000000000}]}

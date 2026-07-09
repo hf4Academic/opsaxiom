@@ -1,0 +1,12 @@
+skill: skills/host/disk-full/skill.yaml
+scenario: inode 耗尽 → 隔离区处置（含真实回滚往返验证）
+expect_path: [locate_mount, check_inode, inode_exhaustion, ask_quarantine, quarantine_files, final_check, done_ok]
+answers:
+  ask_quarantine: quarantine_files
+real_action: quarantine_files       # 到该 action 时真实执行 opsaxiom-quarantine 的 move→restore
+sandbox_file: sessions_junk.dat
+node_ctx:
+  locate_mount:     {rows: [{target: "/data", pcent: 91, avail: 200000000}]}
+  check_inode:      {rows: [{ipcent: 99}]}               # inode 耗尽
+  inode_exhaustion: {rows: [{dir: "/data/sessions", count: 900000}]}
+  final_check:      {rows: [{pcent: 70, avail: 9000000000}]}
