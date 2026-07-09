@@ -34,7 +34,8 @@ import syntax_check       # noqa: E402
 
 ERROR, WARN, INFO = "ERROR", "WARN", "INFO"
 _BUILTIN_VARS = {"sid"}   # 引擎始终注入的会话级变量
-_TEMPLATE_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_.|]+)\s*\}\}")
+_TEMPLATE_RE = re.compile(r"\{\{\s*(.+?)\s*\}\}")
+_NODE_OUTPUT_ROOTS = {"rows", "output", "lines"}   # 节点/discovery 输出的裸引用根（§7.4）
 
 
 class Report:
@@ -64,6 +65,18 @@ def _platform_keys(run):
     return set(run.keys()) if isinstance(run, dict) else set()
 
 
+def _is_noop_cmd(cmd):
+    """判断命令是否为空转（echo/纯注释/空）。用于 S11。"""
+    if not isinstance(cmd, str):
+        return True
+    c = cmd.strip()
+    if not c or c.startswith("#"):
+        return True
+    # 逐条(以 && 或 ; 分隔)判断：全部是 echo 才算空转
+    parts = re.split(r"&&|;", c)
+    return all(p.strip().startswith("echo ") or not p.strip() for p in parts)
+
+
 def _iter_commands(node):
     """产出 (platform, command) 供 S6：覆盖 run/dryrun/verify/preflight.watch/rollback。"""
     def emit(run):
@@ -87,6 +100,19 @@ def _iter_commands(node):
             yield from emit(rb["snapshot"].get("run"))
         if isinstance(rb.get("confirm"), dict):
             yield from emit(rb["confirm"].get("run"))
+
+
+def _collect_template_exprs(obj, acc):
+    """收集所有 {{...}} 内部原始表达式字符串。"""
+    if isinstance(obj, str):
+        for m in _TEMPLATE_RE.finditer(obj):
+            acc.add(m.group(1).strip())
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            _collect_template_exprs(v, acc)
+    elif isinstance(obj, list):
+        for v in obj:
+            _collect_template_exprs(v, acc)
 
 
 def _collect_template_vars(obj, acc):
@@ -143,9 +169,31 @@ def semantic_checks(skill, rep):
                     for f in ("watch", "abort_if"):
                         if not pf.get(f):
                             rep.add(ERROR, "S2", f"action '{nid}' preflight 缺 {f}")
-            # S3 verify 存在
-            if not n.get("verify"):
+            # S3 verify 存在 + assert 可解析（v0.2 §7.2）
+            v = n.get("verify")
+            if not v:
                 rep.add(ERROR, "S3", f"action '{nid}' 缺 verify")
+            elif v.get("assert"):
+                ok, err = exprlang.validate_when(v["assert"])
+                if not ok:
+                    rep.add(ERROR, "S5", f"action '{nid}' verify.assert 非法：{err}  ← {v['assert']!r}")
+            # S11 回滚不得空转（v0.2 §7.5）
+            if rb:
+                advisory = rb.get("advisory") is True
+                if advisory and not n.get("human_only"):
+                    rep.add(ERROR, "S11", f"action '{nid}' rollback.advisory 仅 human_only 节点可用")
+                if not advisory:
+                    cmds = []
+                    if isinstance(rb.get("run"), dict):
+                        cmds += list(rb["run"].values())
+                    if isinstance(rb.get("snapshot", {}).get("run"), dict):
+                        cmds += list(rb["snapshot"]["run"].values())
+                    if isinstance(rb.get("confirm", {}).get("run"), dict):
+                        cmds += list(rb["confirm"]["run"].values())
+                    if cmds and all(_is_noop_cmd(c) for c in cmds):
+                        rep.add(ERROR, "S11",
+                                f"action '{nid}' 回滚全部为空转命令(echo/注释)——形式合规实质违宪(R1)；"
+                                f"若确为人工指引，标 human_only + rollback.advisory:true")
 
         if ntype == "check":
             # S4 otherwise 存在
@@ -200,6 +248,13 @@ def semantic_checks(skill, rep):
             if nid not in seen:
                 rep.add(ERROR, "S7", f"节点 '{nid}' 不可达")
 
+    # ---- F-4 facts 注册表成员检查（WARN）----
+    reg = _facts_registry()
+    if reg:
+        for fact in skill.get("requirements", {}).get("facts", []):
+            if fact not in reg:
+                rep.add(WARN, "FACTS", f"fact '{fact}' 未在 tools/facts.yaml 注册（补注册或改用已注册 fact）")
+
     # ---- S8 成熟度与测试一致性 ----
     if maturity in ("sim_verified", "field_verified", "certified"):
         tests = skill.get("tests", [])
@@ -208,22 +263,31 @@ def semantic_checks(skill, rep):
         elif not any(t.get("rollback_assert") for t in tests):
             rep.add(ERROR, "S8", f"maturity={maturity} 要求至少一个 tests 带 rollback_assert:true")
 
-    # ---- S9 模板变量来源（本轮 WARNING，见 REVIEW-QUEUE R-1）----
-    used = set()
-    _collect_template_vars(skill.get("tree"), used)
-    _collect_template_vars(skill.get("discovery"), used)
-    sources = set(_BUILTIN_VARS)
-    for f in meta.get("platforms", []):
-        pass
+    # ---- S9 模板变量来源（v0.2 §7.1/§7.4：ERROR）----
+    exprs = set()
+    _collect_template_exprs(skill.get("tree"), exprs)
+    _collect_template_exprs(skill.get("discovery"), exprs)
+    discovery_ids = {d.get("id", "") for d in (skill.get("discovery") or [])}
+    sources = set(_BUILTIN_VARS)                              # {sid}
+    sources |= _NODE_OUTPUT_ROOTS                             # rows/output/lines 裸引用
     for fact in skill.get("requirements", {}).get("facts", []):
         sources.add(fact.split(".")[-1]); sources.add(fact.split(".")[0])
-    for d in skill.get("discovery", []) or []:
-        sources.add(d.get("id", ""))
-    unsourced = sorted(v for v in used if v and v not in sources)
-    if unsourced:
-        rep.add(WARN, "S9",
-                f"模板变量无显式来源（facts/discovery/builtin）：{unsourced}  "
-                f"— 本轮不阻断，schema 待补 params 声明")
+    for p in meta.get("params", []) or []:
+        sources.add(p.get("name", ""))
+    for n in nodes.values():
+        if n.get("type") == "ask" and n.get("binds"):
+            sources.add(n["binds"])
+    for e in sorted(exprs):
+        ok, root, second = exprlang.parse_template_ref(e)
+        if not ok:
+            rep.add(ERROR, "S9", f"模板 {{{{{e}}}}} 不是合法字段引用（v0.2 §7.4）")
+            continue
+        if root == "discovery":
+            if second not in discovery_ids:
+                rep.add(ERROR, "S9", f"模板 {{{{{e}}}}} 引用了不存在的 discovery id '{second}'")
+        elif root not in sources:
+            rep.add(ERROR, "S9",
+                    f"模板变量 '{root}' 无来源（需在 facts/params/ask.binds/discovery 声明）：{{{{{e}}}}}")
 
     # ---- S6 命令语法树（O-5：网络平台强制，其他平台跳过）----
     checked_net = 0
@@ -250,6 +314,20 @@ def semantic_checks(skill, rep):
 def _default_validator():
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     return Draft202012Validator(schema)
+
+
+_FACTS_CACHE = None
+
+
+def _facts_registry():
+    global _FACTS_CACHE
+    if _FACTS_CACHE is None:
+        p = HERE / "facts.yaml"
+        try:
+            _FACTS_CACHE = set(yaml.safe_load(p.read_text(encoding="utf-8")).get("facts", {}))
+        except Exception:
+            _FACTS_CACHE = set()
+    return _FACTS_CACHE
 
 
 def validate_skill(skill, label="<dict>", schema_validator=None):

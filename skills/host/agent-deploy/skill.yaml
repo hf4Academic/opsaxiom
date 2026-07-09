@@ -6,82 +6,77 @@ metadata:
   taxonomy: host/provision/agent-deploy
   version: 0.1.0
   maturity: draft
-  platforms: [{os: linux, family: [debian, rhel]}]
+  platforms:
+  - os: linux
+    family: [debian, rhel]
   authors: [opsagent-core]
   license: Apache-2.0
   provenance: {generated_by: claude-opus-4-8}
-  expires_review: "2027-07-01"
+  expires_review: '2027-07-01'
 requirements:
   capability_level: low_risk_write
   connectors: [ssh]
   facts: [os.family, host.arch]
 discovery:
-  - id: precheck
-    run: {linux: "systemctl is-active node_exporter 2>/dev/null; ss -ltn | grep -q ':9100' && echo PORT_USED || echo PORT_FREE"}
+- id: precheck
+  run: {linux: 'systemctl is-active node_exporter 2>/dev/null; ss -ltn | grep -q '':9100'' && echo PORT_USED
+      || echo PORT_FREE'}
 tree:
   entry: idempotency_check
   nodes:
-    - id: idempotency_check
-      type: check
-      title: 幂等检查——是否已部署
-      run: {linux: "systemctl is-active node_exporter 2>/dev/null || echo absent; ss -ltn | grep -q ':9100' && echo PORT_USED || echo PORT_FREE"}
-      branch:
-        - {when: "any(lines[] matches 'active')", goto: already_deployed}
-        - {when: "any(lines[] matches 'PORT_USED')", goto: port_conflict_exit}
-        - {when: "any(lines[] matches 'absent')", goto: install_probe}
-      otherwise: install_probe
-      cautions:
-        - "批量部署第一原则是幂等：已装的跳过、端口占用的报错、干净的才装。不做幂等检查的批量下发会在'部分已装'的环境里翻车"
-        - "9100 被别的服务占用时不要强装——先查清占用者，避免撞端口引发更大故障"
-    - id: already_deployed
-      type: done
-      summary: "node_exporter 已在运行，跳过(幂等)。若需升级版本，走单独的升级流程而非重装。"
-    - id: port_conflict_exit
-      type: escalate
-      summary: "9100 端口已被其他进程占用但非 node_exporter。需人工确认占用者身份后再决定换端口或清理，不自动处置。"
-    - id: install_probe
-      type: action
-      title: 安装并启动 node_exporter
-      risk: low
-      preflight:
-        blast_radius: "新增一个监听 9100 的只读指标进程；不修改现有服务，资源占用极低"
-        watch:
-          - {run: {linux: "curl -sf localhost:9100/metrics | head -1"}, expect: "返回指标文本"}
-        abort_if:
-          - "服务启动后 9100 无响应"
-        approval: required
-      dryrun:
-        run: {linux: "echo '将执行：下载 node_exporter 二进制 → 创建 systemd 单元 → enable --now'; uname -m"}
-        interpret: "确认架构匹配、确认下载源可达"
-      run: {linux: "opsaxiom-deploy node_exporter --arch {{host.arch}} --port 9100"}
-      rollback:
-        type: inverse
-        run: {linux: "opsaxiom-deploy node_exporter --uninstall"}
-      verify:
-        run: {linux: "systemctl is-active node_exporter && curl -sf localhost:9100/metrics | head -1"}
-        expect: "服务 active 且 /metrics 有返回"
-        on_fail: rollback
-      cautions:
-        - "部署工具须内置校验：二进制 checksum 校验、架构匹配检查。来源不可信的二进制不下发(供应链风险)"
-        - "回滚=完整卸载(停服务+删单元+删二进制)，确保回滚后主机回到部署前状态，不留残留"
-      goto: verify_scrape
-    - id: verify_scrape
-      type: check
-      title: 确认监控系统能抓取到
-      run: {linux: "curl -sf localhost:9100/metrics | grep -c '^node_'"}
-      branch:
-        - {when: "output.value > 0", goto: done_ok}
-      otherwise: escalate
-      cautions:
-        - "本机 /metrics 通不代表 Prometheus 能抓到——还要确认防火墙放行、Prometheus 已加该 target。本 Skill 只保证本机侧就绪"
-    - id: done_ok
-      type: done
-      summary: "node_exporter 部署完成且本机 /metrics 正常。后续：在 Prometheus 侧加入该 target 并确认防火墙放行 9100(建议仅对监控网段开放)。"
-    - id: escalate
-      type: escalate
-      summary: "打包升级：部署日志、systemd 状态、/metrics 探测结果、端口占用情况。"
+  - id: idempotency_check
+    type: check
+    title: 幂等检查——是否已部署
+    run: {linux: 'systemctl is-active node_exporter 2>/dev/null || echo absent; ss -ltn | grep -q '':9100''
+        && echo PORT_USED || echo PORT_FREE'}
+    branch:
+    - {when: 'any(lines[] matches ''active'')', goto: already_deployed}
+    - {when: 'any(lines[] matches ''PORT_USED'')', goto: port_conflict_exit}
+    - {when: 'any(lines[] matches ''absent'')', goto: install_probe}
+    otherwise: install_probe
+    cautions: [批量部署第一原则是幂等：已装的跳过、端口占用的报错、干净的才装。不做幂等检查的批量下发会在'部分已装'的环境里翻车, 9100 被别的服务占用时不要强装——先查清占用者，避免撞端口引发更大故障]
+  - {id: already_deployed, type: done, summary: node_exporter 已在运行，跳过(幂等)。若需升级版本，走单独的升级流程而非重装。}
+  - {id: port_conflict_exit, type: escalate, summary: 9100 端口已被其他进程占用但非 node_exporter。需人工确认占用者身份后再决定换端口或清理，不自动处置。}
+  - id: install_probe
+    type: action
+    title: 安装并启动 node_exporter
+    risk: low
+    preflight:
+      blast_radius: 新增一个监听 9100 的只读指标进程；不修改现有服务，资源占用极低
+      watch:
+      - run: {linux: 'curl -sf localhost:9100/metrics | head -1'}
+        expect: 返回指标文本
+      abort_if: [服务启动后 9100 无响应]
+      approval: required
+    dryrun:
+      run: {linux: echo '将执行：下载 node_exporter 二进制 → 创建 systemd 单元 → enable --now'; uname -m}
+      interpret: 确认架构匹配、确认下载源可达
+    run: {linux: 'opsaxiom-deploy node_exporter --arch {{host.arch}} --port 9100'}
+    rollback:
+      type: inverse
+      run: {linux: opsaxiom-deploy node_exporter --uninstall}
+    verify:
+      run: {linux: 'systemctl is-active node_exporter && curl -sf localhost:9100/metrics | head -1'}
+      assert: service_active and metrics_ok
+      note: 服务 active 且 /metrics 有返回
+      on_fail: rollback
+    cautions: [部署工具须内置校验：二进制 checksum 校验、架构匹配检查。来源不可信的二进制不下发(供应链风险), 回滚=完整卸载(停服务+删单元+删二进制)，确保回滚后主机回到部署前状态，不留残留]
+    goto: verify_scrape
+  - id: verify_scrape
+    type: check
+    title: 确认监控系统能抓取到
+    run: {linux: 'curl -sf localhost:9100/metrics | grep -c ''^node_'''}
+    branch:
+    - {when: output.value > 0, goto: done_ok}
+    otherwise: escalate
+    cautions: [本机 /metrics 通不代表 Prometheus 能抓到——还要确认防火墙放行、Prometheus 已加该 target。本 Skill 只保证本机侧就绪]
+  - {id: done_ok, type: done, summary: node_exporter 部署完成且本机 /metrics 正常。后续：在 Prometheus 侧加入该 target 并确认防火墙放行
+      9100(建议仅对监控网段开放)。}
+  - {id: escalate, type: escalate, summary: 打包升级：部署日志、systemd 状态、/metrics 探测结果、端口占用情况。}
 tests:
-  - {scenario: tests/fresh-install.yaml, expect_path: [idempotency_check, install_probe, verify_scrape, done_ok], rollback_assert: true}
-  - {scenario: tests/already-installed.yaml, expect_path: [idempotency_check, already_deployed]}
-feedback:
-  ask: "探针部署成功了吗？"
+- scenario: tests/fresh-install.yaml
+  expect_path: [idempotency_check, install_probe, verify_scrape, done_ok]
+  rollback_assert: true
+- scenario: tests/already-installed.yaml
+  expect_path: [idempotency_check, already_deployed]
+feedback: {ask: 探针部署成功了吗？}

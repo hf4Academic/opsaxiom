@@ -6,90 +6,86 @@ metadata:
   taxonomy: host/system/clock-drift
   version: 0.1.0
   maturity: draft
-  platforms: [{os: linux}]
+  platforms:
+  - {os: linux}
   authors: [opsagent-core]
   license: Apache-2.0
   provenance: {generated_by: claude-opus-4-8}
-  expires_review: "2027-07-01"
+  expires_review: '2027-07-01'
 requirements:
   capability_level: low_risk_write
   connectors: [ssh]
   facts: [os.family]
 discovery:
-  - id: time_state
-    run: {linux: "timedatectl status 2>/dev/null; chronyc tracking 2>/dev/null || ntpq -p 2>/dev/null"}
-    parser: text/timedatectl-v1
+- id: time_state
+  run: {linux: timedatectl status 2>/dev/null; chronyc tracking 2>/dev/null || ntpq -p 2>/dev/null}
+  parser: text/timedatectl-v1
 tree:
   entry: check_sync
   nodes:
-    - id: check_sync
-      type: check
-      title: 检查时间同步状态与偏移量
-      run: {linux: "timedatectl show -p NTPSynchronized -p NTP 2>/dev/null; chronyc tracking 2>/dev/null | grep -i 'system time' || ntpq -pn 2>/dev/null"}
-      branch:
-        - {when: "any(lines[] matches 'NTP=no|NTPSynchronized=no')", goto: check_daemon}
-        - {when: "any(lines[] matches 'NTPSynchronized=yes')", goto: check_offset}
-      otherwise: check_daemon
-      cautions:
-        - "时钟漂移的危害是隐蔽的：日志时间错乱、TLS 证书校验失败、分布式锁/token 失效、Kerberos 认证失败——症状千奇百怪却都指向时间"
-        - "先分清是'没在同步'还是'同步了但偏移大'，两者处置不同"
-    - id: check_offset
-      type: check
-      title: 已同步——检查偏移是否仍过大
-      run: {linux: "chronyc tracking 2>/dev/null | grep -iE 'system time|last offset'"}
-      branch:
-        - {when: "any(lines[] matches 'exceeds|[0-9]+ seconds')", goto: large_offset_exit}
-      otherwise: synced_ok
-      cautions:
-        - "NTP 对大偏移是缓慢 slew(每秒微调)而非跳变，大偏移可能需要很久才收敛——刚重启同步别指望立刻对齐"
-    - id: synced_ok
-      type: done
-      summary: "时间已同步且偏移在可接受范围。若应用仍报时间相关错误，核对应用/容器是否用了独立时区或自己的时间源。"
-    - id: large_offset_exit
-      type: done
-      summary: "已连上 NTP 但偏移仍大，正在 slew 收敛中。若业务无法等待，需人工评估是否强制 step(chronyc makestep)——注意时间跳变可能引发依赖单调时间的应用异常。"
-    - id: check_daemon
-      type: check
-      title: 未同步——检查时间同步服务是否运行
-      run: {linux: "systemctl is-active chronyd 2>/dev/null; systemctl is-active systemd-timesyncd 2>/dev/null; systemctl is-active ntpd 2>/dev/null"}
-      branch:
-        - {when: "not any(lines[] matches 'active')", goto: start_timesync}
-      otherwise: daemon_running_no_sync_exit
-    - id: daemon_running_no_sync_exit
-      type: done
-      summary: "同步服务在运行但未同步，多为无法连通 NTP 服务器。核对 NTP server 配置、防火墙是否放行 UDP 123、内网是否有可达时间源。"
-    - id: start_timesync
-      type: action
-      title: 启动时间同步服务
-      risk: low
-      preflight:
-        blast_radius: "启动同步服务后时间将开始校准；若偏移大且服务配置为 step，可能发生时间跳变"
-        watch:
-          - {run: {linux: "timedatectl show -p NTPSynchronized"}, expect: "NTPSynchronized=yes"}
-        abort_if:
-          - "启动后服务立即失败"
-        approval: required
-      dryrun:
-        run: {linux: "chronyd -Q 2>&1 | head || echo 'dry: 将启动 chronyd/timesyncd'"}
-      run: {linux: "systemctl enable --now chronyd 2>/dev/null || systemctl enable --now systemd-timesyncd"}
-      rollback:
-        type: service_restore
-        run: {linux: "systemctl stop chronyd 2>/dev/null; systemctl stop systemd-timesyncd 2>/dev/null"}
-      verify:
-        run: {linux: "systemctl is-active chronyd systemd-timesyncd 2>/dev/null | grep -q active && echo up"}
-        expect: "服务 active"
-        on_fail: escalate
-      cautions:
-        - "生产环境慎用强制 step：对运行中的数据库/分布式系统，时间瞬间跳变可能比慢慢漂移更危险。优先 slew"
-      goto: done_ok
-    - id: done_ok
-      type: done
-      summary: "时间同步服务已启动。偏移大时会持续 slew 收敛，观察 timedatectl 直到 NTPSynchronized=yes 且偏移收敛。"
-    - id: escalate
-      type: escalate
-      summary: "打包升级：timedatectl、chronyc tracking/ntpq、同步服务状态、NTP server 可达性。"
+  - id: check_sync
+    type: check
+    title: 检查时间同步状态与偏移量
+    run: {linux: timedatectl show -p NTPSynchronized -p NTP 2>/dev/null; chronyc tracking 2>/dev/null
+        | grep -i 'system time' || ntpq -pn 2>/dev/null}
+    branch:
+    - {when: 'any(lines[] matches ''NTP=no|NTPSynchronized=no'')', goto: check_daemon}
+    - {when: 'any(lines[] matches ''NTPSynchronized=yes'')', goto: check_offset}
+    otherwise: check_daemon
+    cautions: [时钟漂移的危害是隐蔽的：日志时间错乱、TLS 证书校验失败、分布式锁/token 失效、Kerberos 认证失败——症状千奇百怪却都指向时间, 先分清是'没在同步'还是'同步了但偏移大'，两者处置不同]
+  - id: check_offset
+    type: check
+    title: 已同步——检查偏移是否仍过大
+    run: {linux: chronyc tracking 2>/dev/null | grep -iE 'system time|last offset'}
+    branch:
+    - {when: 'any(lines[] matches ''exceeds|[0-9]+ seconds'')', goto: large_offset_exit}
+    otherwise: synced_ok
+    cautions: [NTP 对大偏移是缓慢 slew(每秒微调)而非跳变，大偏移可能需要很久才收敛——刚重启同步别指望立刻对齐]
+  - {id: synced_ok, type: done, summary: 时间已同步且偏移在可接受范围。若应用仍报时间相关错误，核对应用/容器是否用了独立时区或自己的时间源。}
+  - {id: large_offset_exit, type: done, summary: 已连上 NTP 但偏移仍大，正在 slew 收敛中。若业务无法等待，需人工评估是否强制 step(chronyc
+      makestep)——注意时间跳变可能引发依赖单调时间的应用异常。}
+  - id: check_daemon
+    type: check
+    title: 未同步——检查时间同步服务是否运行
+    run: {linux: systemctl is-active chronyd 2>/dev/null; systemctl is-active systemd-timesyncd 2>/dev/null;
+        systemctl is-active ntpd 2>/dev/null}
+    branch:
+    - {when: 'not any(lines[] matches ''active'')', goto: start_timesync}
+    otherwise: daemon_running_no_sync_exit
+  - {id: daemon_running_no_sync_exit, type: done, summary: 同步服务在运行但未同步，多为无法连通 NTP 服务器。核对 NTP server 配置、防火墙是否放行
+      UDP 123、内网是否有可达时间源。}
+  - id: start_timesync
+    type: action
+    title: 启动时间同步服务
+    risk: low
+    preflight:
+      blast_radius: 启动同步服务后时间将开始校准；若偏移大且服务配置为 step，可能发生时间跳变
+      watch:
+      - run: {linux: timedatectl show -p NTPSynchronized}
+        expect: NTPSynchronized=yes
+      abort_if: [启动后服务立即失败]
+      approval: required
+    dryrun:
+      run: {linux: 'chronyd -Q 2>&1 | head || echo ''dry: 将启动 chronyd/timesyncd'''}
+    run: {linux: systemctl enable --now chronyd 2>/dev/null || systemctl enable --now systemd-timesyncd}
+    rollback:
+      type: service_restore
+      run: {linux: systemctl stop chronyd 2>/dev/null; systemctl stop systemd-timesyncd 2>/dev/null}
+    verify:
+      run: {linux: systemctl is-active chronyd systemd-timesyncd 2>/dev/null | grep -q active && echo
+          up}
+      assert: service_active
+      note: chronyd 或 systemd-timesyncd 处于 active
+      on_fail: escalate
+    cautions: [生产环境慎用强制 step：对运行中的数据库/分布式系统，时间瞬间跳变可能比慢慢漂移更危险。优先 slew]
+    goto: done_ok
+  - {id: done_ok, type: done, summary: 时间同步服务已启动。偏移大时会持续 slew 收敛，观察 timedatectl 直到 NTPSynchronized=yes
+      且偏移收敛。}
+  - {id: escalate, type: escalate, summary: 打包升级：timedatectl、chronyc tracking/ntpq、同步服务状态、NTP server 可达性。}
 tests:
-  - {scenario: tests/timesync-stopped.yaml, expect_path: [check_sync, check_daemon, start_timesync, done_ok], rollback_assert: true}
-  - {scenario: tests/synced-ok.yaml, expect_path: [check_sync, check_offset, synced_ok]}
-feedback:
-  ask: "时间同步恢复了吗？"
+- scenario: tests/timesync-stopped.yaml
+  expect_path: [check_sync, check_daemon, start_timesync, done_ok]
+  rollback_assert: true
+- scenario: tests/synced-ok.yaml
+  expect_path: [check_sync, check_offset, synced_ok]
+feedback: {ask: 时间同步恢复了吗？}

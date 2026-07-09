@@ -13,7 +13,7 @@ import re
 
 # 保留字与函数名
 _KEYWORDS = {"and", "or", "not", "matches"}
-_FUNCS = {"max", "min", "count", "any", "all", "delta"}
+_FUNCS = {"max", "min", "count", "any", "all", "delta", "avg", "sum"}
 
 # token 规则（顺序敏感：DURATION 必须在 NUMBER 之前）
 _TOKEN_SPEC = [
@@ -308,11 +308,17 @@ class _Eval:
         x = args[0]
         if name == "count":
             return sum(1 for e in x if _truthy(e)) if isinstance(x, list) else (1 if _truthy(x) else 0)
-        if name in ("max", "min"):
+        if name in ("max", "min", "avg", "sum"):
             xs = [e for e in (x if isinstance(x, list) else [x]) if e is not None]
             if not xs:
-                return None
-            return max(xs) if name == "max" else min(xs)
+                return None if name in ("max", "min", "avg") else 0
+            if name == "max":
+                return max(xs)
+            if name == "min":
+                return min(xs)
+            if name == "sum":
+                return sum(xs)
+            return sum(xs) / len(xs)   # avg
         if name in ("any", "all"):
             xs = x if isinstance(x, list) else [x]
             return (any if name == "any" else all)(_truthy(e) for e in xs)
@@ -354,6 +360,44 @@ class _Eval:
 def evaluate(expr, ctx):
     """对表达式求值，ctx 为变量字典。解析/求值出错抛 EvalError。"""
     return _Eval(_tokenize(expr), ctx).run()
+
+
+def parse_template_ref(s):
+    """解析 {{...}} 内部的字段引用（v0.2 §7.4，与 branch.when 同文法的字段引用子集）。
+    返回 (ok, root, second)：ok=是否合法字段引用；root=根标识符；
+    second=紧随 root 的下一段名字（用于 discovery.<id> 形式），无则 None。
+    仅允许 NAME (.NAME | [NUMBER] | [])* ，其余（函数、运算、比较）一律非法。"""
+    s = s.strip()
+    try:
+        toks = _tokenize(s)
+    except ExprError:
+        return False, None, None
+    if not toks or toks[0].kind != "NAME":
+        return False, None, None
+    root = toks[0].val
+    second = None
+    i = 1
+    # 记录第一个 . 后的名字
+    if i < len(toks) and toks[i].kind == "OP1" and toks[i].val == "." \
+            and i + 1 < len(toks) and toks[i + 1].kind == "NAME":
+        second = toks[i + 1].val
+    # 校验剩余 token 仅为访问器
+    while i < len(toks) and toks[i].kind != "EOF":
+        t = toks[i]
+        if t.kind == "OP1" and t.val == ".":
+            if i + 1 >= len(toks) or toks[i + 1].kind != "NAME":
+                return False, None, None
+            i += 2
+        elif t.kind == "OP1" and t.val == "[":
+            i += 1
+            if i < len(toks) and toks[i].kind == "NUMBER":
+                i += 1
+            if i >= len(toks) or not (toks[i].kind == "OP1" and toks[i].val == "]"):
+                return False, None, None
+            i += 1
+        else:
+            return False, None, None
+    return True, root, second
 
 
 if __name__ == "__main__":

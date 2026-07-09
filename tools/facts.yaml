@@ -1,0 +1,17 @@
+# Facts 注册表（机器可读，v0.2 §7.6 / 评审 F-4）
+# 校验器据此告警未注册的 fact，并（后续）做跨源单位一致性检查。
+# 字段：type(scalar/list/enum) / unit(bytes|KB|MB|%|count|str|none) / collect(采集命令示意)
+facts:
+  os.family:            {type: enum,   unit: str,   collect: "cat /etc/os-release"}
+  cpu.cores:            {type: scalar, unit: count, collect: "nproc"}
+  mem.total:            {type: scalar, unit: MB,    collect: "free -m | awk '/Mem:/{print $2}'"}
+  fs.mounts:            {type: list,   unit: none,  collect: "findmnt -J"}
+  storage.devices:      {type: list,   unit: none,  collect: "lsblk -J"}
+  storage.raid_type:    {type: enum,   unit: str,   collect: "cat /proc/mdstat; lspci | grep -i raid"}
+  host.arch:            {type: enum,   unit: str,   collect: "uname -m"}
+  host.virtualization:  {type: enum,   unit: str,   collect: "systemd-detect-virt"}
+  kernel.version:       {type: scalar, unit: str,   collect: "uname -r"}
+  k8s.context:          {type: scalar, unit: str,   collect: "kubectl config current-context"}
+  device.platform:      {type: enum,   unit: str,   collect: "(netmiko autodetect)"}
+  device.version:       {type: scalar, unit: str,   collect: "show version / display version"}
+  bgp.local_as:         {type: scalar, unit: count, collect: "show ip bgp summary"}

@@ -6,64 +6,59 @@ metadata:
   taxonomy: host/memory/leak
   version: 0.1.0
   maturity: draft
-  platforms: [{os: linux}]
+  platforms:
+  - {os: linux}
   authors: [opsagent-core]
   license: Apache-2.0
   provenance: {generated_by: claude-opus-4-8}
-  expires_review: "2027-07-01"
+  expires_review: '2027-07-01'
+  params:
+  - {name: available_pct, source: alert}
 requirements:
   capability_level: read
   connectors: [ssh]
   facts: [os.family, mem.total]
 discovery:
-  - id: mem_now
-    run: {linux: "free -m && cat /proc/meminfo | grep -E 'MemAvailable|Slab|SReclaimable'"}
-    parser: table/free-v1
+- id: mem_now
+  run: {linux: free -m && cat /proc/meminfo | grep -E 'MemAvailable|Slab|SReclaimable'}
+  parser: table/free-v1
 tree:
   entry: classify_shortage
   nodes:
-    - id: classify_shortage
-      type: check
-      title: 区分进程占用 / 内核 Slab / page cache 假象
-      run: {linux: "free -m && grep -E 'Slab|SReclaimable|SUnreclaim' /proc/meminfo"}
-      parser: table/free-v1
-      branch:
-        - {when: "slab_unreclaim_mb > mem_total * 0.2", goto: kernel_slab_exit}
-        - {when: "available_pct > 20", goto: cache_illusion_exit}
-        - {when: "available_pct <= 20", goto: rank_processes}
-      otherwise: rank_processes
-      cautions:
-        - "别被 used 高吓到：Linux 会拿空闲内存做 page cache，看 MemAvailable 而不是 free 列"
-        - "SUnreclaim(不可回收 Slab)大 → 内核对象泄漏(如 dentry/inode)，方向完全不同于用户态进程泄漏"
-    - id: cache_illusion_exit
-      type: done
-      summary: "MemAvailable 仍充足({{available_pct}}%)，used 高是 page cache 占用(可随时回收)，非泄漏。无需处置。"
-    - id: kernel_slab_exit
-      type: done
-      summary: "不可回收 Slab 占比过高，疑似内核对象泄漏。用 slabtop 看哪类对象(dentry/inode 常见于海量小文件访问)；drop_caches 只能回收可回收部分，根因需查触发内核对象暴涨的应用行为。"
-    - id: rank_processes
-      type: check
-      title: 按 RSS 排序找出内存大户
-      run: {linux: "ps -eo pid,rss,comm --sort=-rss | head -10"}
-      parser: table/ps-rss-v1
-      branch:
-        - {when: "rows[0].rss > mem_total * 1024 * 0.4", goto: single_leaker}
-        - {when: "count(rows[].rss > mem_total * 1024 * 0.1) >= 3", goto: distributed_exit}
-      otherwise: escalate
-      cautions:
-        - "RSS 含共享内存，多进程会重复计数；判断单进程真实占用看 PSS(/proc/PID/smaps_rollup)"
-        - "确认是否泄漏要看趋势：单次快照高≠泄漏。对比历史监控或多次采样看 RSS 是否只涨不降"
-    - id: single_leaker
-      type: done
-      summary: "单进程 {{rows0_comm}}(pid {{rows0_pid}}) RSS 最高。确认其 RSS 随时间只增不减方可判定泄漏；确认后按业务窗口重启缓解，并抓 heap profile(如 jmap/pprof/valgrind) 交研发定位。重启前请评估是否需先转储诊断信息。"
-    - id: distributed_exit
-      type: done
-      summary: "多进程分散占用，无单一泄漏点，疑似整体内存规划不足或连接数/worker 数配置过高。核对进程数与单进程内存是否匹配物理内存。"
-    - id: escalate
-      type: escalate
-      summary: "打包升级：free、meminfo、slabtop、按 RSS 排序的进程表、内存趋势。"
+  - id: classify_shortage
+    type: check
+    title: 区分进程占用 / 内核 Slab / page cache 假象
+    run: {linux: free -m && grep -E 'Slab|SReclaimable|SUnreclaim' /proc/meminfo}
+    parser: table/free-v1
+    branch:
+    - {when: slab_unreclaim_mb > mem_total * 0.2, goto: kernel_slab_exit}
+    - {when: available_pct > 20, goto: cache_illusion_exit}
+    - {when: available_pct <= 20, goto: rank_processes}
+    otherwise: rank_processes
+    cautions: [别被 used 高吓到：Linux 会拿空闲内存做 page cache，看 MemAvailable 而不是 free 列, SUnreclaim(不可回收 Slab)大
+        → 内核对象泄漏(如 dentry/inode)，方向完全不同于用户态进程泄漏]
+  - {id: cache_illusion_exit, type: done, summary: 'MemAvailable 仍充足({{available_pct}}%)，used 高是 page
+      cache 占用(可随时回收)，非泄漏。无需处置。'}
+  - {id: kernel_slab_exit, type: done, summary: 不可回收 Slab 占比过高，疑似内核对象泄漏。用 slabtop 看哪类对象(dentry/inode 常见于海量小文件访问)；drop_caches
+      只能回收可回收部分，根因需查触发内核对象暴涨的应用行为。}
+  - id: rank_processes
+    type: check
+    title: 按 RSS 排序找出内存大户
+    run: {linux: 'ps -eo pid,rss,comm --sort=-rss | head -10'}
+    parser: table/ps-rss-v1
+    branch:
+    - {when: 'rows[0].rss > mem_total * 1024 * 0.4', goto: single_leaker}
+    - {when: 'count(rows[].rss > mem_total * 1024 * 0.1) >= 3', goto: distributed_exit}
+    otherwise: escalate
+    cautions: [RSS 含共享内存，多进程会重复计数；判断单进程真实占用看 PSS(/proc/PID/smaps_rollup), 确认是否泄漏要看趋势：单次快照高≠泄漏。对比历史监控或多次采样看
+        RSS 是否只涨不降]
+  - {id: single_leaker, type: done, summary: '单进程 {{rows[0].comm}}(pid {{rows[0].pid}}) RSS 最高。确认其 RSS
+      随时间只增不减方可判定泄漏；确认后按业务窗口重启缓解，并抓 heap profile(如 jmap/pprof/valgrind) 交研发定位。重启前请评估是否需先转储诊断信息。'}
+  - {id: distributed_exit, type: done, summary: 多进程分散占用，无单一泄漏点，疑似整体内存规划不足或连接数/worker 数配置过高。核对进程数与单进程内存是否匹配物理内存。}
+  - {id: escalate, type: escalate, summary: 打包升级：free、meminfo、slabtop、按 RSS 排序的进程表、内存趋势。}
 tests:
-  - {scenario: tests/single-process-leak.yaml, expect_path: [classify_shortage, rank_processes, single_leaker]}
-  - {scenario: tests/page-cache-illusion.yaml, expect_path: [classify_shortage, cache_illusion_exit]}
-feedback:
-  ask: "内存泄漏源头找到了吗？"
+- scenario: tests/single-process-leak.yaml
+  expect_path: [classify_shortage, rank_processes, single_leaker]
+- scenario: tests/page-cache-illusion.yaml
+  expect_path: [classify_shortage, cache_illusion_exit]
+feedback: {ask: 内存泄漏源头找到了吗？}

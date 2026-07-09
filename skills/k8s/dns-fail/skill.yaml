@@ -6,65 +6,63 @@ metadata:
   taxonomy: k8s/networking/dns-fail
   version: 0.1.0
   maturity: draft
-  platforms: [{platform: kubernetes}]
+  platforms:
+  - {platform: kubernetes}
   authors: [opsagent-core]
   license: Apache-2.0
   provenance: {generated_by: claude-opus-4-8}
-  expires_review: "2027-07-01"
+  expires_review: '2027-07-01'
+  params:
+  - {name: ns, source: alert}
+  - {name: pod, source: alert}
 requirements:
   capability_level: read
   connectors: [kubectl]
   facts: [k8s.context]
 discovery:
-  - id: coredns_state
-    run: {kubectl: "kubectl -n kube-system get pods -l k8s-app=kube-dns -o wide"}
-    parser: json/k8s-pod-list-v1
+- id: coredns_state
+  run: {kubectl: kubectl -n kube-system get pods -l k8s-app=kube-dns -o wide}
+  parser: json/k8s-pod-list-v1
 tree:
   entry: scope_dns
   nodes:
-    - id: scope_dns
-      type: check
-      title: 判断是全集群 DNS 挂还是单 Pod 问题
-      run: {kubectl: "kubectl -n kube-system get pods -l k8s-app=kube-dns -o jsonpath='{range .items[*]}{.metadata.name}{\" \"}{.status.phase}{\" \"}{.status.containerStatuses[*].ready}{\"\\n\"}{end}'"}
-      parser: json/k8s-pod-list-v1
-      branch:
-        - {when: "count(lines) == 0", goto: coredns_gone_exit}
-        - {when: "any(lines[] matches 'false|CrashLoop|Pending')", goto: coredns_unhealthy_exit}
-      otherwise: test_resolution
-      cautions:
-        - "先看 CoreDNS 本身健康不健康：它挂了→全集群解析瘫痪(大面积故障)；它好好的→是单 Pod/单域名问题(小范围)"
-        - "CoreDNS 通常多副本跑在不同节点，个别副本挂不致命；全挂或都不 Ready 才是灾难"
-    - id: coredns_gone_exit
-      type: escalate
-      summary: "找不到 CoreDNS Pod——DNS 组件缺失(被误删/部署异常)。这是集群级严重故障，全集群服务发现瘫痪。立即检查 kube-dns Deployment 是否存在、是否被驱逐。已生成 CoreDNS 恢复清单。"
-    - id: coredns_unhealthy_exit
-      type: done
-      summary: "CoreDNS Pod 不健康(CrashLoop/Pending/NotReady)，导致集群解析故障。查 CoreDNS 日志(常见：Corefile 配置错误、上游 DNS 环路、内存不足被 OOM)。转对应 workload Skill 排查该 Pod。"
-    - id: test_resolution
-      type: check
-      title: CoreDNS 健康——从 Pod 内测试解析
-      run: {kubectl: "kubectl -n {{ns}} exec {{pod}} -- nslookup kubernetes.default 2>&1 | tail -5"}
-      branch:
-        - {when: "any(lines[] matches 'connection timed out|no servers')", goto: pod_dns_config_exit}
-        - {when: "any(lines[] matches 'NXDOMAIN|can.t resolve')", goto: search_domain_exit}
-        - {when: "any(lines[] matches 'Address|answer')", goto: partial_ok_exit}
-      otherwise: escalate
-      cautions:
-        - "从出问题的 Pod 里测，而不是随便找个 Pod：DNS 问题常与特定节点/网络路径相关。测 kubernetes.default 是最基础的连通性验证"
-    - id: pod_dns_config_exit
-      type: done
-      summary: "Pod 连不上 DNS 服务(超时)。核对 Pod 的 /etc/resolv.conf nameserver 是否指向 kube-dns ClusterIP、该 ClusterIP 是否可达(kube-proxy/iptables 规则)、节点到 CoreDNS Pod 的网络(CNI)是否通。"
-    - id: search_domain_exit
-      type: done
-      summary: "能连 DNS 但解析返回 NXDOMAIN。核对：短名依赖的 search 域(ndots)是否正确、跨 namespace 是否用了全限定名(svc.ns.svc.cluster.local)、外部域名是否 CoreDNS 转发上游失败。"
-    - id: partial_ok_exit
-      type: done
-      summary: "基础解析正常，问题可能限于特定域名或间歇性。检查目标 Service 是否存在、是否 CoreDNS 缓存/上游间歇故障、是否个别 CoreDNS 副本异常导致部分请求失败。"
-    - id: escalate
-      type: escalate
-      summary: "打包升级：CoreDNS Pod 状态与日志、从故障 Pod 的 nslookup 结果、resolv.conf、kube-dns Service。"
+  - id: scope_dns
+    type: check
+    title: 判断是全集群 DNS 挂还是单 Pod 问题
+    run: {kubectl: 'kubectl -n kube-system get pods -l k8s-app=kube-dns -o jsonpath=''{range .items[*]}{.metadata.name}{"
+        "}{.status.phase}{" "}{.status.containerStatuses[*].ready}{"\n"}{end}'''}
+    parser: json/k8s-pod-list-v1
+    branch:
+    - {when: count(lines) == 0, goto: coredns_gone_exit}
+    - {when: 'any(lines[] matches ''false|CrashLoop|Pending'')', goto: coredns_unhealthy_exit}
+    otherwise: test_resolution
+    cautions: [先看 CoreDNS 本身健康不健康：它挂了→全集群解析瘫痪(大面积故障)；它好好的→是单 Pod/单域名问题(小范围), CoreDNS 通常多副本跑在不同节点，个别副本挂不致命；全挂或都不
+        Ready 才是灾难]
+  - {id: coredns_gone_exit, type: escalate, summary: 找不到 CoreDNS Pod——DNS 组件缺失(被误删/部署异常)。这是集群级严重故障，全集群服务发现瘫痪。立即检查
+      kube-dns Deployment 是否存在、是否被驱逐。已生成 CoreDNS 恢复清单。}
+  - {id: coredns_unhealthy_exit, type: done, summary: CoreDNS Pod 不健康(CrashLoop/Pending/NotReady)，导致集群解析故障。查
+      CoreDNS 日志(常见：Corefile 配置错误、上游 DNS 环路、内存不足被 OOM)。转对应 workload Skill 排查该 Pod。}
+  - id: test_resolution
+    type: check
+    title: CoreDNS 健康——从 Pod 内测试解析
+    run: {kubectl: 'kubectl -n {{ns}} exec {{pod}} -- nslookup kubernetes.default 2>&1 | tail -5'}
+    branch:
+    - {when: 'any(lines[] matches ''connection timed out|no servers'')', goto: pod_dns_config_exit}
+    - {when: 'any(lines[] matches ''NXDOMAIN|can.t resolve'')', goto: search_domain_exit}
+    - {when: 'any(lines[] matches ''Address|answer'')', goto: partial_ok_exit}
+    otherwise: escalate
+    cautions: [从出问题的 Pod 里测，而不是随便找个 Pod：DNS 问题常与特定节点/网络路径相关。测 kubernetes.default 是最基础的连通性验证]
+  - {id: pod_dns_config_exit, type: done, summary: Pod 连不上 DNS 服务(超时)。核对 Pod 的 /etc/resolv.conf nameserver
+      是否指向 kube-dns ClusterIP、该 ClusterIP 是否可达(kube-proxy/iptables 规则)、节点到 CoreDNS Pod 的网络(CNI)是否通。}
+  - {id: search_domain_exit, type: done, summary: 能连 DNS 但解析返回 NXDOMAIN。核对：短名依赖的 search 域(ndots)是否正确、跨
+      namespace 是否用了全限定名(svc.ns.svc.cluster.local)、外部域名是否 CoreDNS 转发上游失败。}
+  - {id: partial_ok_exit, type: done, summary: 基础解析正常，问题可能限于特定域名或间歇性。检查目标 Service 是否存在、是否 CoreDNS 缓存/上游间歇故障、是否个别
+      CoreDNS 副本异常导致部分请求失败。}
+  - {id: escalate, type: escalate, summary: 打包升级：CoreDNS Pod 状态与日志、从故障 Pod 的 nslookup 结果、resolv.conf、kube-dns
+      Service。}
 tests:
-  - {scenario: tests/coredns-unhealthy.yaml, expect_path: [scope_dns, coredns_unhealthy_exit]}
-  - {scenario: tests/pod-dns-timeout.yaml, expect_path: [scope_dns, test_resolution, pod_dns_config_exit]}
-feedback:
-  ask: "集群 DNS 问题定位了吗？"
+- scenario: tests/coredns-unhealthy.yaml
+  expect_path: [scope_dns, coredns_unhealthy_exit]
+- scenario: tests/pod-dns-timeout.yaml
+  expect_path: [scope_dns, test_resolution, pod_dns_config_exit]
+feedback: {ask: 集群 DNS 问题定位了吗？}

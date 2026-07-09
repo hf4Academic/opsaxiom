@@ -46,3 +46,27 @@ def test_delta_reads_context():
     ctx = {"input_errors": 5, "__delta__": {"input_errors": 12}}
     assert bool(ev("delta(input_errors, 60s) > 0", ctx)) is True
     assert bool(ev("delta(input_errors, 60s) > 20", ctx)) is False
+
+
+def test_avg_sum():
+    ctx = {"rows": [{"v": 10}, {"v": 20}, {"v": 30}]}
+    assert ev("avg(rows[].v) == 20", ctx)
+    assert ev("sum(rows[].v) == 60", ctx)
+    assert ev("avg(rows[].v) > 15", ctx)
+
+
+def test_avg_sum_legal_in_validator():
+    from exprlang import validate_when
+    assert validate_when("avg(rows[].wa) > 20")[0]
+    assert validate_when("sum(rows[].bytes) > 1000")[0]
+
+
+def test_parse_template_ref():
+    from exprlang import parse_template_ref
+    assert parse_template_ref("mount") == (True, "mount", None)
+    assert parse_template_ref("rows[0].comm")[:2] == (True, "rows")
+    assert parse_template_ref("discovery.free.avail") == (True, "discovery", "free")
+    ok, _, _ = parse_template_ref("count(rows)")     # 函数非法
+    assert not ok
+    ok, _, _ = parse_template_ref("a|b")             # | 非法
+    assert not ok

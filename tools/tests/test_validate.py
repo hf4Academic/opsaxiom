@@ -135,7 +135,7 @@ def _action_skill(risk="medium", with_preflight=True, with_rollback=True, with_v
     if with_rollback:
         act["rollback"] = {"type": "inverse", "run": {"linux": "rm /tmp/x"}}
     if with_verify:
-        act["verify"] = {"run": {"linux": "test -f /tmp/x"}, "expect": "存在", "on_fail": "rollback"}
+        act["verify"] = {"run": {"linux": "test -f /tmp/x"}, "assert": "file_exists", "on_fail": "rollback"}
     if with_preflight:
         act["preflight"] = {
             "blast_radius": "仅 /tmp/x", "approval": "required",
@@ -175,3 +175,58 @@ def test_s8_maturity_requires_tests():
     s = _minimal()
     s["metadata"]["maturity"] = "sim_verified"   # 但无 tests
     assert "S8" in _rules(V.validate_skill(s))
+
+
+# ---------------------------------------------------------------------------
+# v0.2 新增规则
+# ---------------------------------------------------------------------------
+def test_s11_noop_rollback_rejected():
+    s = _action_skill()
+    for n in s["tree"]["nodes"]:
+        if n["id"] == "a1":
+            n["rollback"] = {"type": "inverse", "run": {"linux": "echo '仅提示，不可执行'"}}
+    assert "S11" in _rules(V.validate_skill(s))
+
+
+def test_s11_advisory_exempt_for_human_only():
+    s = _action_skill()
+    for n in s["tree"]["nodes"]:
+        if n["id"] == "a1":
+            n["human_only"] = True
+            n["rollback"] = {"type": "inverse", "run": {"linux": "echo '人工指引'"}, "advisory": True}
+    assert "S11" not in _rules(V.validate_skill(s))
+
+
+def test_s11_advisory_without_human_only_rejected():
+    s = _action_skill()
+    for n in s["tree"]["nodes"]:
+        if n["id"] == "a1":
+            n["rollback"] = {"type": "inverse", "run": {"linux": "rm /tmp/x"}, "advisory": True}
+    assert "S11" in _rules(V.validate_skill(s))
+
+
+def test_s9_error_on_unsourced_template():
+    s = _minimal()
+    s["tree"]["nodes"][1]["summary"] = "值是 {{undeclared_var}}"
+    assert "S9" in _rules(V.validate_skill(s))
+
+
+def test_s9_ok_with_param():
+    s = _minimal()
+    s["metadata"]["params"] = [{"name": "mount", "source": "alert"}]
+    s["tree"]["nodes"][1]["summary"] = "挂载点 {{mount}} 已处理"
+    assert "S9" not in _rules(V.validate_skill(s))
+
+
+def test_s9_ok_with_node_output_ref():
+    s = _minimal()
+    s["tree"]["nodes"][1]["summary"] = "最高 {{rows[0].pcent}}%"
+    assert "S9" not in _rules(V.validate_skill(s))
+
+
+def test_verify_assert_must_parse():
+    s = _action_skill()
+    for n in s["tree"]["nodes"]:
+        if n["id"] == "a1":
+            n["verify"]["assert"] = "服务正常"       # 散文，非表达式
+    assert "S5" in _rules(V.validate_skill(s))

@@ -10,6 +10,15 @@
 规范性细节已写入 `docs/03-skill-schema.md §7`（v0.2 决议），实施任务在 TODO-opus 第二轮 P-1。
 四条均保留原文于下，状态：已裁决，待实施后关闭。
 
+> **[P-1 关闭 R-1~R-4 + F-2/F-4，2026-07-09 Opus]** v0.2 已实施并迁移全部 31 Skill：
+> schema 增 params/ask.binds/verify(assert+note)/rollback.advisory；exprlang 增 avg/sum +
+> parse_template_ref；S9 升 ERROR；新增 S11(回滚空转)；facts 注册表 tools/facts.yaml + docs/06 +
+> FACTS 成员告警。校验 31/31、pytest 100/100 全绿。R-1/R-3/R-4/F-2/F-4 关闭；
+> R-2 部分关闭（verify.assert 已强制表达式；watch.expect/abort_if 按裁决保留散文）。
+> **遗留给 Fable 复核**：迁移中 verify.assert 引用了若干"解析器应产出但尚未实现"的字段
+> （service_active/metrics_ok/rollout_succeeded/mount_rw/pcent_before 等）——这些是解析器契约，
+> 记为新条目 R-5，待解析器补齐时对齐。
+
 ## 对抗评审新发现（F 系列）
 
 审查范围：29 个 Opus 生成 Skill 全部通读，6 个带写操作的逐行审
@@ -80,3 +89,14 @@
   需要引擎在渲染时提供别名映射。
 - **建议**：v0.2 明确模板变量语法是否允许下标/点路径（如 `{{discovery.free.available_pct}}`），
   并规定 discovery 输出如何绑定到模板命名空间。当前 summary 里的变量渲染契约未定义，记此备忘。
+
+## R-5 (P-1) verify.assert 引用了未实现的解析器字段
+
+- **发现于**：P-1 迁移各 action 的 verify.expect(散文) → assert(表达式) 时。
+- **问题**：为让 assert 机器可判，我引用了解析器"应当产出"的结构化字段：
+  service_active、metrics_ok、rollout_succeeded、unready_pods、mount_rw、fs_errors、pcent_before。
+  这些字段的解析器尚未实现（服务健康类、kubectl status 类），且 pcent_before 是"执行前基线"，
+  需要引擎在 action 前快照——属运行时引擎契约，当前 sim 不覆盖 verify。
+- **不阻断**：assert 只被 S5 校验语法（已通过），不校验字段来源；sim 不执行 verify。
+- **建议**：解析器补齐时（后续轮次）定义这批"健康类字段"的标准命名与解析器；
+  引擎实现 verify 前快照（pcent_before 之类）。届时可加一条"assert 字段须有解析器产出"的校验。

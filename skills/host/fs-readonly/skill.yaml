@@ -6,100 +6,99 @@ metadata:
   taxonomy: host/storage/fs-readonly
   version: 0.1.0
   maturity: draft
-  platforms: [{os: linux}]
+  platforms:
+  - {os: linux}
   authors: [opsagent-core]
   license: Apache-2.0
   provenance: {generated_by: claude-opus-4-8}
-  expires_review: "2027-07-01"
+  expires_review: '2027-07-01'
+  params:
+  - {name: device, source: alert}
+  - {name: mount, source: alert}
 requirements:
   capability_level: high_risk_write
   connectors: [ssh]
   facts: [os.family, fs.mounts]
 discovery:
-  - id: mount_state
-    run: {linux: "mount | grep -w {{mount}} && dmesg -T | grep -iE 'remount.*read-only|EXT4-fs error|I/O error' | tail -10"}
-    parser: text/dmesg-fs-v1
+- id: mount_state
+  run: {linux: 'mount | grep -w {{mount}} && dmesg -T | grep -iE ''remount.*read-only|EXT4-fs error|I/O
+      error'' | tail -10'}
+  parser: text/dmesg-fs-v1
 tree:
   entry: confirm_ro
   nodes:
-    - id: confirm_ro
-      type: check
-      title: 确认挂载点确为只读及触发原因
-      run: {linux: "findmnt -no OPTIONS {{mount}}"}
-      branch:
-        - {when: "any(lines[] matches '(^|,)ro(,|$)')", goto: find_cause}
-        - {when: "not any(lines[] matches '(^|,)ro(,|$)')", goto: not_ro}
-      otherwise: escalate
-      cautions:
-        - "文件系统变只读几乎总是内核的自我保护：检测到 IO 错误或元数据损坏后强制 RO，避免继续写坏数据"
-        - "此时最忌讳的操作就是无脑 remount rw ——如果底层是坏盘或元数据损坏，会把数据彻底写烂"
-    - id: not_ro
-      type: done
-      summary: "当前挂载已是可读写，可能问题已被处理或告警延迟。核对 dmesg 是否有历史 RO 记录。"
-    - id: find_cause
-      type: check
-      title: 判断根因是硬件 IO 错误还是文件系统逻辑错误
-      run: {linux: "dmesg -T | grep -iE 'I/O error|medium error|EXT4-fs error|XFS.*corruption|metadata' | tail -10"}
-      parser: text/dmesg-fs-v1
-      branch:
-        - {when: "any(lines[] matches 'I/O error|medium error')", goto: hardware_exit}
-        - {when: "any(lines[] matches 'EXT4-fs error|corruption|metadata')", goto: assess_disk}
-      otherwise: escalate
-      cautions:
-        - "I/O error / medium error → 磁盘硬件故障，别 fsck(会加速坏盘死亡)，先备份可读数据再换盘"
-        - "EXT4-fs error / corruption → 文件系统逻辑损坏，需离线 fsck 修复"
-    - id: hardware_exit
-      type: escalate
-      summary: "根因是底层磁盘硬件 IO 错误。禁止 remount/fsck。立即：抢救性备份该盘仍可读的数据(dd/ddrescue)、检查 RAID 是否降级、准备换盘。已生成硬件故障处置清单。"
-    - id: assess_disk
-      type: check
-      title: 判断该文件系统能否离线修复
-      run: {linux: "findmnt -no TARGET {{mount}} && [ '{{mount}}' = '/' ] && echo IS_ROOT || echo NOT_ROOT"}
-      branch:
-        - {when: "any(lines[] matches 'IS_ROOT')", goto: root_fs_exit}
-        - {when: "any(lines[] matches 'NOT_ROOT')", goto: offline_fsck}
-      otherwise: escalate
-    - id: root_fs_exit
-      type: escalate
-      summary: "根文件系统损坏无法在线卸载修复。需要在维护窗口通过 救援模式/单用户模式 或从 initramfs 跑 fsck。请安排停机窗口，已生成 rescue 修复步骤清单。"
-    - id: offline_fsck
-      type: action
-      title: 卸载并对数据盘执行 fsck 修复
-      risk: critical
-      human_only: true
-      preflight:
-        blast_radius: "卸载 {{mount}} 期间该盘上所有数据不可访问；fsck 可能删除/移动损坏的 inode 到 lost+found"
-        est_downtime: "取决于文件系统大小，TB 级可能数十分钟至数小时"
-        watch:
-          - {run: {linux: "echo fsck 进度由人工观察"}, expect: "fsck 无未修复错误退出"}
-        abort_if:
-          - "fsck 报告大量硬件坏块(应转硬件处置而非继续修复)"
-        approval: required
-      dryrun:
-        run: {linux: "fsck -N {{device}}"}
-        interpret: "-N 只打印将做什么，不实际修改。确认设备正确、确认已卸载"
-      run: {linux: "umount {{mount}} && fsck -y {{device}} && mount {{mount}}"}
-      rollback:
-        type: snapshot
-        snapshot:
-          run: {linux: "echo '前置要求：fsck 前必须已有该卷的块级快照或备份(LVM snapshot / 存储快照)'"}
-        run: {linux: "echo '如 fsck 使情况恶化，从执行前的块级快照恢复该卷'"}
-      verify:
-        run: {linux: "findmnt -no OPTIONS {{mount}} && dmesg -T | tail -5"}
-        expect: "挂载为 rw 且无新的 fs error"
-        on_fail: escalate
-      cautions:
-        - "human_only：Agent 永不代执行本步骤，只输出指导。fsck 是破坏性修复，人必须在场并已确认备份"
-        - "fsck 前若无块级快照/备份，不要开始——fsck -y 会自动删改损坏结构，无法撤销单条修改"
-      goto: done_ok
-    - id: done_ok
-      type: done
-      summary: "fsck 修复完成且已重新挂载为 rw，无新错误。建议：核对 lost+found 是否有被移出的文件；对该盘做一次 SMART 健康检查排除硬件隐患。"
-    - id: escalate
-      type: escalate
-      summary: "打包升级：mount 选项、dmesg fs/IO 错误、设备型号、RAID/SMART 状态、是否为根分区。"
+  - id: confirm_ro
+    type: check
+    title: 确认挂载点确为只读及触发原因
+    run: {linux: 'findmnt -no OPTIONS {{mount}}'}
+    branch:
+    - {when: 'any(lines[] matches ''(^|,)ro(,|$)'')', goto: find_cause}
+    - {when: 'not any(lines[] matches ''(^|,)ro(,|$)'')', goto: not_ro}
+    otherwise: escalate
+    cautions: [文件系统变只读几乎总是内核的自我保护：检测到 IO 错误或元数据损坏后强制 RO，避免继续写坏数据, 此时最忌讳的操作就是无脑 remount rw ——如果底层是坏盘或元数据损坏，会把数据彻底写烂]
+  - {id: not_ro, type: done, summary: 当前挂载已是可读写，可能问题已被处理或告警延迟。核对 dmesg 是否有历史 RO 记录。}
+  - id: find_cause
+    type: check
+    title: 判断根因是硬件 IO 错误还是文件系统逻辑错误
+    run: {linux: dmesg -T | grep -iE 'I/O error|medium error|EXT4-fs error|XFS.*corruption|metadata' |
+        tail -10}
+    parser: text/dmesg-fs-v1
+    branch:
+    - {when: 'any(lines[] matches ''I/O error|medium error'')', goto: hardware_exit}
+    - {when: 'any(lines[] matches ''EXT4-fs error|corruption|metadata'')', goto: assess_disk}
+    otherwise: escalate
+    cautions: [I/O error / medium error → 磁盘硬件故障，别 fsck(会加速坏盘死亡)，先备份可读数据再换盘, EXT4-fs error / corruption
+        → 文件系统逻辑损坏，需离线 fsck 修复]
+  - {id: hardware_exit, type: escalate, summary: 根因是底层磁盘硬件 IO 错误。禁止 remount/fsck。立即：抢救性备份该盘仍可读的数据(dd/ddrescue)、检查
+      RAID 是否降级、准备换盘。已生成硬件故障处置清单。}
+  - id: assess_disk
+    type: check
+    title: 判断该文件系统能否离线修复
+    run: {linux: 'findmnt -no TARGET {{mount}} && [ ''{{mount}}'' = ''/'' ] && echo IS_ROOT || echo NOT_ROOT'}
+    branch:
+    - {when: 'any(lines[] matches ''IS_ROOT'')', goto: root_fs_exit}
+    - {when: 'any(lines[] matches ''NOT_ROOT'')', goto: offline_fsck}
+    otherwise: escalate
+  - {id: root_fs_exit, type: escalate, summary: 根文件系统损坏无法在线卸载修复。需要在维护窗口通过 救援模式/单用户模式 或从 initramfs 跑 fsck。请安排停机窗口，已生成
+      rescue 修复步骤清单。}
+  - id: offline_fsck
+    type: action
+    title: 卸载并对数据盘执行 fsck 修复
+    risk: critical
+    human_only: true
+    preflight:
+      blast_radius: 卸载 {{mount}} 期间该盘上所有数据不可访问；fsck 可能删除/移动损坏的 inode 到 lost+found
+      est_downtime: 取决于文件系统大小，TB 级可能数十分钟至数小时
+      watch:
+      - run: {linux: echo fsck 进度由人工观察}
+        expect: fsck 无未修复错误退出
+      abort_if: [fsck 报告大量硬件坏块(应转硬件处置而非继续修复)]
+      approval: required
+    dryrun:
+      run: {linux: 'fsck -N {{device}}'}
+      interpret: -N 只打印将做什么，不实际修改。确认设备正确、确认已卸载
+    run: {linux: 'umount {{mount}} && fsck -y {{device}} && mount {{mount}}'}
+    rollback:
+      type: snapshot
+      snapshot:
+        run: {linux: echo '前置要求：fsck 前必须已有该卷的块级快照或备份(LVM snapshot / 存储快照)'}
+      run: {linux: echo '如 fsck 使情况恶化，从执行前的块级快照恢复该卷'}
+      advisory: true
+    verify:
+      run: {linux: 'findmnt -no OPTIONS {{mount}} && dmesg -T | tail -5'}
+      assert: mount_rw and fs_errors == 0
+      note: 挂载恢复 rw 且无新的 fs error
+      on_fail: escalate
+    cautions: [human_only：Agent 永不代执行本步骤，只输出指导。fsck 是破坏性修复，人必须在场并已确认备份, fsck 前若无块级快照/备份，不要开始——fsck -y
+        会自动删改损坏结构，无法撤销单条修改]
+    goto: done_ok
+  - {id: done_ok, type: done, summary: fsck 修复完成且已重新挂载为 rw，无新错误。建议：核对 lost+found 是否有被移出的文件；对该盘做一次 SMART
+      健康检查排除硬件隐患。}
+  - {id: escalate, type: escalate, summary: 打包升级：mount 选项、dmesg fs/IO 错误、设备型号、RAID/SMART 状态、是否为根分区。}
 tests:
-  - {scenario: tests/fs-hardware-error.yaml, expect_path: [confirm_ro, find_cause, hardware_exit]}
-  - {scenario: tests/fs-datadisk-corruption.yaml, expect_path: [confirm_ro, find_cause, assess_disk, offline_fsck, done_ok], rollback_assert: true}
-feedback:
-  ask: "只读文件系统问题处理了吗？"
+- scenario: tests/fs-hardware-error.yaml
+  expect_path: [confirm_ro, find_cause, hardware_exit]
+- scenario: tests/fs-datadisk-corruption.yaml
+  expect_path: [confirm_ro, find_cause, assess_disk, offline_fsck, done_ok]
+  rollback_assert: true
+feedback: {ask: 只读文件系统问题处理了吗？}

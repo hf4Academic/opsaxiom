@@ -16,6 +16,10 @@ metadata:
     - {os: linux, family: [debian, rhel, suse]}
   authors: [opsagent-core]
   license: Apache-2.0
+  params:
+    - {name: mount, source: alert, desc: 告警指向的挂载点}
+    - {name: svc, source: derived, desc: 持有已删除文件的服务(由 check_deleted_open 推断)}
+    - {name: human_size, source: derived, desc: 已删除但被占用的可读大小}
   provenance:
     generated_by: claude-fable-5
     reviewed_by: [claude-opus-4-8]
@@ -92,6 +96,7 @@ tree:
     type: ask
     title: 确认是否可以重启/重载占用进程
     question: "以下进程持有已删除文件共 {{human_size}}（详单见上）。重载/重启它们会释放空间但有短暂服务影响，是否处置？"
+    binds: null            # 仅选择路径，不产出变量
     options:
       - {label: "可以，先尝试 reload（影响最小）", goto: reload_holder}
       - {label: "不可以，改为清理其他大文件", goto: find_big_files}
@@ -118,7 +123,8 @@ tree:
       run: {linux: "systemctl restart {{svc}}"}
     verify:
       run: {linux: "systemctl is-active {{svc}} && df -B1 --output=pcent {{mount}}"}
-      expect: "服务 active 且使用率较执行前下降"
+      assert: "service_active and rows[0].pcent < pcent_before"
+      note: "服务恢复 active 且使用率较执行前(pcent_before)下降"
       on_fail: rollback
     goto: final_check
 
@@ -155,7 +161,7 @@ tree:
       run: {linux: "find {{mount}} -name '*.log.gz' -newer /var/lib/opsagent/session/{{sid}}/start -exec gunzip {} \\;"}
     verify:
       run: {linux: "df -B1 --output=pcent {{mount}}"}
-      expect: "rows[0].pcent < 90"
+      assert: "rows[0].pcent < 90"
       on_fail: escalate    # 压缩不够说明另有元凶，继续排查而非回滚
     goto: final_check
 
@@ -163,6 +169,7 @@ tree:
     type: ask
     title: 人工确认可移出的文件
     question: "以上是最大的 20 个文件/目录。哪些业务上确认不再需要？（将移入隔离区保留 7 天，随时可恢复，不会直接删除）"
+    binds: files           # 人选定的文件清单绑定到 {{files}}
     options:
       - {label: "选定文件，移入隔离区", goto: quarantine_files}
       - {label: "都不能动，升级处理", goto: escalate}
@@ -180,13 +187,13 @@ tree:
     dryrun:
       run: {linux: "du -shc {{files}}"}
       interpret: "确认释放量与文件清单"
-    run: {linux: "opsagent-quarantine move --session {{sid}} {{files}}"}
+    run: {linux: "opsaxiom-quarantine move --session {{sid}} {{files}}"}
     rollback:
       type: inverse
-      run: {linux: "opsagent-quarantine restore --session {{sid}}"}
+      run: {linux: "opsaxiom-quarantine restore --session {{sid}}"}
     verify:
       run: {linux: "df -B1 --output=pcent {{mount}}"}
-      expect: "rows[0].pcent < 90"
+      assert: "rows[0].pcent < 90"
       on_fail: escalate
     cautions:
       - "隔离区在同一文件系统时 mv 是 O(1)；隔离区规划必须与业务盘同 FS，否则大文件移动本身会加剧写入"

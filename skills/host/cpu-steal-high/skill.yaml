@@ -6,59 +6,50 @@ metadata:
   taxonomy: host/cpu/steal-high
   version: 0.1.0
   maturity: draft
-  platforms: [{os: linux}]
+  platforms:
+  - {os: linux}
   authors: [opsagent-core]
   license: Apache-2.0
   provenance: {generated_by: claude-opus-4-8}
-  expires_review: "2027-07-01"
+  expires_review: '2027-07-01'
 requirements:
   capability_level: read
   connectors: [ssh]
   facts: [os.family, host.virtualization]
 discovery:
-  - id: steal
-    run: {linux: "mpstat 1 3 | tail -4"}
-    parser: table/mpstat-v1
+- id: steal
+  run: {linux: mpstat 1 3 | tail -4}
+  parser: table/mpstat-v1
 tree:
   entry: confirm_steal
   nodes:
-    - id: confirm_steal
-      type: check
-      title: 确认 steal 时间占比
-      run: {linux: "mpstat 1 3 | tail -4"}
-      parser: table/mpstat-v1
-      branch:
-        - {when: "count(rows[].steal > 10) >= 2", goto: check_virt}
-        - {when: "count(rows[].steal > 10) < 2", goto: not_steal}
-      otherwise: escalate
-      cautions:
-        - "steal 是虚拟化特有指标：宿主的 CPU 被分给了别的虚机，本机想用却拿不到。物理机上 steal 恒为 0"
-        - "steal 高时本机 CPU 利用率数据会失真——你以为 CPU 空闲，其实是被'偷'走了，应用照样慢"
-    - id: not_steal
-      type: done
-      summary: "steal 未持续超 10%，非邻居抢占问题。若 CPU 仍慢，转 host/cpu/load-high 排查本机进程。"
-    - id: check_virt
-      type: check
-      title: 确认虚拟化环境
-      run: {linux: "systemd-detect-virt; cat /sys/class/dmi/id/product_name 2>/dev/null"}
-      branch:
-        - {when: "any(lines[] matches 'kvm|vmware|xen|microsoft|amazon|qemu')", goto: noisy_neighbor_exit}
-        - {when: "any(lines[] matches 'none')", goto: bare_metal_exit}
-      otherwise: noisy_neighbor_exit
-    - id: bare_metal_exit
-      type: escalate
-      summary: "检测为物理机但 steal 非零，异常(可能是嵌套虚拟化或采集错误)。需人工核实虚拟化层级。"
-    - id: noisy_neighbor_exit
-      type: done
-      summary: >-
-        确认为虚拟机且 steal 持续偏高，根因是宿主超卖/邻居抢占 CPU(noisy neighbor)——这是宿主层问题，
-        本机内部无法根治。可选：①联系云厂商/迁移到独占型实例；②迁移宿主；③升级实例规格。
-        本机侧只能确认并甩锅给虚拟化层，不要在 guest 里瞎调优。
-    - id: escalate
-      type: escalate
-      summary: "打包升级：mpstat steal 数据、虚拟化类型、实例规格。"
+  - id: confirm_steal
+    type: check
+    title: 确认 steal 时间占比
+    run: {linux: mpstat 1 3 | tail -4}
+    parser: table/mpstat-v1
+    branch:
+    - {when: 'count(rows[].steal > 10) >= 2', goto: check_virt}
+    - {when: 'count(rows[].steal > 10) < 2', goto: not_steal}
+    otherwise: escalate
+    cautions: [steal 是虚拟化特有指标：宿主的 CPU 被分给了别的虚机，本机想用却拿不到。物理机上 steal 恒为 0, steal 高时本机 CPU 利用率数据会失真——你以为
+        CPU 空闲，其实是被'偷'走了，应用照样慢]
+  - {id: not_steal, type: done, summary: steal 未持续超 10%，非邻居抢占问题。若 CPU 仍慢，转 host/cpu/load-high 排查本机进程。}
+  - id: check_virt
+    type: check
+    title: 确认虚拟化环境
+    run: {linux: systemd-detect-virt; cat /sys/class/dmi/id/product_name 2>/dev/null}
+    branch:
+    - {when: 'any(lines[] matches ''kvm|vmware|xen|microsoft|amazon|qemu'')', goto: noisy_neighbor_exit}
+    - {when: 'any(lines[] matches ''none'')', goto: bare_metal_exit}
+    otherwise: noisy_neighbor_exit
+  - {id: bare_metal_exit, type: escalate, summary: 检测为物理机但 steal 非零，异常(可能是嵌套虚拟化或采集错误)。需人工核实虚拟化层级。}
+  - {id: noisy_neighbor_exit, type: done, summary: 确认为虚拟机且 steal 持续偏高，根因是宿主超卖/邻居抢占 CPU(noisy neighbor)——这是宿主层问题，
+      本机内部无法根治。可选：①联系云厂商/迁移到独占型实例；②迁移宿主；③升级实例规格。 本机侧只能确认并甩锅给虚拟化层，不要在 guest 里瞎调优。}
+  - {id: escalate, type: escalate, summary: 打包升级：mpstat steal 数据、虚拟化类型、实例规格。}
 tests:
-  - {scenario: tests/noisy-neighbor.yaml, expect_path: [confirm_steal, check_virt, noisy_neighbor_exit]}
-  - {scenario: tests/no-steal.yaml, expect_path: [confirm_steal, not_steal]}
-feedback:
-  ask: "CPU steal 问题定位了吗？"
+- scenario: tests/noisy-neighbor.yaml
+  expect_path: [confirm_steal, check_virt, noisy_neighbor_exit]
+- scenario: tests/no-steal.yaml
+  expect_path: [confirm_steal, not_steal]
+feedback: {ask: CPU steal 问题定位了吗？}

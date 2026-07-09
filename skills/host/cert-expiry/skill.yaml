@@ -6,53 +6,52 @@ metadata:
   taxonomy: host/system/cert-expiry
   version: 0.1.0
   maturity: draft
-  platforms: [{os: linux}]
+  platforms:
+  - {os: linux}
   authors: [opsagent-core]
   license: Apache-2.0
   provenance: {generated_by: claude-opus-4-8}
-  expires_review: "2027-07-01"
+  expires_review: '2027-07-01'
+  params:
+  - {name: days_left, source: alert}
+  - {name: endpoint, source: alert}
+  - {name: sni, source: user}
 requirements:
   capability_level: read
   connectors: [ssh]
   facts: [os.family]
 discovery:
-  - id: cert_probe
-    run: {linux: "echo | openssl s_client -connect {{endpoint}} -servername {{sni|host}} 2>/dev/null | openssl x509 -noout -enddate -subject -issuer"}
-    parser: text/x509-v1
+- id: cert_probe
+  run: {linux: 'echo | openssl s_client -connect {{endpoint}} -servername {{sni}} 2>/dev/null | openssl
+      x509 -noout -enddate -subject -issuer'}
+  parser: text/x509-v1
 tree:
   entry: read_expiry
   nodes:
-    - id: read_expiry
-      type: check
-      title: 读取证书剩余有效期
-      run: {linux: "echo | openssl s_client -connect {{endpoint}} -servername {{sni|host}} 2>/dev/null | openssl x509 -noout -checkend 0 && echo VALID_NOW || echo EXPIRED; echo | openssl s_client -connect {{endpoint}} 2>/dev/null | openssl x509 -noout -enddate"}
-      parser: text/x509-v1
-      branch:
-        - {when: "any(lines[] matches 'EXPIRED')", goto: expired_exit}
-        - {when: "days_left < 7", goto: urgent_exit}
-        - {when: "days_left < 30", goto: warn_exit}
-        - {when: "days_left >= 30", goto: ok_exit}
-      otherwise: escalate
-      cautions:
-        - "检查的是证书链末端(叶子证书)到期——但中间 CA 证书到期同样致命，且更隐蔽。用 -showcerts 检查整条链"
-        - "多域名/多端口机器要逐个证书查：一个域名的证书没过不代表别的没过。SNI 不对会拿到默认证书误导判断"
-    - id: expired_exit
-      type: done
-      summary: "证书已过期，服务当前可能已不可用(客户端拒绝连接)。紧急：立即续签并部署；核对是否有自动续期(certbot/ACME)失效。这是最高优先级。"
-    - id: urgent_exit
-      type: done
-      summary: "证书 {{days_left}} 天内到期，需立即处理。检查自动续期机制为何没触发；手动续签部署，并验证续签后新证书链完整。"
-    - id: warn_exit
-      type: done
-      summary: "证书 {{days_left}} 天内到期，进入预警窗口。安排续签；若有 ACME 自动续期，确认其正常工作(多数在剩余 30 天时自动续)。"
-    - id: ok_exit
-      type: done
-      summary: "证书剩余 {{days_left}} 天，健康。建议：确认已配置到期监控(剩 30 天告警)；核对整条证书链(含中间 CA)均未临近到期。"
-    - id: escalate
-      type: escalate
-      summary: "打包升级：探测的端点、证书链各级到期时间、颁发者、是否配置自动续期。"
+  - id: read_expiry
+    type: check
+    title: 读取证书剩余有效期
+    run: {linux: 'echo | openssl s_client -connect {{endpoint}} -servername {{sni}} 2>/dev/null | openssl
+        x509 -noout -checkend 0 && echo VALID_NOW || echo EXPIRED; echo | openssl s_client -connect {{endpoint}}
+        2>/dev/null | openssl x509 -noout -enddate'}
+    parser: text/x509-v1
+    branch:
+    - {when: 'any(lines[] matches ''EXPIRED'')', goto: expired_exit}
+    - {when: days_left < 7, goto: urgent_exit}
+    - {when: days_left < 30, goto: warn_exit}
+    - {when: days_left >= 30, goto: ok_exit}
+    otherwise: escalate
+    cautions: [检查的是证书链末端(叶子证书)到期——但中间 CA 证书到期同样致命，且更隐蔽。用 -showcerts 检查整条链, 多域名/多端口机器要逐个证书查：一个域名的证书没过不代表别的没过。SNI
+        不对会拿到默认证书误导判断]
+  - {id: expired_exit, type: done, summary: 证书已过期，服务当前可能已不可用(客户端拒绝连接)。紧急：立即续签并部署；核对是否有自动续期(certbot/ACME)失效。这是最高优先级。}
+  - {id: urgent_exit, type: done, summary: '证书 {{days_left}} 天内到期，需立即处理。检查自动续期机制为何没触发；手动续签部署，并验证续签后新证书链完整。'}
+  - {id: warn_exit, type: done, summary: '证书 {{days_left}} 天内到期，进入预警窗口。安排续签；若有 ACME 自动续期，确认其正常工作(多数在剩余
+      30 天时自动续)。'}
+  - {id: ok_exit, type: done, summary: '证书剩余 {{days_left}} 天，健康。建议：确认已配置到期监控(剩 30 天告警)；核对整条证书链(含中间 CA)均未临近到期。'}
+  - {id: escalate, type: escalate, summary: 打包升级：探测的端点、证书链各级到期时间、颁发者、是否配置自动续期。}
 tests:
-  - {scenario: tests/cert-expiring-soon.yaml, expect_path: [read_expiry, urgent_exit]}
-  - {scenario: tests/cert-healthy.yaml, expect_path: [read_expiry, ok_exit]}
-feedback:
-  ask: "证书到期情况清楚了吗？"
+- scenario: tests/cert-expiring-soon.yaml
+  expect_path: [read_expiry, urgent_exit]
+- scenario: tests/cert-healthy.yaml
+  expect_path: [read_expiry, ok_exit]
+feedback: {ask: 证书到期情况清楚了吗？}

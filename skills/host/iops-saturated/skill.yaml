@@ -6,71 +6,63 @@ metadata:
   taxonomy: host/storage/iops-saturated
   version: 0.1.0
   maturity: draft
-  platforms: [{os: linux}]
+  platforms:
+  - {os: linux}
   authors: [opsagent-core]
   license: Apache-2.0
   provenance: {generated_by: claude-opus-4-8}
-  expires_review: "2027-07-01"
+  expires_review: '2027-07-01'
 requirements:
   capability_level: read
   connectors: [ssh]
   facts: [os.family, storage.devices]
 discovery:
-  - id: iostat
-    run: {linux: "iostat -dx 1 3"}
-    parser: table/iostat-v1
+- id: iostat
+  run: {linux: iostat -dx 1 3}
+  parser: table/iostat-v1
 tree:
   entry: confirm_saturation
   nodes:
-    - id: confirm_saturation
-      type: check
-      title: 确认磁盘是否真的饱和
-      run: {linux: "iostat -dx 1 3"}
-      parser: table/iostat-v1
-      branch:
-        - {when: "count(rows[].util > 90) >= 2", goto: latency_vs_throughput}
-        - {when: "count(rows[].util > 90) < 2", goto: not_saturated}
-      otherwise: escalate
-      cautions:
-        - "%util 对 SSD/NVMe 会误导：SSD 内部并行，util=100% 不代表打满，要结合 await 和实际 IOPS 判断"
-        - "先确认是哪块盘：多盘系统别把系统盘和数据盘搞混"
-    - id: not_saturated
-      type: done
-      summary: "磁盘利用率未持续超 90%，非 IO 饱和。若应用仍慢，检查是否单次大 IO 或 fsync 频繁(await 高但 util 不高)。"
-    - id: latency_vs_throughput
-      type: check
-      title: 区分高延迟 vs 高吞吐 vs 高 IOPS
-      run: {linux: "iostat -dx 1 3"}
-      parser: table/iostat-v1
-      branch:
-        - {when: "count(rows[].await > 50) >= 2", goto: find_io_process}
-        - {when: "count(rows[].aqu_sz > 10) >= 2", goto: find_io_process}
-      otherwise: find_io_process
-      cautions:
-        - "await 高=每次 IO 慢(可能盘老化/RAID 降级)；队列深(aqu-sz)=请求太多。两者处置方向不同"
-    - id: find_io_process
-      type: check
-      title: 定位产生 IO 的进程
-      run: {linux: "iotop -b -n 2 -o -k 2>/dev/null | head -15 || pidstat -d 1 3"}
-      parser: table/iotop-v1
-      branch:
-        - {when: "rows[0].io_pct > 50", goto: single_io_hog}
-        - {when: "count(rows) > 0", goto: many_io_exit}
-      otherwise: escalate
-      cautions:
-        - "iotop 需 root 且需内核开 CONFIG_TASK_IO_ACCOUNTING；没有则退回 pidstat -d 或 /proc/PID/io"
-        - "刷脏页由 kworker/flush 线程代做，元凶可能显示为内核线程——要往上追是谁在写"
-    - id: single_io_hog
-      type: done
-      summary: "单进程 {{rows0_comm}} 主导 IO。结合业务判断：备份/日志/大查询是否可错峰或限速(ionice/cgroup blkio)。持续异常则抓 IO 栈(biosnoop/blktrace)。"
-    - id: many_io_exit
-      type: done
-      summary: "多进程分散 IO，疑似整体负载或存储性能不足。核对是否有批量任务叠加；评估存储是否需扩容/换 SSD。"
-    - id: escalate
-      type: escalate
-      summary: "打包升级：iostat -dx、按 IO 排序的进程、设备型号、RAID 状态。"
+  - id: confirm_saturation
+    type: check
+    title: 确认磁盘是否真的饱和
+    run: {linux: iostat -dx 1 3}
+    parser: table/iostat-v1
+    branch:
+    - {when: 'count(rows[].util > 90) >= 2', goto: latency_vs_throughput}
+    - {when: 'count(rows[].util > 90) < 2', goto: not_saturated}
+    otherwise: escalate
+    cautions: ['%util 对 SSD/NVMe 会误导：SSD 内部并行，util=100% 不代表打满，要结合 await 和实际 IOPS 判断', 先确认是哪块盘：多盘系统别把系统盘和数据盘搞混]
+  - {id: not_saturated, type: done, summary: 磁盘利用率未持续超 90%，非 IO 饱和。若应用仍慢，检查是否单次大 IO 或 fsync 频繁(await 高但
+      util 不高)。}
+  - id: latency_vs_throughput
+    type: check
+    title: 区分高延迟 vs 高吞吐 vs 高 IOPS
+    run: {linux: iostat -dx 1 3}
+    parser: table/iostat-v1
+    branch:
+    - {when: 'count(rows[].await > 50) >= 2', goto: find_io_process}
+    - {when: 'count(rows[].aqu_sz > 10) >= 2', goto: find_io_process}
+    otherwise: find_io_process
+    cautions: [await 高=每次 IO 慢(可能盘老化/RAID 降级)；队列深(aqu-sz)=请求太多。两者处置方向不同]
+  - id: find_io_process
+    type: check
+    title: 定位产生 IO 的进程
+    run: {linux: iotop -b -n 2 -o -k 2>/dev/null | head -15 || pidstat -d 1 3}
+    parser: table/iotop-v1
+    branch:
+    - {when: 'rows[0].io_pct > 50', goto: single_io_hog}
+    - {when: count(rows) > 0, goto: many_io_exit}
+    otherwise: escalate
+    cautions: [iotop 需 root 且需内核开 CONFIG_TASK_IO_ACCOUNTING；没有则退回 pidstat -d 或 /proc/PID/io, 刷脏页由 kworker/flush
+        线程代做，元凶可能显示为内核线程——要往上追是谁在写]
+  - {id: single_io_hog, type: done, summary: '单进程 {{rows[0].comm}} 主导 IO。结合业务判断：备份/日志/大查询是否可错峰或限速(ionice/cgroup
+      blkio)。持续异常则抓 IO 栈(biosnoop/blktrace)。'}
+  - {id: many_io_exit, type: done, summary: 多进程分散 IO，疑似整体负载或存储性能不足。核对是否有批量任务叠加；评估存储是否需扩容/换 SSD。}
+  - {id: escalate, type: escalate, summary: 打包升级：iostat -dx、按 IO 排序的进程、设备型号、RAID 状态。}
 tests:
-  - {scenario: tests/single-io-hog.yaml, expect_path: [confirm_saturation, latency_vs_throughput, find_io_process, single_io_hog]}
-  - {scenario: tests/not-saturated.yaml, expect_path: [confirm_saturation, not_saturated]}
-feedback:
-  ask: "磁盘 IO 瓶颈定位了吗？"
+- scenario: tests/single-io-hog.yaml
+  expect_path: [confirm_saturation, latency_vs_throughput, find_io_process, single_io_hog]
+- scenario: tests/not-saturated.yaml
+  expect_path: [confirm_saturation, not_saturated]
+feedback: {ask: 磁盘 IO 瓶颈定位了吗？}

@@ -6,61 +6,57 @@ metadata:
   taxonomy: host/network-stack/conntrack-full
   version: 0.1.0
   maturity: draft
-  platforms: [{os: linux}]
+  platforms:
+  - {os: linux}
   authors: [opsagent-core]
   license: Apache-2.0
   provenance: {generated_by: claude-opus-4-8}
-  expires_review: "2027-07-01"
+  expires_review: '2027-07-01'
 requirements:
   capability_level: read
   connectors: [ssh]
   facts: [os.family]
 discovery:
-  - id: ct_count
-    run: {linux: "cat /proc/sys/net/netfilter/nf_conntrack_count /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null; dmesg -T | grep -i 'nf_conntrack: table full' | tail -3"}
-    parser: json/conntrack-v1
+- id: ct_count
+  run: {linux: 'cat /proc/sys/net/netfilter/nf_conntrack_count /proc/sys/net/netfilter/nf_conntrack_max
+      2>/dev/null; dmesg -T | grep -i ''nf_conntrack: table full'' | tail -3'}
+  parser: json/conntrack-v1
 tree:
   entry: confirm_full
   nodes:
-    - id: confirm_full
-      type: check
-      title: 确认 conntrack 表使用率
-      run: {linux: "cat /proc/sys/net/netfilter/nf_conntrack_count /proc/sys/net/netfilter/nf_conntrack_max"}
-      parser: json/conntrack-v1
-      branch:
-        - {when: "count > max * 0.9", goto: analyze_entries}
-        - {when: "count <= max * 0.9", goto: not_full}
-      otherwise: escalate
-      cautions:
-        - "表满的症状是新连接被丢弃、dmesg 报 'nf_conntrack: table full, dropping packet'，但业务表现是随机连接失败——容易误判为应用问题"
-        - "不是所有主机都启用 conntrack：无 NAT/无 stateful 防火墙的机器可能根本没加载该模块，此时该文件不存在"
-    - id: not_full
-      type: done
-      summary: "conntrack 使用率未超 90%。若仍有随机丢连，检查是否某瞬时突发已过，或问题在别处(转 network-stack/timewait-flood 或应用层)。"
-    - id: analyze_entries
-      type: check
-      title: 分析连接来源与状态分布
-      run: {linux: "conntrack -L 2>/dev/null | awk '{print $1,$4}' | sort | uniq -c | sort -rn | head -10 || cat /proc/net/nf_conntrack | awk '{print $3}' | sort | uniq -c | sort -rn | head"}
-      branch:
-        - {when: "any(lines[] matches 'TIME_WAIT|CLOSE')", goto: timewait_dominant_exit}
-        - {when: "any(lines[] matches 'SYN_SENT|SYN_RECV')", goto: syn_flood_exit}
-      otherwise: legit_load_exit
-      cautions:
-        - "大量 TIME_WAIT 条目占满表 → 短连接过多，调 timeout 或改长连接；大量 SYN_SENT → 可能被扫描/攻击或大量连接建不起来"
-    - id: timewait_dominant_exit
-      type: done
-      summary: "表被 TIME_WAIT/CLOSE 态连接占满，根因是短连接海量。方向：应用改长连接/连接池、或调低 nf_conntrack_tcp_timeout_time_wait。扩大 nf_conntrack_max 只是缓解(注意每条目约 300 字节，需评估内存)。"
-    - id: syn_flood_exit
-      type: done
-      summary: "大量 SYN_SENT/SYN_RECV 半开连接占满表，疑似 SYN 扫描/攻击或大规模连接失败。核对来源 IP 分布，是攻击则转 network/traffic/ddos-suspect，是业务则查为何连接建不起来。"
-    - id: legit_load_exit
-      type: done
-      summary: "连接以 ESTABLISHED 为主，属真实业务负载增长。评估调大 nf_conntrack_max(并相应调 hashsize)，或对不需要跟踪的流量用 iptables NOTRACK 减负。"
-    - id: escalate
-      type: escalate
-      summary: "打包升级：conntrack count/max、按状态聚合的连接分布、dmesg table full 记录。"
+  - id: confirm_full
+    type: check
+    title: 确认 conntrack 表使用率
+    run: {linux: cat /proc/sys/net/netfilter/nf_conntrack_count /proc/sys/net/netfilter/nf_conntrack_max}
+    parser: json/conntrack-v1
+    branch:
+    - {when: count > max * 0.9, goto: analyze_entries}
+    - {when: count <= max * 0.9, goto: not_full}
+    otherwise: escalate
+    cautions: ['表满的症状是新连接被丢弃、dmesg 报 ''nf_conntrack: table full, dropping packet''，但业务表现是随机连接失败——容易误判为应用问题',
+      不是所有主机都启用 conntrack：无 NAT/无 stateful 防火墙的机器可能根本没加载该模块，此时该文件不存在]
+  - {id: not_full, type: done, summary: conntrack 使用率未超 90%。若仍有随机丢连，检查是否某瞬时突发已过，或问题在别处(转 network-stack/timewait-flood
+      或应用层)。}
+  - id: analyze_entries
+    type: check
+    title: 分析连接来源与状态分布
+    run: {linux: 'conntrack -L 2>/dev/null | awk ''{print $1,$4}'' | sort | uniq -c | sort -rn | head
+        -10 || cat /proc/net/nf_conntrack | awk ''{print $3}'' | sort | uniq -c | sort -rn | head'}
+    branch:
+    - {when: 'any(lines[] matches ''TIME_WAIT|CLOSE'')', goto: timewait_dominant_exit}
+    - {when: 'any(lines[] matches ''SYN_SENT|SYN_RECV'')', goto: syn_flood_exit}
+    otherwise: legit_load_exit
+    cautions: [大量 TIME_WAIT 条目占满表 → 短连接过多，调 timeout 或改长连接；大量 SYN_SENT → 可能被扫描/攻击或大量连接建不起来]
+  - {id: timewait_dominant_exit, type: done, summary: 表被 TIME_WAIT/CLOSE 态连接占满，根因是短连接海量。方向：应用改长连接/连接池、或调低
+      nf_conntrack_tcp_timeout_time_wait。扩大 nf_conntrack_max 只是缓解(注意每条目约 300 字节，需评估内存)。}
+  - {id: syn_flood_exit, type: done, summary: 大量 SYN_SENT/SYN_RECV 半开连接占满表，疑似 SYN 扫描/攻击或大规模连接失败。核对来源 IP
+      分布，是攻击则转 network/traffic/ddos-suspect，是业务则查为何连接建不起来。}
+  - {id: legit_load_exit, type: done, summary: 连接以 ESTABLISHED 为主，属真实业务负载增长。评估调大 nf_conntrack_max(并相应调
+      hashsize)，或对不需要跟踪的流量用 iptables NOTRACK 减负。}
+  - {id: escalate, type: escalate, summary: 打包升级：conntrack count/max、按状态聚合的连接分布、dmesg table full 记录。}
 tests:
-  - {scenario: tests/timewait-dominant.yaml, expect_path: [confirm_full, analyze_entries, timewait_dominant_exit]}
-  - {scenario: tests/conntrack-ok.yaml, expect_path: [confirm_full, not_full]}
-feedback:
-  ask: "conntrack 表满问题定位了吗？"
+- scenario: tests/timewait-dominant.yaml
+  expect_path: [confirm_full, analyze_entries, timewait_dominant_exit]
+- scenario: tests/conntrack-ok.yaml
+  expect_path: [confirm_full, not_full]
+feedback: {ask: conntrack 表满问题定位了吗？}

@@ -6,77 +6,66 @@ metadata:
   taxonomy: host/cpu/load-high
   version: 0.1.0
   maturity: draft
-  platforms: [{os: linux}]
+  platforms:
+  - {os: linux}
   authors: [opsagent-core]
   license: Apache-2.0
   provenance: {generated_by: claude-opus-4-8}
-  expires_review: "2027-07-01"
+  expires_review: '2027-07-01'
+  params:
+  - {name: load1, source: alert}
 requirements:
   capability_level: read
   connectors: [ssh]
   facts: [os.family, cpu.cores]
 discovery:
-  - id: loadavg
-    run: {linux: "cat /proc/loadavg && nproc"}
-    parser: json/loadavg-v1
+- id: loadavg
+  run: {linux: cat /proc/loadavg && nproc}
+  parser: json/loadavg-v1
 tree:
   entry: assess_load
   nodes:
-    - id: assess_load
-      type: check
-      title: 判断负载是否真的过高（相对核数）
-      run: {linux: "cat /proc/loadavg && nproc"}
-      parser: json/loadavg-v1
-      branch:
-        - {when: "load1 > cores * 2", goto: classify_bottleneck}
-        - {when: "load1 <= cores * 2", goto: not_high}
-      otherwise: escalate
-      cautions:
-        - "负载必须除以核数看：load=16 在 4 核是灾难，在 64 核是正常。别被绝对值吓到"
-        - "loadavg 计入 D 状态(不可中断睡眠)进程，高 load 不一定是 CPU 忙——可能是 IO 等待或 NFS 卡死"
-    - id: not_high
-      type: done
-      summary: "1 分钟负载 {{load1}} 相对 {{cores}} 核未超阈值，可能为瞬时峰值。建议观察 5/15 分钟负载趋势。"
-    - id: classify_bottleneck
-      type: check
-      title: 区分 CPU 密集 / IO 等待 / 运行队列积压
-      run: {linux: "vmstat 1 3"}
-      parser: table/vmstat-v1
-      branch:
-        - {when: "count(rows[].wa > 20) >= 2", goto: io_bound_exit}
-        - {when: "count(rows[].us + rows[].sy > 80) >= 2", goto: find_top_consumers}
-        - {when: "count(rows[].r > cores * 2) >= 2", goto: runqueue_exit}
-      otherwise: find_top_consumers
-      cautions:
-        - "wa(iowait)高→转 storage 域；us/sy 高→真 CPU 忙；r(运行队列)长但 CPU 不满→cgroup 限流或调度问题"
-    - id: io_bound_exit
-      type: done
-      summary: "iowait 持续偏高，瓶颈在磁盘 IO 而非 CPU。请转 host/storage/iops-saturated。"
-    - id: runqueue_exit
-      type: done
-      summary: "运行队列长但 CPU 未打满，疑似 cgroup CPU 限流或调度问题。请查 host/cpu/throttled。"
-    - id: find_top_consumers
-      type: check
-      title: 定位占用 CPU 最高的进程
-      run: {linux: "ps -eo pid,pcpu,comm --sort=-pcpu | head -10"}
-      parser: table/ps-v1
-      branch:
-        - {when: "rows[0].pcpu > 50", goto: single_hog_exit}
-        - {when: "count(rows[].pcpu > 10) >= 3", goto: many_procs_exit}
-      otherwise: escalate
-      cautions:
-        - "pcpu 可 >100%（多核之和）。留意 fork 风暴：大量同名短命进程 ps 抓不住，用 pidstat 或 execsnoop"
-    - id: single_hog_exit
-      type: done
-      summary: "单进程 {{rows0_comm}}(pid {{rows0_pid}}) 占用最高。结合业务判断是否正常；异常则抓火焰图(perf/py-spy)定位热点函数再处置。"
-    - id: many_procs_exit
-      type: done
-      summary: "多进程共同拉高 CPU，疑似整体负载上升或批量任务。核对是否有定时任务/发布/流量突增。"
-    - id: escalate
-      type: escalate
-      summary: "打包升级：loadavg、vmstat、top 进程、核数。"
+  - id: assess_load
+    type: check
+    title: 判断负载是否真的过高（相对核数）
+    run: {linux: cat /proc/loadavg && nproc}
+    parser: json/loadavg-v1
+    branch:
+    - {when: load1 > cores * 2, goto: classify_bottleneck}
+    - {when: load1 <= cores * 2, goto: not_high}
+    otherwise: escalate
+    cautions: [负载必须除以核数看：load=16 在 4 核是灾难，在 64 核是正常。别被绝对值吓到, loadavg 计入 D 状态(不可中断睡眠)进程，高 load 不一定是 CPU
+        忙——可能是 IO 等待或 NFS 卡死]
+  - {id: not_high, type: done, summary: '1 分钟负载 {{load1}} 相对 {{cores}} 核未超阈值，可能为瞬时峰值。建议观察 5/15 分钟负载趋势。'}
+  - id: classify_bottleneck
+    type: check
+    title: 区分 CPU 密集 / IO 等待 / 运行队列积压
+    run: {linux: vmstat 1 3}
+    parser: table/vmstat-v1
+    branch:
+    - {when: 'count(rows[].wa > 20) >= 2', goto: io_bound_exit}
+    - {when: 'count(rows[].us + rows[].sy > 80) >= 2', goto: find_top_consumers}
+    - {when: 'count(rows[].r > cores * 2) >= 2', goto: runqueue_exit}
+    otherwise: find_top_consumers
+    cautions: [wa(iowait)高→转 storage 域；us/sy 高→真 CPU 忙；r(运行队列)长但 CPU 不满→cgroup 限流或调度问题]
+  - {id: io_bound_exit, type: done, summary: iowait 持续偏高，瓶颈在磁盘 IO 而非 CPU。请转 host/storage/iops-saturated。}
+  - {id: runqueue_exit, type: done, summary: 运行队列长但 CPU 未打满，疑似 cgroup CPU 限流或调度问题。请查 host/cpu/throttled。}
+  - id: find_top_consumers
+    type: check
+    title: 定位占用 CPU 最高的进程
+    run: {linux: 'ps -eo pid,pcpu,comm --sort=-pcpu | head -10'}
+    parser: table/ps-v1
+    branch:
+    - {when: 'rows[0].pcpu > 50', goto: single_hog_exit}
+    - {when: 'count(rows[].pcpu > 10) >= 3', goto: many_procs_exit}
+    otherwise: escalate
+    cautions: [pcpu 可 >100%（多核之和）。留意 fork 风暴：大量同名短命进程 ps 抓不住，用 pidstat 或 execsnoop]
+  - {id: single_hog_exit, type: done, summary: '单进程 {{rows[0].comm}}(pid {{rows[0].pid}}) 占用最高。结合业务判断是否正常；异常则抓火焰图(perf/py-spy)定位热点函数再处置。'}
+  - {id: many_procs_exit, type: done, summary: 多进程共同拉高 CPU，疑似整体负载上升或批量任务。核对是否有定时任务/发布/流量突增。}
+  - {id: escalate, type: escalate, summary: 打包升级：loadavg、vmstat、top 进程、核数。}
 tests:
-  - {scenario: tests/cpu-bound.yaml, expect_path: [assess_load, classify_bottleneck, find_top_consumers, single_hog_exit]}
-  - {scenario: tests/io-bound.yaml, expect_path: [assess_load, classify_bottleneck, io_bound_exit]}
-feedback:
-  ask: "CPU 负载问题定位了吗？"
+- scenario: tests/cpu-bound.yaml
+  expect_path: [assess_load, classify_bottleneck, find_top_consumers, single_hog_exit]
+- scenario: tests/io-bound.yaml
+  expect_path: [assess_load, classify_bottleneck, io_bound_exit]
+feedback: {ask: CPU 负载问题定位了吗？}

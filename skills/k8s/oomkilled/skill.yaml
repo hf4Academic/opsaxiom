@@ -6,60 +6,55 @@ metadata:
   taxonomy: k8s/workload/oomkilled
   version: 0.1.0
   maturity: draft
-  platforms: [{platform: kubernetes}]
+  platforms:
+  - {platform: kubernetes}
   authors: [opsagent-core]
   license: Apache-2.0
   provenance: {generated_by: claude-opus-4-8}
-  expires_review: "2027-07-01"
+  expires_review: '2027-07-01'
+  params:
+  - {name: ns, source: alert}
+  - {name: pod, source: alert}
 requirements:
   capability_level: read
   connectors: [kubectl]
   facts: [k8s.context]
 discovery:
-  - id: limits
-    run: {kubectl: "kubectl -n {{ns}} get pod {{pod}} -o jsonpath='{.spec.containers[*].resources}'"}
-    parser: json/k8s-resources-v1
+- id: limits
+  run: {kubectl: 'kubectl -n {{ns}} get pod {{pod}} -o jsonpath=''{.spec.containers[*].resources}'''}
+  parser: json/k8s-resources-v1
 tree:
   entry: confirm_oom
   nodes:
-    - id: confirm_oom
-      type: check
-      title: 确认 OOMKilled 并读取 limit
-      run: {kubectl: "kubectl -n {{ns}} get pod {{pod}} -o jsonpath='{.status.containerStatuses[*].lastState.terminated.reason}{\"|\"}{.spec.containers[*].resources.limits.memory}'"}
-      parser: json/k8s-container-state-v1
-      branch:
-        - {when: "any(lines[] matches 'OOMKilled')", goto: check_limit_set}
-        - {when: "not any(lines[] matches 'OOMKilled')", goto: not_oom}
-      otherwise: escalate
-      cautions:
-        - "容器 OOMKilled 是 cgroup 内存超限，与宿主内存是否充足无关——宿主可能一片空闲，容器照样因超自己的 limit 被杀"
-        - "看的是 lastState.terminated.reason=OOMKilled；单看 Pod 状态可能只显示 CrashLoopBackOff，要往里挖一层"
-    - id: not_oom
-      type: done
-      summary: "未见 OOMKilled 记录。若 Pod 异常，回到 k8s/workload/crashloop 按退出码排查。"
-    - id: check_limit_set
-      type: check
-      title: 判断是 limit 过低还是应用泄漏
-      run: {kubectl: "kubectl -n {{ns}} get pod {{pod}} -o jsonpath='{.spec.containers[*].resources.limits.memory}{\"|\"}{.spec.containers[*].resources.requests.memory}'"}
-      branch:
-        - {when: "not any(lines[] matches '[0-9]')", goto: no_limit_exit}
-      otherwise: limit_analysis_exit
-      cautions:
-        - "先分清：limit 设得太小(正常应用被误杀) vs 应用真泄漏(多大 limit 都会被吃满)。看内存增长曲线：稳态高=limit 小，持续爬升=泄漏"
-    - id: no_limit_exit
-      type: done
-      summary: "容器未设 memory limit 却被 OOMKilled——说明是节点级内存压力，kubelet 按 QoS 驱逐/杀了它(BestEffort 最先死)。为容器设置合理的 requests/limits 提升 QoS，并排查节点内存超卖。"
-    - id: limit_analysis_exit
-      type: done
-      summary: >-
-        容器设了 limit 且被 OOMKilled。方向：①对比历史内存曲线判断是 limit 过低还是泄漏；
-        ②limit 过低→调高 limits.memory 并同步 requests；③持续爬升→应用内存泄漏，抓 heap dump 交研发。
-        注意 JVM 等需感知 cgroup limit(如 -XX:MaxRAMPercentage)，否则会按宿主内存分配堆而超 limit。
-    - id: escalate
-      type: escalate
-      summary: "打包升级：lastState.reason、resources 配置、内存使用历史、QoS class、节点内存状态。"
+  - id: confirm_oom
+    type: check
+    title: 确认 OOMKilled 并读取 limit
+    run: {kubectl: 'kubectl -n {{ns}} get pod {{pod}} -o jsonpath=''{.status.containerStatuses[*].lastState.terminated.reason}{"|"}{.spec.containers[*].resources.limits.memory}'''}
+    parser: json/k8s-container-state-v1
+    branch:
+    - {when: 'any(lines[] matches ''OOMKilled'')', goto: check_limit_set}
+    - {when: 'not any(lines[] matches ''OOMKilled'')', goto: not_oom}
+    otherwise: escalate
+    cautions: [容器 OOMKilled 是 cgroup 内存超限，与宿主内存是否充足无关——宿主可能一片空闲，容器照样因超自己的 limit 被杀, 看的是 lastState.terminated.reason=OOMKilled；单看
+        Pod 状态可能只显示 CrashLoopBackOff，要往里挖一层]
+  - {id: not_oom, type: done, summary: 未见 OOMKilled 记录。若 Pod 异常，回到 k8s/workload/crashloop 按退出码排查。}
+  - id: check_limit_set
+    type: check
+    title: 判断是 limit 过低还是应用泄漏
+    run: {kubectl: 'kubectl -n {{ns}} get pod {{pod}} -o jsonpath=''{.spec.containers[*].resources.limits.memory}{"|"}{.spec.containers[*].resources.requests.memory}'''}
+    branch:
+    - {when: 'not any(lines[] matches ''[0-9]'')', goto: no_limit_exit}
+    otherwise: limit_analysis_exit
+    cautions: [先分清：limit 设得太小(正常应用被误杀) vs 应用真泄漏(多大 limit 都会被吃满)。看内存增长曲线：稳态高=limit 小，持续爬升=泄漏]
+  - {id: no_limit_exit, type: done, summary: 容器未设 memory limit 却被 OOMKilled——说明是节点级内存压力，kubelet 按 QoS
+      驱逐/杀了它(BestEffort 最先死)。为容器设置合理的 requests/limits 提升 QoS，并排查节点内存超卖。}
+  - {id: limit_analysis_exit, type: done, summary: '容器设了 limit 且被 OOMKilled。方向：①对比历史内存曲线判断是 limit 过低还是泄漏；
+      ②limit 过低→调高 limits.memory 并同步 requests；③持续爬升→应用内存泄漏，抓 heap dump 交研发。 注意 JVM 等需感知 cgroup limit(如
+      -XX:MaxRAMPercentage)，否则会按宿主内存分配堆而超 limit。'}
+  - {id: escalate, type: escalate, summary: 打包升级：lastState.reason、resources 配置、内存使用历史、QoS class、节点内存状态。}
 tests:
-  - {scenario: tests/oom-limit-too-low.yaml, expect_path: [confirm_oom, check_limit_set, limit_analysis_exit]}
-  - {scenario: tests/oom-no-limit.yaml, expect_path: [confirm_oom, check_limit_set, no_limit_exit]}
-feedback:
-  ask: "OOMKilled 原因定位了吗？"
+- scenario: tests/oom-limit-too-low.yaml
+  expect_path: [confirm_oom, check_limit_set, limit_analysis_exit]
+- scenario: tests/oom-no-limit.yaml
+  expect_path: [confirm_oom, check_limit_set, no_limit_exit]
+feedback: {ask: OOMKilled 原因定位了吗？}

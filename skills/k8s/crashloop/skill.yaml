@@ -6,81 +6,74 @@ metadata:
   taxonomy: k8s/workload/crashloop
   version: 0.1.0
   maturity: draft
-  platforms: [{platform: kubernetes}]
+  platforms:
+  - {platform: kubernetes}
   authors: [opsagent-core]
   license: Apache-2.0
   provenance: {generated_by: claude-opus-4-8}
-  expires_review: "2027-07-01"
+  expires_review: '2027-07-01'
+  params:
+  - {name: ns, source: alert}
+  - {name: pod, source: alert}
 requirements:
   capability_level: read
   connectors: [kubectl]
   facts: [k8s.context]
 discovery:
-  - id: pod_state
-    run: {kubectl: "kubectl -n {{ns}} get pod {{pod}} -o json"}
-    parser: json/k8s-pod-v1
+- id: pod_state
+  run: {kubectl: 'kubectl -n {{ns}} get pod {{pod}} -o json'}
+  parser: json/k8s-pod-v1
 tree:
   entry: read_exit
   nodes:
-    - id: read_exit
-      type: check
-      title: 读取上次退出原因与退出码
-      run: {kubectl: "kubectl -n {{ns}} get pod {{pod}} -o jsonpath='{.status.containerStatuses[*].lastState.terminated.exitCode}{\" \"}{.status.containerStatuses[*].lastState.terminated.reason}'"}
-      parser: json/k8s-container-state-v1
-      branch:
-        - {when: "exit_code == 137", goto: oom_or_killed}
-        - {when: "exit_code == 143", goto: sigterm_exit}
-        - {when: "exit_code == 1 or exit_code == 2", goto: read_app_logs}
-        - {when: "exit_code == 0", goto: premature_exit}
-      otherwise: read_app_logs
-      cautions:
-        - "退出码是第一线索：137=被 SIGKILL(常为 OOM)，143=SIGTERM，非0=应用自身错误，0=进程正常退出但 K8s 期望它常驻(命令写错)"
-        - "看的是 lastState.terminated（上一次挂的原因），不是 currentState——CrashLoop 时容器正在重启间隙"
-    - id: oom_or_killed
-      type: check
-      title: 退出码 137——区分 OOM 还是被主动杀
-      run: {kubectl: "kubectl -n {{ns}} get pod {{pod}} -o jsonpath='{.status.containerStatuses[*].lastState.terminated.reason}'"}
-      branch:
-        - {when: "any(lines[] matches 'OOMKilled')", goto: oom_exit}
-      otherwise: liveness_kill_exit
-    - id: oom_exit
-      type: done
-      summary: "容器 OOMKilled(超过 memory limit)。方向：调高 resources.limits.memory，或排查应用内存泄漏。转 k8s/workload/oomkilled 深入。"
-    - id: liveness_kill_exit
-      type: done
-      summary: "137 但非 OOM，多为 liveness probe 失败导致 kubelet 杀容器重启。检查 livenessProbe 配置是否过严(初始延迟太短/超时太紧)、应用启动是否慢于探针容忍。"
-    - id: sigterm_exit
-      type: done
-      summary: "收到 SIGTERM 后退出(143)。检查是否被驱逐/滚动更新，或应用未正确处理优雅关闭。若非预期，查 events 看谁发的信号。"
-    - id: premature_exit
-      type: done
-      summary: "进程退出码 0 但 Pod 期望常驻——通常是启动命令/entrypoint 执行完就结束了(如误把一次性脚本当常驻服务)。核对 command/args 与镜像 CMD。"
-    - id: read_app_logs
-      type: check
-      title: 读取应用日志定位崩溃原因
-      run: {kubectl: "kubectl -n {{ns}} logs {{pod}} --previous --tail=50"}
-      parser: text/pod-logs-v1
-      branch:
-        - {when: "any(lines[] matches 'panic|fatal|exception|traceback')", goto: app_error_exit}
-        - {when: "any(lines[] matches 'connection refused|timeout|no such host')", goto: dependency_exit}
-        - {when: "any(lines[] matches 'permission denied|config|not found')", goto: config_exit}
-      otherwise: escalate
-      cautions:
-        - "关键是 --previous：崩溃的是上一个容器实例，不加 --previous 看到的是新实例(可能还没崩或没日志)"
-    - id: app_error_exit
-      type: done
-      summary: "应用代码级错误(panic/exception)。日志已定位崩溃栈，交研发修复。运维侧确认非环境问题(配置/依赖)即可。"
-    - id: dependency_exit
-      type: done
-      summary: "启动时连不上依赖(数据库/下游服务)导致崩溃。核对依赖服务是否就绪、Service/DNS 是否可解析、NetworkPolicy 是否放行。可能需要 initContainer 等待依赖或应用加重试。"
-    - id: config_exit
-      type: done
-      summary: "配置/权限问题导致启动失败。核对 ConfigMap/Secret 是否挂载正确、文件路径、运行用户权限(securityContext)、只读文件系统限制。"
-    - id: escalate
-      type: escalate
-      summary: "打包升级：退出码与 reason、--previous 应用日志、events、resources 配置、探针配置。"
+  - id: read_exit
+    type: check
+    title: 读取上次退出原因与退出码
+    run: {kubectl: 'kubectl -n {{ns}} get pod {{pod}} -o jsonpath=''{.status.containerStatuses[*].lastState.terminated.exitCode}{"
+        "}{.status.containerStatuses[*].lastState.terminated.reason}'''}
+    parser: json/k8s-container-state-v1
+    branch:
+    - {when: exit_code == 137, goto: oom_or_killed}
+    - {when: exit_code == 143, goto: sigterm_exit}
+    - {when: exit_code == 1 or exit_code == 2, goto: read_app_logs}
+    - {when: exit_code == 0, goto: premature_exit}
+    otherwise: read_app_logs
+    cautions: [退出码是第一线索：137=被 SIGKILL(常为 OOM)，143=SIGTERM，非0=应用自身错误，0=进程正常退出但 K8s 期望它常驻(命令写错), 看的是 lastState.terminated（上一次挂的原因），不是
+        currentState——CrashLoop 时容器正在重启间隙]
+  - id: oom_or_killed
+    type: check
+    title: 退出码 137——区分 OOM 还是被主动杀
+    run: {kubectl: 'kubectl -n {{ns}} get pod {{pod}} -o jsonpath=''{.status.containerStatuses[*].lastState.terminated.reason}'''}
+    branch:
+    - {when: 'any(lines[] matches ''OOMKilled'')', goto: oom_exit}
+    otherwise: liveness_kill_exit
+  - {id: oom_exit, type: done, summary: 容器 OOMKilled(超过 memory limit)。方向：调高 resources.limits.memory，或排查应用内存泄漏。转
+      k8s/workload/oomkilled 深入。}
+  - {id: liveness_kill_exit, type: done, summary: 137 但非 OOM，多为 liveness probe 失败导致 kubelet 杀容器重启。检查 livenessProbe
+      配置是否过严(初始延迟太短/超时太紧)、应用启动是否慢于探针容忍。}
+  - {id: sigterm_exit, type: done, summary: 收到 SIGTERM 后退出(143)。检查是否被驱逐/滚动更新，或应用未正确处理优雅关闭。若非预期，查 events
+      看谁发的信号。}
+  - {id: premature_exit, type: done, summary: 进程退出码 0 但 Pod 期望常驻——通常是启动命令/entrypoint 执行完就结束了(如误把一次性脚本当常驻服务)。核对
+      command/args 与镜像 CMD。}
+  - id: read_app_logs
+    type: check
+    title: 读取应用日志定位崩溃原因
+    run: {kubectl: 'kubectl -n {{ns}} logs {{pod}} --previous --tail=50'}
+    parser: text/pod-logs-v1
+    branch:
+    - {when: 'any(lines[] matches ''panic|fatal|exception|traceback'')', goto: app_error_exit}
+    - {when: 'any(lines[] matches ''connection refused|timeout|no such host'')', goto: dependency_exit}
+    - {when: 'any(lines[] matches ''permission denied|config|not found'')', goto: config_exit}
+    otherwise: escalate
+    cautions: [关键是 --previous：崩溃的是上一个容器实例，不加 --previous 看到的是新实例(可能还没崩或没日志)]
+  - {id: app_error_exit, type: done, summary: 应用代码级错误(panic/exception)。日志已定位崩溃栈，交研发修复。运维侧确认非环境问题(配置/依赖)即可。}
+  - {id: dependency_exit, type: done, summary: 启动时连不上依赖(数据库/下游服务)导致崩溃。核对依赖服务是否就绪、Service/DNS 是否可解析、NetworkPolicy
+      是否放行。可能需要 initContainer 等待依赖或应用加重试。}
+  - {id: config_exit, type: done, summary: 配置/权限问题导致启动失败。核对 ConfigMap/Secret 是否挂载正确、文件路径、运行用户权限(securityContext)、只读文件系统限制。}
+  - {id: escalate, type: escalate, summary: 打包升级：退出码与 reason、--previous 应用日志、events、resources 配置、探针配置。}
 tests:
-  - {scenario: tests/crashloop-oom.yaml, expect_path: [read_exit, oom_or_killed, oom_exit]}
-  - {scenario: tests/crashloop-app-error.yaml, expect_path: [read_exit, read_app_logs, app_error_exit]}
-feedback:
-  ask: "CrashLoop 根因定位了吗？"
+- scenario: tests/crashloop-oom.yaml
+  expect_path: [read_exit, oom_or_killed, oom_exit]
+- scenario: tests/crashloop-app-error.yaml
+  expect_path: [read_exit, read_app_logs, app_error_exit]
+feedback: {ask: CrashLoop 根因定位了吗？}

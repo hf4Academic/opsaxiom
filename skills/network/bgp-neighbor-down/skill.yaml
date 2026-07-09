@@ -17,6 +17,10 @@ metadata:
     - {device: junos}
   authors: [opsagent-core]
   license: Apache-2.0
+  params:
+    - {name: peer_ip, source: alert, desc: 告警指向的 BGP 邻居地址}
+    - {name: update_source, source: derived, desc: 本端 BGP update-source 地址(引擎从会话配置推断)}
+    - {name: intf, source: derived, desc: 到邻居的出接口(由可达性/路由推断)}
   provenance:
     generated_by: claude-fable-5
     reviewed_by: []
@@ -66,9 +70,9 @@ tree:
     type: check
     title: 检查到邻居的 TCP/IP 可达性
     run:
-      cisco_ios: "ping {{peer_ip}} source {{update_source|local_bgp_ip}} repeat 5"
-      huawei_vrp: "ping -a {{update_source|local_bgp_ip}} -c 5 {{peer_ip}}"
-      junos: "ping {{peer_ip}} source {{update_source|local_bgp_ip}} count 5"
+      cisco_ios: "ping {{peer_ip}} source {{update_source}} repeat 5"
+      huawei_vrp: "ping -a {{update_source}} -c 5 {{peer_ip}}"
+      junos: "ping {{peer_ip}} source {{update_source}} count 5"
     branch:
       - {when: "loss_pct == 100", goto: check_interface}
       - {when: "loss_pct == 0", goto: check_tcp_179}
@@ -134,6 +138,7 @@ tree:
     type: ask
     title: 是否尝试软复位会话
     question: "各项检查未见硬性故障，可能是会话卡死。软复位（不撤路由通告的前提下重协商）通常无损，是否执行？"
+    binds: null
     options:
       - {label: "执行软复位", goto: soft_reset}
       - {label: "不执行，升级人工", goto: escalate}
@@ -182,7 +187,7 @@ tree:
         huawei_vrp: "display bgp peer {{peer_ip}}"
         junos: "show bgp summary | match {{peer_ip}}"
       parser: ntc/{{device.platform}}/bgp-summary
-      expect: "state == 'Established' and prefixes >= baseline * 0.9"
+      assert: "state == 'Established' and prefixes >= baseline * 0.9"
       on_fail: escalate
     goto: done_ok
 

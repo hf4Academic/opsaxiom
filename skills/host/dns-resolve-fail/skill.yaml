@@ -6,73 +6,68 @@ metadata:
   taxonomy: host/network-stack/dns-resolve-fail
   version: 0.1.0
   maturity: draft
-  platforms: [{os: linux}]
+  platforms:
+  - {os: linux}
   authors: [opsagent-core]
   license: Apache-2.0
   provenance: {generated_by: claude-opus-4-8}
-  expires_review: "2027-07-01"
+  expires_review: '2027-07-01'
+  params:
+  - {name: domain, source: alert}
 requirements:
   capability_level: read
   connectors: [ssh]
   facts: [os.family]
 discovery:
-  - id: resolv
-    run: {linux: "cat /etc/resolv.conf; cat /etc/nsswitch.conf | grep hosts"}
-    parser: text/resolv-v1
+- id: resolv
+  run: {linux: cat /etc/resolv.conf; cat /etc/nsswitch.conf | grep hosts}
+  parser: text/resolv-v1
 tree:
   entry: reproduce
   nodes:
-    - id: reproduce
-      type: check
-      title: 复现并区分解析层次
-      run: {linux: "getent hosts {{domain}} || echo GETENT_FAIL; nslookup {{domain}} 2>&1 | tail -5"}
-      branch:
-        - {when: "any(lines[] matches 'GETENT_FAIL')", goto: check_server}
-        - {when: "not any(lines[] matches 'GETENT_FAIL')", goto: nsswitch_exit}
-      otherwise: check_server
-      cautions:
-        - "getent 走完整 nsswitch(含 /etc/hosts、mdns 等)，nslookup/dig 只问 DNS。两者结果不同能定位是 DNS 还是 hosts/缓存问题"
-        - "先确认是全解析失败还是仅某域名：某个域名解析不了 vs 所有域名都不行，根因完全不同"
-    - id: nsswitch_exit
-      type: done
-      summary: "getent 能解析但应用报错，可能是应用自带 DNS 缓存/解析库、或 /etc/hosts 有旧记录覆盖。核对 hosts 文件与应用侧缓存。"
-    - id: check_server
-      type: check
-      title: 检查配置的 DNS 服务器是否可达可用
-      run: {linux: "grep nameserver /etc/resolv.conf | awk '{print $2}' | head -1 | xargs -I{} sh -c 'nslookup {{domain}} {} 2>&1 | tail -3; ping -c2 -W1 {}'"}
-      branch:
-        - {when: "any(lines[] matches '100% packet loss|unreachable')", goto: server_unreachable_exit}
-        - {when: "any(lines[] matches 'SERVFAIL|REFUSED|timed out')", goto: server_bad_exit}
-        - {when: "any(lines[] matches 'NXDOMAIN')", goto: nxdomain_exit}
-      otherwise: check_resolv_sanity
-      cautions:
-        - "systemd-resolved 环境下 resolv.conf 常指向 127.0.0.53，真正的上游要看 resolvectl status"
-    - id: server_unreachable_exit
-      type: done
-      summary: "配置的 DNS 服务器不可达(ping 不通)。核对网络连通性(可能是防火墙/路由问题，转 network 域)、或更换为可用 DNS。"
-    - id: server_bad_exit
-      type: done
-      summary: "DNS 服务器返回 SERVFAIL/REFUSED/超时——服务器本身有问题或不允许本机查询。联系 DNS 管理员，或临时切换上游 DNS 验证。"
-    - id: nxdomain_exit
-      type: done
-      summary: "DNS 明确返回 NXDOMAIN(域名不存在)。这是权威应答：核对域名拼写、该记录是否真的存在、是否内部域名但用了外部 DNS。"
-    - id: check_resolv_sanity
-      type: check
-      title: 检查 resolv.conf 合理性
-      run: {linux: "cat /etc/resolv.conf"}
-      branch:
-        - {when: "not any(lines[] matches 'nameserver')", goto: no_nameserver_exit}
-      otherwise: escalate
-      cautions:
-        - "resolv.conf 可能被 NetworkManager/systemd-resolved/dhclient 动态覆盖——改了不生效多半是被托管重写了"
-    - id: no_nameserver_exit
-      type: done
-      summary: "resolv.conf 里没有有效 nameserver。核对是谁管理它(NetworkManager/resolved/dhcp)，从源头修复而非直接改文件(会被覆盖)。"
-    - id: escalate
-      type: escalate
-      summary: "打包升级：resolv.conf、nsswitch hosts 行、getent/nslookup 结果、上游 DNS 连通性。"
+  - id: reproduce
+    type: check
+    title: 复现并区分解析层次
+    run: {linux: 'getent hosts {{domain}} || echo GETENT_FAIL; nslookup {{domain}} 2>&1 | tail -5'}
+    branch:
+    - {when: 'any(lines[] matches ''GETENT_FAIL'')', goto: check_server}
+    - {when: 'not any(lines[] matches ''GETENT_FAIL'')', goto: nsswitch_exit}
+    otherwise: check_server
+    cautions: [getent 走完整 nsswitch(含 /etc/hosts、mdns 等)，nslookup/dig 只问 DNS。两者结果不同能定位是 DNS 还是 hosts/缓存问题,
+      先确认是全解析失败还是仅某域名：某个域名解析不了 vs 所有域名都不行，根因完全不同]
+  - {id: nsswitch_exit, type: done, summary: getent 能解析但应用报错，可能是应用自带 DNS 缓存/解析库、或 /etc/hosts 有旧记录覆盖。核对
+      hosts 文件与应用侧缓存。}
+  - id: check_server
+    type: check
+    title: 检查配置的 DNS 服务器是否可达可用
+    run: {linux: 'grep nameserver /etc/resolv.conf | awk ''{print $2}'' | head -1 | xargs -I{} sh -c ''nslookup
+        {{domain}} {} 2>&1 | tail -3; ping -c2 -W1 {}'''}
+    branch:
+    - {when: 'any(lines[] matches ''100% packet loss|unreachable'')', goto: server_unreachable_exit}
+    - {when: 'any(lines[] matches ''SERVFAIL|REFUSED|timed out'')', goto: server_bad_exit}
+    - {when: 'any(lines[] matches ''NXDOMAIN'')', goto: nxdomain_exit}
+    otherwise: check_resolv_sanity
+    cautions: [systemd-resolved 环境下 resolv.conf 常指向 127.0.0.53，真正的上游要看 resolvectl status]
+  - {id: server_unreachable_exit, type: done, summary: 配置的 DNS 服务器不可达(ping 不通)。核对网络连通性(可能是防火墙/路由问题，转 network
+      域)、或更换为可用 DNS。}
+  - {id: server_bad_exit, type: done, summary: DNS 服务器返回 SERVFAIL/REFUSED/超时——服务器本身有问题或不允许本机查询。联系 DNS
+      管理员，或临时切换上游 DNS 验证。}
+  - {id: nxdomain_exit, type: done, summary: DNS 明确返回 NXDOMAIN(域名不存在)。这是权威应答：核对域名拼写、该记录是否真的存在、是否内部域名但用了外部
+      DNS。}
+  - id: check_resolv_sanity
+    type: check
+    title: 检查 resolv.conf 合理性
+    run: {linux: cat /etc/resolv.conf}
+    branch:
+    - {when: 'not any(lines[] matches ''nameserver'')', goto: no_nameserver_exit}
+    otherwise: escalate
+    cautions: [resolv.conf 可能被 NetworkManager/systemd-resolved/dhclient 动态覆盖——改了不生效多半是被托管重写了]
+  - {id: no_nameserver_exit, type: done, summary: resolv.conf 里没有有效 nameserver。核对是谁管理它(NetworkManager/resolved/dhcp)，从源头修复而非直接改文件(会被覆盖)。}
+  - {id: escalate, type: escalate, summary: 打包升级：resolv.conf、nsswitch hosts 行、getent/nslookup 结果、上游 DNS
+      连通性。}
 tests:
-  - {scenario: tests/dns-server-down.yaml, expect_path: [reproduce, check_server, server_unreachable_exit]}
-  - {scenario: tests/dns-nxdomain.yaml, expect_path: [reproduce, check_server, nxdomain_exit]}
-feedback:
-  ask: "DNS 解析恢复了吗？"
+- scenario: tests/dns-server-down.yaml
+  expect_path: [reproduce, check_server, server_unreachable_exit]
+- scenario: tests/dns-nxdomain.yaml
+  expect_path: [reproduce, check_server, nxdomain_exit]
+feedback: {ask: DNS 解析恢复了吗？}

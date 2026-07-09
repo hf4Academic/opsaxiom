@@ -6,103 +6,87 @@ metadata:
   taxonomy: host/system/systemd-unit-failed
   version: 0.1.0
   maturity: draft
-  platforms: [{os: linux, family: [debian, rhel, suse]}]
+  platforms:
+  - os: linux
+    family: [debian, rhel, suse]
   authors: [opsagent-core]
   license: Apache-2.0
   provenance: {generated_by: claude-opus-4-8}
-  expires_review: "2027-07-01"
+  expires_review: '2027-07-01'
+  params:
+  - {name: unit, source: alert}
 requirements:
   capability_level: low_risk_write
   connectors: [ssh]
   facts: [os.family]
 discovery:
-  - id: unit_status
-    run: {linux: "systemctl status {{unit}} --no-pager -l | head -30"}
-    parser: text/systemctl-status-v1
+- id: unit_status
+  run: {linux: 'systemctl status {{unit}} --no-pager -l | head -30'}
+  parser: text/systemctl-status-v1
 tree:
   entry: read_state
   nodes:
-    - id: read_state
-      type: check
-      title: 读取单元状态与失败原因
-      run: {linux: "systemctl show {{unit}} -p ActiveState,Result,ExecMainStatus,Restart"}
-      parser: json/systemctl-show-v1
-      branch:
-        - {when: "result == 'exit-code'", goto: read_logs}
-        - {when: "result == 'timeout'", goto: timeout_exit}
-        - {when: "result == 'oom-kill'", goto: oom_exit}
-        - {when: "active_state == 'active'", goto: already_ok}
-      otherwise: read_logs
-      cautions:
-        - "先看 Result 再动手：exit-code 是程序自己退了，timeout 是启动超时，oom-kill 要转内存排查"
-        - "别急着 restart：如果是配置错误，重启只会再失败一次，先看日志定位根因"
-    - id: already_ok
-      type: done
-      summary: "服务当前 active，可能已恢复或告警延迟。核对 systemctl 是否有历史失败计数(NRestarts)。"
-    - id: timeout_exit
-      type: done
-      summary: "启动超时。检查 TimeoutStartSec 是否过短、依赖服务(After/Requires)是否就绪、是否卡在网络/挂载等待。日志里看卡在哪一步。"
-    - id: oom_exit
-      type: done
-      summary: "服务被 OOM 杀死。请转 host/memory/oom-kill，或调整该单元的 MemoryMax/MemoryHigh。"
-    - id: read_logs
-      type: check
-      title: 从 journal 读取失败细节
-      run: {linux: "journalctl -u {{unit}} --no-pager -n 40 -p err..emerg"}
-      parser: text/journal-v1
-      branch:
-        - {when: "any(lines[] matches 'Permission denied|EACCES')", goto: perm_exit}
-        - {when: "any(lines[] matches 'No such file|not found|cannot open')", goto: missing_exit}
-        - {when: "any(lines[] matches 'Address already in use|bind')", goto: port_exit}
-        - {when: "any(lines[] matches 'config|parse|syntax|invalid')", goto: config_exit}
-      otherwise: try_restart
-      cautions:
-        - "journal 里的第一条 error 通常是根因，后面的往往是连锁反应，从前往后读"
-    - id: perm_exit
-      type: done
-      summary: "权限问题(EACCES)。核对运行用户(User=)、文件/目录属主、SELinux/AppArmor 上下文。"
-    - id: missing_exit
-      type: done
-      summary: "缺文件/路径。核对 ExecStart 路径、WorkingDirectory、依赖的配置或数据文件是否存在。"
-    - id: port_exit
-      type: done
-      summary: "端口被占用(Address already in use)。用 ss -ltnp 找占用进程；确认是否上一个实例未退干净或端口冲突。"
-    - id: config_exit
-      type: done
-      summary: "配置解析错误。核对最近的配置变更；多数服务有 -t/--test 校验子命令，先离线验证配置再启动。"
-    - id: try_restart
-      type: action
-      title: 排除配置类错误后尝试重启一次
-      risk: low
-      preflight:
-        blast_radius: "仅目标服务 {{unit}}；若为无状态服务重启通常无损"
-        watch:
-          - {run: {linux: "systemctl is-active {{unit}}"}, expect: "active"}
-        abort_if:
-          - "重启后再次进入 failed"
-        approval: required
-      dryrun:
-        run: {linux: "systemd-analyze verify {{unit}} 2>&1 | head"}
-        interpret: "先做单元文件语法校验，无误再重启"
-      run: {linux: "systemctl restart {{unit}}"}
-      rollback:
-        type: service_restore
-        run: {linux: "systemctl stop {{unit}}"}
-      verify:
-        run: {linux: "systemctl is-active {{unit}}"}
-        expect: "active"
-        on_fail: escalate
-      cautions:
-        - "仅在日志未指向明确配置/权限错误时才走重启——盲目重启掩盖真因还可能触发 restart 风暴"
-      goto: done_ok
-    - id: done_ok
-      type: done
-      summary: "服务已恢复 active。若 NRestarts 计数偏高，排查是否存在周期性 crash 需要研发介入。"
-    - id: escalate
-      type: escalate
-      summary: "打包升级：systemctl show、journalctl 错误、单元文件、依赖树。"
+  - id: read_state
+    type: check
+    title: 读取单元状态与失败原因
+    run: {linux: 'systemctl show {{unit}} -p ActiveState,Result,ExecMainStatus,Restart'}
+    parser: json/systemctl-show-v1
+    branch:
+    - {when: result == 'exit-code', goto: read_logs}
+    - {when: result == 'timeout', goto: timeout_exit}
+    - {when: result == 'oom-kill', goto: oom_exit}
+    - {when: active_state == 'active', goto: already_ok}
+    otherwise: read_logs
+    cautions: [先看 Result 再动手：exit-code 是程序自己退了，timeout 是启动超时，oom-kill 要转内存排查, 别急着 restart：如果是配置错误，重启只会再失败一次，先看日志定位根因]
+  - {id: already_ok, type: done, summary: 服务当前 active，可能已恢复或告警延迟。核对 systemctl 是否有历史失败计数(NRestarts)。}
+  - {id: timeout_exit, type: done, summary: 启动超时。检查 TimeoutStartSec 是否过短、依赖服务(After/Requires)是否就绪、是否卡在网络/挂载等待。日志里看卡在哪一步。}
+  - {id: oom_exit, type: done, summary: 服务被 OOM 杀死。请转 host/memory/oom-kill，或调整该单元的 MemoryMax/MemoryHigh。}
+  - id: read_logs
+    type: check
+    title: 从 journal 读取失败细节
+    run: {linux: 'journalctl -u {{unit}} --no-pager -n 40 -p err..emerg'}
+    parser: text/journal-v1
+    branch:
+    - {when: 'any(lines[] matches ''Permission denied|EACCES'')', goto: perm_exit}
+    - {when: 'any(lines[] matches ''No such file|not found|cannot open'')', goto: missing_exit}
+    - {when: 'any(lines[] matches ''Address already in use|bind'')', goto: port_exit}
+    - {when: 'any(lines[] matches ''config|parse|syntax|invalid'')', goto: config_exit}
+    otherwise: try_restart
+    cautions: [journal 里的第一条 error 通常是根因，后面的往往是连锁反应，从前往后读]
+  - {id: perm_exit, type: done, summary: 权限问题(EACCES)。核对运行用户(User=)、文件/目录属主、SELinux/AppArmor 上下文。}
+  - {id: missing_exit, type: done, summary: 缺文件/路径。核对 ExecStart 路径、WorkingDirectory、依赖的配置或数据文件是否存在。}
+  - {id: port_exit, type: done, summary: 端口被占用(Address already in use)。用 ss -ltnp 找占用进程；确认是否上一个实例未退干净或端口冲突。}
+  - {id: config_exit, type: done, summary: 配置解析错误。核对最近的配置变更；多数服务有 -t/--test 校验子命令，先离线验证配置再启动。}
+  - id: try_restart
+    type: action
+    title: 排除配置类错误后尝试重启一次
+    risk: low
+    preflight:
+      blast_radius: 仅目标服务 {{unit}}；若为无状态服务重启通常无损
+      watch:
+      - run: {linux: 'systemctl is-active {{unit}}'}
+        expect: active
+      abort_if: [重启后再次进入 failed]
+      approval: required
+    dryrun:
+      run: {linux: 'systemd-analyze verify {{unit}} 2>&1 | head'}
+      interpret: 先做单元文件语法校验，无误再重启
+    run: {linux: 'systemctl restart {{unit}}'}
+    rollback:
+      type: service_restore
+      run: {linux: 'systemctl stop {{unit}}'}
+    verify:
+      run: {linux: 'systemctl is-active {{unit}}'}
+      on_fail: escalate
+      assert: active
+    cautions: [仅在日志未指向明确配置/权限错误时才走重启——盲目重启掩盖真因还可能触发 restart 风暴]
+    goto: done_ok
+  - {id: done_ok, type: done, summary: 服务已恢复 active。若 NRestarts 计数偏高，排查是否存在周期性 crash 需要研发介入。}
+  - {id: escalate, type: escalate, summary: 打包升级：systemctl show、journalctl 错误、单元文件、依赖树。}
 tests:
-  - {scenario: tests/config-error.yaml, expect_path: [read_state, read_logs, config_exit]}
-  - {scenario: tests/transient-restart-ok.yaml, expect_path: [read_state, read_logs, try_restart, done_ok], rollback_assert: true}
-feedback:
-  ask: "服务起来了吗？"
+- scenario: tests/config-error.yaml
+  expect_path: [read_state, read_logs, config_exit]
+- scenario: tests/transient-restart-ok.yaml
+  expect_path: [read_state, read_logs, try_restart, done_ok]
+  rollback_assert: true
+feedback: {ask: 服务起来了吗？}

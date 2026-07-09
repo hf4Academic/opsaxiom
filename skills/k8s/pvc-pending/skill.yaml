@@ -6,53 +6,53 @@ metadata:
   taxonomy: k8s/storage/pvc-pending
   version: 0.1.0
   maturity: draft
-  platforms: [{platform: kubernetes}]
+  platforms:
+  - {platform: kubernetes}
   authors: [opsagent-core]
   license: Apache-2.0
   provenance: {generated_by: claude-opus-4-8}
-  expires_review: "2027-07-01"
+  expires_review: '2027-07-01'
+  params:
+  - {name: ns, source: alert}
+  - {name: pvc, source: alert}
 requirements:
   capability_level: read
   connectors: [kubectl]
   facts: [k8s.context]
 discovery:
-  - id: pvc_state
-    run: {kubectl: "kubectl -n {{ns}} describe pvc {{pvc}} | grep -A5 -iE 'Events|StorageClass|Status'"}
-    parser: text/k8s-events-v1
+- id: pvc_state
+  run: {kubectl: 'kubectl -n {{ns}} describe pvc {{pvc}} | grep -A5 -iE ''Events|StorageClass|Status'''}
+  parser: text/k8s-events-v1
 tree:
   entry: read_pvc_event
   nodes:
-    - id: read_pvc_event
-      type: check
-      title: 读取 PVC 事件与 StorageClass
-      run: {kubectl: "kubectl -n {{ns}} get pvc {{pvc}} -o jsonpath='{.spec.storageClassName}|{.status.phase}'; kubectl -n {{ns}} get events --field-selector involvedObject.name={{pvc}} | tail -3"}
-      parser: text/k8s-events-v1
-      branch:
-        - {when: "any(lines[] matches 'no persistent volumes available|no volume plugin')", goto: no_pv_exit}
-        - {when: "any(lines[] matches 'storageclass.*not found|no storage class')", goto: sc_missing_exit}
-        - {when: "any(lines[] matches 'provisioning failed|ProvisioningFailed')", goto: provisioner_exit}
-        - {when: "any(lines[] matches 'waiting for.*consumer|WaitForFirstConsumer')", goto: wait_consumer_exit}
-      otherwise: escalate
-      cautions:
-        - "先分清动态供给还是静态供给：有 StorageClass=动态(provisioner 建 PV)，无 SC=静态(需管理员预建 PV 匹配)。两者卡住的原因完全不同"
-        - "PVC 的 accessMode 与 size 必须能被满足——RWX 卷不是所有存储都支持，size 超过后端配额也会失败"
-    - id: no_pv_exit
-      type: done
-      summary: "静态供给下无匹配的可用 PV。核对是否有 Available 状态的 PV 满足 PVC 的 accessMode/size/storageClassName；PV 与 PVC 的 selector/class 是否匹配。需管理员创建匹配的 PV。"
-    - id: sc_missing_exit
-      type: done
-      summary: "引用的 StorageClass 不存在。核对 PVC.spec.storageClassName 拼写、集群是否安装了该 SC(kubectl get sc)、是否该用默认 SC(留空)。"
-    - id: provisioner_exit
-      type: done
-      summary: "动态供给失败(ProvisioningFailed)。查 provisioner/CSI driver 的 Pod 日志(kube-system 或 csi 命名空间)。常见：云盘配额耗尽、可用区不匹配、CSI driver 异常、后端存储不可达。"
-    - id: wait_consumer_exit
-      type: done
-      summary: "正常现象：StorageClass 的 volumeBindingMode=WaitForFirstConsumer，PVC 会等到有 Pod 使用它才绑定(为了拓扑感知调度)。若 Pod 也 Pending，问题在调度侧(转 pending-unschedulable)，PVC 会随 Pod 调度成功而绑定。"
-    - id: escalate
-      type: escalate
-      summary: "打包升级：PVC describe、StorageClass 配置、provisioner/CSI Pod 日志、可用 PV 列表。"
+  - id: read_pvc_event
+    type: check
+    title: 读取 PVC 事件与 StorageClass
+    run: {kubectl: 'kubectl -n {{ns}} get pvc {{pvc}} -o jsonpath=''{.spec.storageClassName}|{.status.phase}'';
+        kubectl -n {{ns}} get events --field-selector involvedObject.name={{pvc}} | tail -3'}
+    parser: text/k8s-events-v1
+    branch:
+    - {when: 'any(lines[] matches ''no persistent volumes available|no volume plugin'')', goto: no_pv_exit}
+    - {when: 'any(lines[] matches ''storageclass.*not found|no storage class'')', goto: sc_missing_exit}
+    - {when: 'any(lines[] matches ''provisioning failed|ProvisioningFailed'')', goto: provisioner_exit}
+    - {when: 'any(lines[] matches ''waiting for.*consumer|WaitForFirstConsumer'')', goto: wait_consumer_exit}
+    otherwise: escalate
+    cautions: [先分清动态供给还是静态供给：有 StorageClass=动态(provisioner 建 PV)，无 SC=静态(需管理员预建 PV 匹配)。两者卡住的原因完全不同, PVC
+        的 accessMode 与 size 必须能被满足——RWX 卷不是所有存储都支持，size 超过后端配额也会失败]
+  - {id: no_pv_exit, type: done, summary: 静态供给下无匹配的可用 PV。核对是否有 Available 状态的 PV 满足 PVC 的 accessMode/size/storageClassName；PV
+      与 PVC 的 selector/class 是否匹配。需管理员创建匹配的 PV。}
+  - {id: sc_missing_exit, type: done, summary: 引用的 StorageClass 不存在。核对 PVC.spec.storageClassName 拼写、集群是否安装了该
+      SC(kubectl get sc)、是否该用默认 SC(留空)。}
+  - {id: provisioner_exit, type: done, summary: 动态供给失败(ProvisioningFailed)。查 provisioner/CSI driver 的
+      Pod 日志(kube-system 或 csi 命名空间)。常见：云盘配额耗尽、可用区不匹配、CSI driver 异常、后端存储不可达。}
+  - {id: wait_consumer_exit, type: done, summary: 正常现象：StorageClass 的 volumeBindingMode=WaitForFirstConsumer，PVC
+      会等到有 Pod 使用它才绑定(为了拓扑感知调度)。若 Pod 也 Pending，问题在调度侧(转 pending-unschedulable)，PVC 会随 Pod 调度成功而绑定。}
+  - {id: escalate, type: escalate, summary: 打包升级：PVC describe、StorageClass 配置、provisioner/CSI Pod 日志、可用
+      PV 列表。}
 tests:
-  - {scenario: tests/pvc-provisioner-fail.yaml, expect_path: [read_pvc_event, provisioner_exit]}
-  - {scenario: tests/pvc-wait-consumer.yaml, expect_path: [read_pvc_event, wait_consumer_exit]}
-feedback:
-  ask: "PVC 绑定问题定位了吗？"
+- scenario: tests/pvc-provisioner-fail.yaml
+  expect_path: [read_pvc_event, provisioner_exit]
+- scenario: tests/pvc-wait-consumer.yaml
+  expect_path: [read_pvc_event, wait_consumer_exit]
+feedback: {ask: PVC 绑定问题定位了吗？}

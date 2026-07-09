@@ -6,68 +6,58 @@ metadata:
   taxonomy: host/storage/raid-degraded
   version: 0.1.0
   maturity: draft
-  platforms: [{os: linux}]
+  platforms:
+  - {os: linux}
   authors: [opsagent-core]
   license: Apache-2.0
   provenance: {generated_by: claude-opus-4-8}
-  expires_review: "2027-07-01"
+  expires_review: '2027-07-01'
 requirements:
   capability_level: read
   connectors: [ssh]
   facts: [os.family, storage.raid_type]
 discovery:
-  - id: raid_state
-    run: {linux: "cat /proc/mdstat 2>/dev/null; which mdadm >/dev/null && echo HAS_MDADM"}
-    parser: text/mdstat-v1
+- id: raid_state
+  run: {linux: cat /proc/mdstat 2>/dev/null; which mdadm >/dev/null && echo HAS_MDADM}
+  parser: text/mdstat-v1
 tree:
   entry: detect_type
   nodes:
-    - id: detect_type
-      type: check
-      title: 识别 RAID 类型（软 RAID / 硬 RAID 卡）
-      run: {linux: "cat /proc/mdstat 2>/dev/null | grep -q md && echo SOFT_RAID; ls /dev/sg* >/dev/null 2>&1 && echo HAS_HBA; lspci | grep -iE 'raid|megaraid|smartarray' | head -1"}
-      branch:
-        - {when: "any(lines[] matches 'SOFT_RAID')", goto: check_mdstat}
-        - {when: "any(lines[] matches 'megaraid|smartarray|raid')", goto: hardware_raid_exit}
-      otherwise: escalate
-      cautions:
-        - "先分清软/硬 RAID：软 RAID(mdadm)看 /proc/mdstat；硬 RAID 卡要用厂商工具(MegaCLI/storcli/ssacli)，两套完全不同的命令"
-        - "阵列降级但仍在跑=还有冗余在扛，但已无容错余量——再掉一块盘(RAID5)就数据全失。这是与时间赛跑，别拖"
-    - id: check_mdstat
-      type: check
-      title: 读取软 RAID 降级详情
-      run: {linux: "cat /proc/mdstat; for d in /dev/md[0-9]*; do mdadm --detail $d 2>/dev/null | grep -iE 'State|Failed|Active|Working'; done"}
-      parser: text/mdstat-v1
-      branch:
-        - {when: "any(lines[] matches 'recovery|resync')", goto: rebuilding_exit}
-        - {when: "any(lines[] matches 'degraded|_')", goto: degraded_exit}
-        - {when: "any(lines[] matches 'clean|active') and not any(lines[] matches 'degraded')", goto: healthy_exit}
-      otherwise: escalate
-      cautions:
-        - "/proc/mdstat 里 [UU_U] 的下划线就是掉的盘位；[U_]=第二块盘失效。这个位图是最快的降级判读方式"
-    - id: healthy_exit
-      type: done
-      summary: "阵列状态为 clean/active 且无降级标记，可能告警已恢复或误报。核对 mdadm --detail 确认所有盘 active。"
-    - id: rebuilding_exit
-      type: done
-      summary: "阵列正在重建(recovery/resync)中——已有替换盘在同步。监控重建进度(/proc/mdstat 的百分比)，重建期间性能下降且无冗余，避免高 IO 操作。重建完成前不要碰阵列。"
-    - id: degraded_exit
-      type: done
-      summary: >-
-        阵列降级且未在重建——有盘已失效但还没换。紧急且高危：①确认失效盘位(mdstat 位图/mdadm --detail)；
-        ②准备同规格替换盘；③热插拔换盘并 mdadm --add 触发重建。换盘是物理+高危操作，必须人工执行并双确认盘位
-        (拔错盘=整个阵列完蛋)。本 Skill 只做诊断，换盘请走人工变更流程。
-    - id: hardware_raid_exit
-      type: done
-      summary: >-
-        检测到硬 RAID 卡。软 RAID 命令不适用，需用厂商工具查询：LSI/Broadcom 用 storcli/MegaCLI，
-        HPE 用 ssacli，浪潮/Dell 各有工具。请用对应工具查阵列状态与盘位，换盘同样是人工高危操作(确认盘位、
-        确认热备是否已自动接管)。已生成按厂商的查询命令清单。
-    - id: escalate
-      type: escalate
-      summary: "打包升级：/proc/mdstat、mdadm --detail、RAID 卡型号、各盘 SMART 状态。"
+  - id: detect_type
+    type: check
+    title: 识别 RAID 类型（软 RAID / 硬 RAID 卡）
+    run: {linux: cat /proc/mdstat 2>/dev/null | grep -q md && echo SOFT_RAID; ls /dev/sg* >/dev/null 2>&1
+        && echo HAS_HBA; lspci | grep -iE 'raid|megaraid|smartarray' | head -1}
+    branch:
+    - {when: 'any(lines[] matches ''SOFT_RAID'')', goto: check_mdstat}
+    - {when: 'any(lines[] matches ''megaraid|smartarray|raid'')', goto: hardware_raid_exit}
+    otherwise: escalate
+    cautions: [先分清软/硬 RAID：软 RAID(mdadm)看 /proc/mdstat；硬 RAID 卡要用厂商工具(MegaCLI/storcli/ssacli)，两套完全不同的命令,
+      阵列降级但仍在跑=还有冗余在扛，但已无容错余量——再掉一块盘(RAID5)就数据全失。这是与时间赛跑，别拖]
+  - id: check_mdstat
+    type: check
+    title: 读取软 RAID 降级详情
+    run: {linux: 'cat /proc/mdstat; for d in /dev/md[0-9]*; do mdadm --detail $d 2>/dev/null | grep -iE
+        ''State|Failed|Active|Working''; done'}
+    parser: text/mdstat-v1
+    branch:
+    - {when: 'any(lines[] matches ''recovery|resync'')', goto: rebuilding_exit}
+    - {when: 'any(lines[] matches ''degraded|_'')', goto: degraded_exit}
+    - {when: 'any(lines[] matches ''clean|active'') and not any(lines[] matches ''degraded'')', goto: healthy_exit}
+    otherwise: escalate
+    cautions: ['/proc/mdstat 里 [UU_U] 的下划线就是掉的盘位；[U_]=第二块盘失效。这个位图是最快的降级判读方式']
+  - {id: healthy_exit, type: done, summary: 阵列状态为 clean/active 且无降级标记，可能告警已恢复或误报。核对 mdadm --detail 确认所有盘
+      active。}
+  - {id: rebuilding_exit, type: done, summary: 阵列正在重建(recovery/resync)中——已有替换盘在同步。监控重建进度(/proc/mdstat
+      的百分比)，重建期间性能下降且无冗余，避免高 IO 操作。重建完成前不要碰阵列。}
+  - {id: degraded_exit, type: done, summary: 阵列降级且未在重建——有盘已失效但还没换。紧急且高危：①确认失效盘位(mdstat 位图/mdadm --detail)；
+      ②准备同规格替换盘；③热插拔换盘并 mdadm --add 触发重建。换盘是物理+高危操作，必须人工执行并双确认盘位 (拔错盘=整个阵列完蛋)。本 Skill 只做诊断，换盘请走人工变更流程。}
+  - {id: hardware_raid_exit, type: done, summary: 检测到硬 RAID 卡。软 RAID 命令不适用，需用厂商工具查询：LSI/Broadcom 用 storcli/MegaCLI，
+      HPE 用 ssacli，浪潮/Dell 各有工具。请用对应工具查阵列状态与盘位，换盘同样是人工高危操作(确认盘位、 确认热备是否已自动接管)。已生成按厂商的查询命令清单。}
+  - {id: escalate, type: escalate, summary: 打包升级：/proc/mdstat、mdadm --detail、RAID 卡型号、各盘 SMART 状态。}
 tests:
-  - {scenario: tests/soft-raid-degraded.yaml, expect_path: [detect_type, check_mdstat, degraded_exit]}
-  - {scenario: tests/soft-raid-rebuilding.yaml, expect_path: [detect_type, check_mdstat, rebuilding_exit]}
-feedback:
-  ask: "RAID 降级情况清楚了吗？"
+- scenario: tests/soft-raid-degraded.yaml
+  expect_path: [detect_type, check_mdstat, degraded_exit]
+- scenario: tests/soft-raid-rebuilding.yaml
+  expect_path: [detect_type, check_mdstat, rebuilding_exit]
+feedback: {ask: RAID 降级情况清楚了吗？}
