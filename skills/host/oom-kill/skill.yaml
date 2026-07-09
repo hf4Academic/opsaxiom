@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.memory.oom-kill
+  name: OOM Killer 触发排查
+  taxonomy: host/memory/oom-kill
+  version: 0.1.0
+  maturity: draft
+  platforms: [{os: linux}]
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [ssh]
+  facts: [os.family, mem.total]
+discovery:
+  - id: oom_log
+    run: {linux: "dmesg -T | grep -iE 'killed process|out of memory' | tail -20"}
+    parser: text/dmesg-oom-v1
+tree:
+  entry: confirm_oom
+  nodes:
+    - id: confirm_oom
+      type: check
+      title: 确认确实发生了 OOM 及被杀进程
+      run: {linux: "dmesg -T | grep -iE 'Out of memory|Killed process' | tail -5"}
+      parser: text/dmesg-oom-v1
+      branch:
+        - {when: "count(lines) >= 1", goto: scope_oom}
+        - {when: "count(lines) == 0", goto: no_oom_found}
+      otherwise: escalate
+      cautions:
+        - "dmesg 时间戳可能是相对启动时间；用 dmesg -T 转成墙钟，核对是否与本次告警时间吻合"
+        - "被杀进程未必是元凶——OOM Killer 按 oom_score 挑'性价比最高'的杀，常误伤大内存的无辜进程"
+    - id: no_oom_found
+      type: done
+      summary: "近期 dmesg 无 OOM 记录。若应用报内存错误，可能是 cgroup 内存限制(容器 OOM)或应用自身限制，请查 /sys/fs/cgroup 或 k8s/workload/oomkilled。"
+    - id: scope_oom
+      type: check
+      title: 判断是整机 OOM 还是 cgroup(容器)OOM
+      run: {linux: "dmesg -T | grep -i 'oom' | grep -iE 'memory cgroup|/docker/|/kubepods' | tail -3"}
+      branch:
+        - {when: "count(lines) >= 1", goto: cgroup_oom_exit}
+        - {when: "count(lines) == 0", goto: check_mem_trend}
+      otherwise: check_mem_trend
+      cautions:
+        - "日志里出现 memory cgroup / kubepods → 是某容器超了自己的 limit，宿主可能内存充足"
+    - id: cgroup_oom_exit
+      type: done
+      summary: "属于 cgroup(容器)内存超限，非宿主内存不足。请转 k8s/workload/oomkilled 或调整容器 memory limit，宿主内存正常。"
+    - id: check_mem_trend
+      type: check
+      title: 判断是持续泄漏还是瞬时峰值
+      run: {linux: "free -m && cat /proc/meminfo | grep -E 'MemAvailable|Committed_AS'"}
+      parser: table/free-v1
+      branch:
+        - {when: "available_pct < 5", goto: still_tight_exit}
+        - {when: "available_pct >= 5", goto: transient_exit}
+      otherwise: escalate
+      cautions:
+        - "OOM 已过去但内存现在仍紧张 → 元凶仍在运行；若已缓解 → 可能是瞬时批量任务，抓取当时的历史监控"
+    - id: still_tight_exit
+      type: done
+      summary: "内存当前仍紧张，元凶进程大概率仍在运行。请转 host/memory/leak 排查泄漏进程；临时缓解可考虑重启最大内存占用进程(需业务确认)。"
+    - id: transient_exit
+      type: done
+      summary: "OOM 已缓解，内存回到正常水位，疑似瞬时峰值(批量任务/突发流量)。建议：为该主机设置内存 85% 预警；核对被杀进程是否需要调高 oom_score_adj 保护。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：dmesg OOM 记录、free、meminfo、被杀进程清单。"
+tests:
+  - {scenario: tests/host-oom-persistent.yaml, expect_path: [confirm_oom, scope_oom, check_mem_trend, still_tight_exit]}
+  - {scenario: tests/cgroup-oom.yaml, expect_path: [confirm_oom, scope_oom, cgroup_oom_exit]}
+feedback:
+  ask: "OOM 原因定位了吗？"
