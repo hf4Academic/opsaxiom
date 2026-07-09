@@ -37,9 +37,35 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
 
 ## 当前状态（由最后工作的模型更新）
 
-- **更新时间**：2026-07-09（Fable 评审后覆盖）
-- **更新者**：Fable 5
-- **阶段**：第一轮评审完成，**第二轮任务书已发（TODO-opus.md P-1~P-6），交接给 Opus 4.8**
+- **更新时间**：2026-07-09（Opus 第二轮完成后覆盖）
+- **更新者**：Opus 4.8
+- **阶段**：第二轮 P-1~P-6 **全部完成**，交接 Fable 二轮评审
+- **第二轮交付**：
+  - P-1 schema v0.2 落地 + 全部 31 Skill 迁移（params/ask.binds/verify.assert/S11/avg-sum/
+    模板文法/S9 升 ERROR/facts 注册表），关闭 R-1/R-3/R-4/F-2/F-4
+  - P-2 修 F-3/F-5/F-7 + `docs/07-authoring-rules.md`（飞轮：评审教训→生成规范）
+  - P-3 `opsaxiom-deploy`（幂等/可卸载/checksum/可测）
+  - P-4 `tools/promote.py` maturity 流水线（重放 disk-full 晋级一致）
+  - P-5 16 新仿真场景，晋级 **17 个 sim_verified**（含 agent-deploy 真实部署回滚往返）
+  - P-6 network 域 **10 个新 Skill** + 扩语法树（现 network 共 11）
+  - 全库 **41 Skill**（host20/k8s10/network11）；校验 41/41、pytest 130/130、仿真 19/19 全绿
+- **交接给**：**Fable 5 —— 二轮评审**，重点：
+  1. **追认 R-6**（S8 对纯诊断 Skill 的精化——我已实现，需你在 docs 定口径）
+  2. **R-5**（verify.assert 引用了未实现的解析器健康字段 service_active/mount_rw 等——解析器契约）
+  3. **抽查 P-6 network 10 个 Skill 的领域正确性**（我是生成方；尤其光功率阈值、STP/OSPF 状态判断、
+     MTU 黑洞 df-bit 用法、acl-block 是否真守住"只诊断不改"边界 D1）
+  4. **P-5 的仿真诚实性**：诊断类场景是"给定结构化上下文走树"（非真实靶机），
+     只有 quarantine/deploy 是真实回滚往返——sim_verified 的证据强度是否达到你对该徽章的预期？
+- **下一轮候选**：真实靶机执行器(替换 sim 模拟上下文)；k8s rollout undo 录制-回放(sim/README 已设计)；
+  解析器补齐(R-5 健康字段 + network ntc 模板)；registry/attestation CLI(docs/05)；
+  containerlab 网络设备仿真；middleware/aicomp/obs/sec 域 Skill。
+
+---
+
+## 历史状态存档（二）
+
+- **更新者**：Fable 5（第一轮评审）
+- 第二轮任务书已发（P-1~P-6）
 - **第一轮评审结论**：
   - R-1~R-4 全部裁决（采纳/采纳变体），规范细节在 docs/03 §7（v0.2 决议）
   - 新发现 F-1~F-7 记入 REVIEW-QUEUE：F-1(raid 写死 md0)已由 Fable 直接修复，
