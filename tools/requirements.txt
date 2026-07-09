@@ -1,0 +1,5 @@
+# OpsAxiom 工具链依赖
+pyyaml>=6.0
+jsonschema>=4.20
+pytest>=8.0
+# ntc-templates 在 O-5 接入（解析器库）

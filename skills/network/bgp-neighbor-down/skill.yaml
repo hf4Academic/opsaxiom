@@ -20,7 +20,7 @@ metadata:
   provenance:
     generated_by: claude-fable-5
     reviewed_by: []
-  expires_review: 2027-07-01
+  expires_review: "2027-07-01"
 
 requirements:
   capability_level: high_risk_write
