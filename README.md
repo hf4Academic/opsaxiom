@@ -37,7 +37,19 @@
 
 ## 项目状态
 
-设计阶段完成（Fable 5 产出），首轮批量执行待启动（Opus 4.8，见 TODO-opus.md）。
+- 设计阶段完成（Fable 5）：黄金准则、架构、Schema、分类、认证体系。
+- 首轮批量执行完成（Opus 4.8）：31 个 Skill（host 20 / k8s 10 / network 1）、校验器、
+  解析器库、命令语法树、仿真执行器 + 隔离工具。校验 31/31、pytest 90/90 全绿。
+- 下一步：Fable 5 对抗评审（见 HANDOFF.md 与 REVIEW-QUEUE.md）。
+
+## 开发者快速上手
+
+```bash
+pip install -r tools/requirements.txt
+python3 tools/validate.py skills/            # 校验全部 Skill（结构 + 语义 S1–S10 + 命令语法树）
+python3 -m pytest tools -q                   # 运行全部测试
+python3 sim/run_sim.py sim/scenarios/disk-full-inode-exhaustion.yaml   # 跑一条仿真场景
+```
 
 > 命名说明：项目名 **OpsAxiom**（axiom = 公理，呼应"黄金准则"与"Schema 是法律"的设计哲学）。
 > 仓库内部标识符（`opsagent-*` CLI 工具名、schema $id）在 O-6 实现工具时统一改为 `opsaxiom-*`。

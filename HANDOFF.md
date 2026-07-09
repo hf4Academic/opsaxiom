@@ -37,20 +37,29 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
 
 ## 当前状态（由最后工作的模型更新）
 
-- **更新时间**：2026-07-08
-- **更新者**：Fable 5
-- **阶段**：设计阶段完成，进入首轮批量执行
-- **已完成**：
-  - 黄金准则 12 条（docs/00）
-  - 核心架构与差异化逻辑（docs/01）
-  - 可回滚机制设计（docs/02）
-  - Skill Schema v0.1：文档（docs/03）+ JSON Schema（schema/skill.schema.json）
-  - 分类体系 L1/L2（docs/04，L3 待 Opus 扩展）
-  - 认证体系设计（docs/05）
-  - 金标准 Skill ×2（host/disk-full、network/bgp-neighbor-down）
-  - Opus 任务书（TODO-opus.md，7 个条目）
-- **交接给**：Opus 4.8 —— 从 `TODO-opus.md` 的 O-1 开始，按序执行
-- **未决问题**（Opus 无需处理，留给 Fable/人）：
-  - ~~项目命名未定~~ → 已定名 **OpsAxiom**（2026-07-08）；内部 `opsagent-*` 标识符在 O-6 统一更名 `opsaxiom-*`
-  - 受限表达式语言的正式文法（当前只有 docs/03 §5 的描述性定义，O-2 会先实现一个保守子集）
-  - `opsagent-quarantine` / `opsagent-restore` 工具本身尚不存在（O-6，实现时用 `opsaxiom-` 前缀）
+- **更新时间**：2026-07-09
+- **更新者**：Opus 4.8
+- **阶段**：首轮批量执行（TODO-opus.md O-1~O-7）**全部完成**，等待 Fable 对抗评审
+- **本轮交付**：
+  - O-1 分类 L3 全量清单（docs/04 §5，8 域）+ 归属存疑记 docs/_inbox.md
+  - O-2 校验器 tools/validate.py：结构 + 语义 S1–S10，受限表达式 fail-closed(tools/exprlang.py)
+  - O-3 host 域 20 个 Skill（disk-full 金标准 + 19 新增）
+  - O-4 k8s 域 10 个 Skill（rollback/rollout 用 transaction 型回滚）
+  - O-5 解析器库(tools/parsers) + 命令语法树(tools/syntax)，S6 升为真实校验，拦截跨平台 CLI 幻觉
+  - O-6 仿真环境(sim/)：求值器 + 执行器 + opsaxiom-quarantine，disk-full 三路径全过含真实回滚往返
+  - 校验器全量 **31/31 过**，pytest **90/90 过**
+- **交接给**：**Fable 5 —— 请进行对抗评审**，重点：
+  1. **REVIEW-QUEUE.md 的 R-1~R-4**（都需要 schema v0.2 决策）：
+     - R-1 S9 无声明位（建议加 metadata.params + ask.binds）——**最该先定**，影响所有 Skill
+     - R-3 表达式缺 avg/sum（我用 count(...)>=k 绕过了，但建议补）
+     - R-2 verify.expect 自由文本、R-4 模板变量下标语法
+  2. **抽查 Skill 的领域正确性**（我是生成方，命令/阈值/cautions 需专家复核）——
+     建议优先审带 action 的高危 Skill：fs-readonly(critical/human_only)、k8s/rollback、clock-drift、agent-deploy
+  3. **金标准 maturity**：disk-full 已通过仿真+回滚往返，具备 sim_verified 条件，但我未擅自改
+     maturity（遵守"由流水线写入"约定）——请确认是否搭建 maturity 流水线或授权手动晋级
+- **已消化的原未决问题**：
+  - 项目定名 OpsAxiom ✓；工具名统一 opsaxiom-* ✓
+  - 受限表达式：已实现 tokenizer+parser（校验）+evaluate（求值），保守子集，见 tools/exprlang.py
+  - opsaxiom-quarantine 已实现且测试通过（move/restore/list/purge）
+- **下一轮候选（未开工）**：network 域 Skill 包 + containerlab 真实设备仿真；host/k8s 剩余 L3 叶子；
+  registry/attestation CLI（docs/05 的 `opsaxiom attest`）；真实靶机执行器（替换 sim 的模拟上下文）。
