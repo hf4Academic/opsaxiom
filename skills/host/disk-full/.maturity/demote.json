@@ -1,0 +1,8 @@
+{
+  "skill": "host.storage.capacity.disk-full",
+  "action": "demote",
+  "from": "sim_verified",
+  "to": "draft",
+  "at": "2026-07-09T04:43:06",
+  "reason": "P-4 重放测试：先降级"
+}

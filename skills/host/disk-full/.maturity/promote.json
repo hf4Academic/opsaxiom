@@ -1,0 +1,25 @@
+{
+  "skill": "host.storage.capacity.disk-full",
+  "action": "promote",
+  "from": "sim_verified",
+  "to": "sim_verified",
+  "at": "2026-07-09T04:43:34",
+  "validator": "0 ERROR",
+  "scenarios": [
+    {
+      "scenario": "disk-full-deleted-open-fd.yaml",
+      "path_ok": true,
+      "rollback_ok": null
+    },
+    {
+      "scenario": "disk-full-inode-exhaustion.yaml",
+      "path_ok": true,
+      "rollback_ok": true
+    },
+    {
+      "scenario": "disk-full-log-growth.yaml",
+      "path_ok": true,
+      "rollback_ok": null
+    }
+  ]
+}
