@@ -55,7 +55,10 @@ tree:
         junos: "show spanning-tree interface"
       parser: ntc/{{device.platform}}/stp
       branch:
-        - {when: "any(ports[].role == 'disabled') and any(ports[].state == 'forwarding')", goto: stp_broken_exit}
+        # inconsistent_ports 为解析器派生字段：角色应阻塞(alternate/backup)但状态却 forwarding 的端口数。
+        # 注意：不可写成 any(ports[].role==X) and any(ports[].state==Y)——两个 any 独立求值，
+        # 无法表达"同一端口同时满足"，会在正常交换机上误报（见 docs/07 B6 / REVIEW-QUEUE F-8）。
+        - {when: "inconsistent_ports > 0", goto: stp_broken_exit}
         - {when: "tcn_rate > 10", goto: tcn_flap_exit}
       otherwise: stp_ok_but_storm_exit
       cautions:

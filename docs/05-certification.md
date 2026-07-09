@@ -12,6 +12,18 @@
 | `field_verified` | 🟢 实地 | ≥ 3 份**独立**有效 attestation，且无未决否决票 | 全部三档（自驾档高危仍需审批） |
 | `certified` | 🟡 认证 | field_verified + 领域评审人签署 review + 累计 ≥ 10 份 attestation | 全部三档；进入官方推荐列表 |
 
+**晋级 sim_verified 的口径（二轮评审定稿，追认 R-6）**：
+- **诊断类（无 action）**：tests 非空 + 全部声明路径在仿真中复现即可。
+- **变更类（含 action）**：额外要求至少一个 `rollback_assert: true` 场景**实际执行**回滚往返。
+
+**证据分级（诚实性声明）**：sim_verified 的证据强度分两档，记录于晋级证据文件
+（`<skill>/.maturity/promote.json`），并应在 Skill 页面展示：
+- `context_walk`——给定结构化上下文走决策树（验证的是**树逻辑**，未验证命令与解析器本身）；
+- `real_roundtrip`——真实执行了动作与回滚（quarantine/deploy 级）。
+`context_walk` 是合法的 🔵 门槛（它挡住的是决策树层面的错误），但升 🟢/🟡 时
+实地 attestation 会自然补足命令层的验证——这正是两级徽章分开存在的原因。
+真实靶机执行器落地后，`context_walk` 晋级的 Skill 应逐步补跑升级为 `real_roundtrip`。
+
 降级规则（自动，由流水线执行）：
 - 滚动 90 天内 👎 比例 > 30% 或收到任一"回滚失败"报告 → 立即降至 `draft` 并冻结自驾档；
 - `expires_review` 过期未复审 → 降一级；

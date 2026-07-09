@@ -1,6 +1,45 @@
 # Opus 4.8 任务书
 
-# 第二轮（Fable 布置，2026-07-09）
+# 第三轮（Fable 布置，2026-07-09 二轮评审后）
+
+> 规范依据新增：docs/03 §7.6a/§7.6b（F-8 投影语义、R-5 字段契约）、docs/05 证据分级、docs/07 B6。
+
+## Q-1 实施 S12：投影语义静态检测（最高优先——F-8 类错误今天校验器挡不住）
+- exprlang 校验路径中检测："`[]` 投影未经聚合函数（max/min/count/any/all/avg/sum）包裹
+  即参与 and/or 或与另一投影比较" → ERROR，报错信息指向 docs/07 B6。
+- 负向测试用例至少 4 个（含 F-8 的两个原始写法）；全库 41 Skill 重新过校验必须全绿。
+
+## Q-2 解析器注册表带输出字段声明 + assert 字段校验（实施 R-5）
+- 解析器注册时声明输出字段清单（含 R-5/F-8 累积的健康与派生字段：
+  service_active、mount_rw、rollout_succeeded、unready_pods、inconsistent_ports、
+  deny_hit_count、tcn_rate、pcent_before[引擎快照] 等）。
+- 新校验（先 WARN 一轮）：branch.when / verify.assert 引用的字段须在
+  对应解析器声明的输出 ∪ facts ∪ params ∪ 引擎快照(`*_before`) 内。
+- 实现其中至少 5 个高频解析器（systemctl is-active、df 前后对比、kubectl rollout status、
+  stp brief、acl hits——linux/kubectl 侧优先，网络侧可先 ntc 映射）。
+
+## Q-3 真实靶机执行器 v1（sim 从 context_walk 走向 real）
+- run_sim 增加 `mode: real` ：在本地沙箱（无 root）真实执行 linux 平台的 discovery/check 命令
+  （限白名单只读命令），接真实解析器，走真实分支——先覆盖 disk-full 与 3 个纯诊断 host Skill。
+- 晋级证据自动记 `evidence: real_roundtrip` / `context_walk`（promote.json 已有 scenarios，
+  增加 evidence 字段，docs/05 的分级展示以此为源）。
+
+## Q-4 attestation CLI 骨架（docs/05 §2 的 `opsaxiom attest`）
+- `tools/bin/opsaxiom-attest`：交互式生成 attestation YAML（含 env_fingerprint 脱敏分桶、
+  deviations、rollback_exercised），落到 `<skill>/attestations/`，签名先留 TODO 桩。
+- 校验器新增：attestations 目录格式校验（append-only 由 CI 保证，先不做）。
+
+## Q-5 middleware 域 10 个 Skill（mysql/redis/kafka 优先，按 docs/04 §5.5 高频叶子）
+- 严格执行 docs/07 全部规则（尤其 B6）；每个附 ≥1 可执行 context_walk 场景并走 promote。
+
+## Q-6 收尾：HANDOFF + 提醒切回 Fable 三轮评审
+
+进度勾选区（Opus 更新）：
+- [ ] Q-1  - [ ] Q-2  - [ ] Q-3  - [ ] Q-4  - [ ] Q-5  - [ ] Q-6
+
+---
+
+# 第二轮（Fable 布置，2026-07-09）【已完成，存档】
 
 > 通用要求同第一轮：读 HANDOFF → 小步提交（前缀 `[P-n]`）→ 疑问进 REVIEW-QUEUE 不改设计 →
 > 全部完成后更新 HANDOFF 并提醒切回 Fable。规范依据：`docs/03 §7`（v0.2 决议）与

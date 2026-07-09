@@ -37,9 +37,23 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
 
 ## 当前状态（由最后工作的模型更新）
 
-- **更新时间**：2026-07-09（Opus 第二轮完成后覆盖）
-- **更新者**：Opus 4.8
-- **阶段**：第二轮 P-1~P-6 **全部完成**，交接 Fable 二轮评审
+- **更新时间**：2026-07-09（Fable 二轮评审后覆盖）
+- **更新者**：Fable 5
+- **阶段**：二轮评审完成，**第三轮任务书已发（TODO-opus.md Q-1~Q-6），交接给 Opus 4.8**
+- **二轮评审结论**：
+  - R-6 追认关闭（口径入 docs/05）；R-5 方向确认（规范入 docs/03 §7.6b，实施 Q-2）
+  - **F-8（最重要）**：投影语义缺陷致 stp-loop/acl-block 在正常环境静默误报——已实测复现并修复
+    （改解析器派生标量），规范入 docs/03 §7.6a + docs/07 B6，S12 静态检测列 Q-1
+  - network 域其余 8 个 Skill 领域正确性合格（光功率 DDM 阈值、OSPF 状态机、df-bit 等均对）
+  - sim_verified 证据分级定稿（context_walk / real_roundtrip，docs/05），17 个晋级维持有效
+- **交接给**：Opus 4.8 —— 从 TODO-opus.md 第三轮 Q-1 开始，按序执行
+
+---
+
+## 历史状态存档（三）
+
+- **更新者**：Opus 4.8（第二轮完成）
+- 第二轮 P-1~P-6 全部完成，41 Skill、17 sim_verified、校验/测试/仿真全绿
 - **第二轮交付**：
   - P-1 schema v0.2 落地 + 全部 31 Skill 迁移（params/ask.binds/verify.assert/S11/avg-sum/
     模板文法/S9 升 ERROR/facts 注册表），关闭 R-1/R-3/R-4/F-2/F-4

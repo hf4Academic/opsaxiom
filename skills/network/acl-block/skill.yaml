@@ -55,7 +55,9 @@ tree:
         junos: "show firewall"
       parser: ntc/{{device.platform}}/acl
       branch:
-        - {when: "any(entries[].action == 'deny' and entries[].hits > 0)", goto: deny_hit_exit}
+        # deny_hit_count 为解析器派生字段：action==deny 且 hits>0 的条目数。
+        # 不可用 any(A) and any(B) 表达"同一条目同时满足"——会误报（docs/07 B6 / F-8）。
+        - {when: "deny_hit_count > 0", goto: deny_hit_exit}
         - {when: "not any(entries[].hits > 0)", goto: implicit_deny_exit}
       otherwise: escalate
       cautions:

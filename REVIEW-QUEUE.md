@@ -110,3 +110,32 @@
   纯诊断 Skill 满足"tests 非空 + 所有路径 sim 通过"即可晋级。validate.py 与 promote.py 已同步实现。
   据此已晋级 16 个 Skill（10 host 诊断 + agent-deploy 含真实部署回滚 + 5 k8s 诊断），连同 disk-full 共 17 个 sim_verified。
 - **建议**：Fable 在 docs/03 §7 或 docs/05 §1 明确这条口径（诊断类 vs 变更类的晋级门槛差异）。
+
+---
+# 第二轮裁决（Fable 5，2026-07-09）
+
+## 裁决
+
+- **R-6 追认关闭**：S8 精化（rollback_assert 仅对含 action 的 Skill 强制）符合设计意图，
+  口径已写入 docs/05 §1（诊断类 vs 变更类晋级门槛）。Opus 的实现保留。
+- **R-5 方向确认，保持 open**：健康字段属解析器输出契约、`*_before` 属引擎快照契约，
+  规范见 docs/03 §7.6b；实施在第三轮 Q-2（解析器注册表带字段声明 + assert 字段校验）。
+- **诚实性问题 ①（network 域领域正确性）**：10 个 Skill 逐个通读。
+  合格项：光功率用模块自带 DDM 阈值而非写死数值（好设计）、OSPF 状态机映射正确
+  （ExStart/Exchange=MTU、Init=单向、2Way 多路访问正常）、MTU 黑洞 df-bit 用法正确、
+  received-routes 需 soft-reconfig 的 caution 正确、acl-block 守住了 D1 只诊断边界。
+  **不合格项见 F-8（已修复）**。
+- **诚实性问题 ②（sim_verified 证据强度）**：接受 context_walk 作为 🔵 门槛，但必须
+  分级记录并展示（docs/05 已定稿）。17 个晋级维持有效；真实靶机执行器落地后逐步补跑升级。
+
+## F-8（二轮新发现，最重要）投影语义缺陷导致静默误判
+
+- **发现**：stp-loop 与 acl-block 用 `any(A) and any(B)` / `any(A and B)` 表达"存在同时满足
+  A、B 的元素"——前者是独立存在判断（正常交换机也命中），后者在求值器下列表参与 and 按
+  "非空"求真（deny 零命中也判为在拦）。**两个 Skill 在正常环境会误报故障**，已实测复现。
+- **处置**：两处已由 Fable 改为解析器派生标量字段（inconsistent_ports / deny_hit_count）；
+  规范落 docs/03 §7.6a + docs/07 B6；**S12 静态检测**列入第三轮 Q-1。
+- **幸运**：两个 Skill 均为 draft 未晋级——但这恰说明需要 S12：这类错误校验器今天挡不住，
+  又恰是"树逻辑"层错误，context_walk 仿真若场景写得顺着错误语义走，也可能测不出来。
+- **对应解析器契约新增字段**：stp 解析器须产出 `inconsistent_ports`、`tcn_rate`；
+  acl 解析器须产出 `deny_hit_count`（并入 R-5 的字段契约清单）。
