@@ -11,14 +11,15 @@ metadata:
   name: 磁盘空间耗尽排查与处置
   taxonomy: host/storage/capacity/disk-full
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms:
     - {os: linux, family: [debian, rhel, suse]}
   authors: [opsagent-core]
   license: Apache-2.0
   provenance:
     generated_by: claude-fable-5
-    reviewed_by: []
+    reviewed_by: [claude-opus-4-8]
+    source_trace: "晋级证据：sim/scenarios/disk-full-{log-growth,deleted-open-fd,inode-exhaustion} 三路径通过，inode 场景含真实 quarantine move→restore 回滚往返（2026-07-09，Fable 代行流水线；正式 promote 工具见下轮 P-4）"
   expires_review: "2027-07-01"
 
 requirements:

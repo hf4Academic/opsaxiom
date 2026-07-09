@@ -36,7 +36,7 @@ tree:
     - id: check_mdstat
       type: check
       title: 读取软 RAID 降级详情
-      run: {linux: "cat /proc/mdstat; mdadm --detail /dev/md0 2>/dev/null | grep -iE 'State|Failed|Active|Working'"}
+      run: {linux: "cat /proc/mdstat; for d in /dev/md[0-9]*; do mdadm --detail $d 2>/dev/null | grep -iE 'State|Failed|Active|Working'; done"}
       parser: text/mdstat-v1
       branch:
         - {when: "any(lines[] matches 'recovery|resync')", goto: rebuilding_exit}

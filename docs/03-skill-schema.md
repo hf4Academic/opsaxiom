@@ -144,3 +144,41 @@ feedback:
 
 - `skill/v0.1` 期间允许 schema 破坏性演进，但每次演进必须提供迁移脚本（tools/migrate/）。
 - Skill 的 `version` 与 `maturity` 绑定：结构性修改（MAJOR）自动重置 maturity 为 `draft`。
+
+## 7. v0.2 决议（Fable 裁决，2026-07-09；实施见 TODO-opus 第二轮）
+
+针对首轮执行暴露的 R-1~R-4 与评审新发现，v0.2 做如下演进。**在实施完成前，
+本节是规范的一部分**——新写的 Skill 应按此准备，校验器升级后旧 Skill 统一迁移。
+
+### 7.1 变量声明（裁决 R-1：采纳）
+- `metadata.params`: `[{name, source: alert|user|derived, desc}]` —— Skill 入参声明。
+- `ask` 节点新增必填 `binds: <varname>`（无产出的 ask 允许 `binds: null`）。
+- 变量合法来源 = `facts ∪ discovery.<id> ∪ params ∪ ask.binds ∪ builtin{sid}`。
+- 迁移完成后 **S9 升为 ERROR**。
+
+### 7.2 verify 断言机器化（裁决 R-2：采纳变体）
+- `verify` 拆为：`assert`（必填，受限表达式，S5 同规则强制）+ `note`（可选散文，给人看）。
+- `preflight.watch[].expect` 与 `abort_if` **保留散文**：它们的第一读者是执行中的人（导航/协驾档），
+  机器化收益低；但引擎在自驾档执行时须把 `abort_if` 视为"任一条件模型判定成立即中止"，
+  且该判定结果必须记入审计日志。
+
+### 7.3 聚合函数（裁决 R-3：采纳）
+- 允许函数集增加 `avg`、`sum`。`count(...) >= k` 仍是"持续超阈值"的推荐写法（抗尖峰），
+  写入生成规范。同步修改 exprlang 的 _FUNCS 与求值器。
+
+### 7.4 模板变量文法（裁决 R-4：统一到表达式文法）
+- `{{...}}` 内部采用与 branch.when **相同的字段引用文法**（点路径 + `[N]` 下标 + `[]` 投影），
+  渲染引擎直接复用 exprlang 的字段求值。`{{rows0_comm}}` 这类拍平别名废止，迁移为 `{{rows[0].comm}}`。
+- 命名空间：discovery 输出以 `{{discovery.<id>.<field>}}` 访问；当前节点输出可用裸 `{{rows...}}`。
+
+### 7.5 新增语义规则 S11：回滚不得为空转（评审发现 F-2）
+- `rollback.run`（及 snapshot.run）若实质为 `echo`/注释类空转命令 → ERROR；
+  例外：`human_only: true` 的节点允许 `rollback.advisory: true` + 说明文字，
+  表示"回滚方案是给人的操作指引而非可执行命令"（fs-readonly 的 fsck 属此类）。
+- 动机：不可执行的回滚通过 S1 是形式合规、实质违宪（R1）。
+
+### 7.6 facts 单位与命名注册表（评审发现 F-4）
+- 新建 `docs/06-facts.md`：facts 的权威清单，含**单位**（bytes/KB/%/count）、类型、采集命令。
+- 表达式里跨源比较（如 `rows[0].rss > mem_total * 1024 * 0.4`）必须能从注册表推出单位一致，
+  否则校验器告警。首批注册：os.family, cpu.cores, mem.total(MB), fs.mounts, storage.devices,
+  host.arch, host.virtualization, kernel.version, k8s.context, device.platform, device.version, bgp.local_as。

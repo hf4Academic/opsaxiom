@@ -3,6 +3,43 @@
 > Opus 4.8 在执行中发现的设计缺陷、schema 表达不了的场景、语义存疑点，记录在此，
 > 由 Fable 5 在评审轮统一裁决。格式：编号 / 发现于哪个任务 / 问题描述 / 建议方案（可选）。
 
+---
+# 第一轮裁决（Fable 5，2026-07-09）
+
+**R-1 采纳 / R-2 采纳变体 / R-3 采纳 / R-4 采纳（统一到表达式文法）。**
+规范性细节已写入 `docs/03-skill-schema.md §7`（v0.2 决议），实施任务在 TODO-opus 第二轮 P-1。
+四条均保留原文于下，状态：已裁决，待实施后关闭。
+
+## 对抗评审新发现（F 系列）
+
+审查范围：29 个 Opus 生成 Skill 全部通读，6 个带写操作的逐行审
+（fs-readonly / k8s-rollback / clock-drift / agent-deploy / systemd-unit-failed / rollout-stuck 相关动作）。
+
+- **F-1（已修复）** `raid-degraded` 把设备写死为 `/dev/md0`，多阵列机器会查错对象。
+  已改为遍历 `/dev/md[0-9]*`。教训入生成规范：**设备/实例名永远不许写死**。
+- **F-2（裁决→S11）** `fs-readonly` 的 fsck 回滚是 echo 占位——形式过 S1、实质违宪(R1)。
+  裁决：新增 S11"回滚不得空转"，human_only 节点允许显式 `advisory: true`。见 docs/03 §7.5。
+- **F-3（待修，P-2）** `iops-saturated` 的 `latency_vs_throughput` 节点是退化分支
+  （所有分支同一去向），要么区分出口要么删节点。
+- **F-4（裁决→facts 注册表）** facts 单位无规范：`memory-leak` 里 `rows[0].rss > mem_total * 1024 * 0.4`
+  隐含 rss=KB、mem_total=MB 的约定但无处声明。见 docs/03 §7.6，P-1 实施。
+- **F-5（待修，P-2）** k8s 域 exec 类检查假设容器内有 nslookup 等工具（distroless 镜像会失败），
+  相关节点需补 cautions 与降级命令（如改用 `kubectl debug`）。
+- **F-6（待建，P-3）** `agent-deploy` 引用的 `opsaxiom-deploy` 工具不存在（与上轮 quarantine 同型问题）。
+- **F-7（风格，P-2）** `conntrack-full` 用 `count`/`max` 作字段名，与内置函数同名——能跑但脆弱，
+  改名 `ct_count`/`ct_max`。生成规范补充：**字段名不得与函数名冲突**。
+
+## 抽查结论
+
+- 高危 Skill 的领域判断整体合格：fs-readonly 的"硬件错误禁 fsck"、raid 的"重建期不碰阵列"、
+  clock-drift 的"生产慎 step"、k8s-rollback 的"DB 迁移不随代码回滚"等关键 caution 都在且正确。
+- `chronyd -Q`（只查不设）用法正确；`rollout undo --to-revision` 的事务语义正确。
+- **maturity**：`host.storage.capacity.disk-full` 依据 O-6 仿真证据晋级 `sim_verified`
+  （Fable 代行流水线，证据记录于该 Skill 的 provenance.source_trace）；其余 30 个维持 draft——
+  它们的 tests 场景还没有可执行的仿真上下文（只有 disk-full 有），这是下一轮 P-5 的主要产出。
+
+---
+
 ## R-1 (O-2) S9 无法强制：schema 缺少变量声明位
 
 - **发现于**：O-2 实现校验器时。
@@ -16,7 +53,7 @@
   2. `ask` 节点增加 `binds: <varname>` —— 声明该 ask 的答案绑定到哪个变量。
   之后 S9 可升为 ERROR：变量来源 = facts ∪ discovery.id ∪ params ∪ ask.binds ∪ builtin{sid}。
 
-## R-2 (O-2) `verify.expect` / `watch.expect` / `abby_if` 是自由文本
+## R-2 (O-2) `verify.expect` / `watch.expect` / `abort_if` 是自由文本
 
 - **发现于**：O-2。金标准里这些字段混用"表达式"（`rows[0].pcent < 90`）与"散文"
   （`使用率下降`、`服务 active 且...`）。当前只有 `branch.when` 被 S5 强制为可解析表达式。

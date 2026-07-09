@@ -1,4 +1,50 @@
-# Opus 4.8 任务书（第一轮）
+# Opus 4.8 任务书
+
+# 第二轮（Fable 布置，2026-07-09）
+
+> 通用要求同第一轮：读 HANDOFF → 小步提交（前缀 `[P-n]`）→ 疑问进 REVIEW-QUEUE 不改设计 →
+> 全部完成后更新 HANDOFF 并提醒切回 Fable。规范依据：`docs/03 §7`（v0.2 决议）与
+> REVIEW-QUEUE 第一轮裁决。
+
+## P-1 实施 schema v0.2（最高优先，其余条目依赖）
+- schema/skill.schema.json 与校验器：`metadata.params`、`ask.binds`、`verify.assert+note`、
+  S11（回滚空转检测：rollback.run 归一后若只含 echo/注释 → ERROR，`human_only` + `rollback.advisory: true` 豁免）。
+- exprlang：_FUNCS 增加 `avg`/`sum`（验证器与求值器同步），模板渲染统一到字段引用文法（docs/03 §7.4）。
+- **迁移全部 31 个 Skill**：补 params 声明、ask 补 binds、verify.expect → assert+note、
+  拍平变量（rows0_comm 等）改为下标路径。迁移完成后 **S9 升为 ERROR**，全量校验必须全绿。
+- 新建 `docs/06-facts.md` facts 注册表（首批清单见 docs/03 §7.6），实现跨源单位一致性告警。
+
+## P-2 修复评审 F 系列
+- F-3：iops-saturated 退化分支节点（区分出口或删除）。
+- F-5：k8s exec 类检查补"容器可能没有该工具"的 cautions 与降级命令。
+- F-7：conntrack-full 字段改名 ct_count/ct_max。
+- 顺带把上述三条教训写进一个新文件 `docs/07-authoring-rules.md`（Skill 生成规范：
+  设备名不写死、字段不与函数同名、exec 不假设容器工具、count>=k 抗尖峰模式……
+  第一轮所有踩坑都沉淀进去，这是给未来批量生成当 prompt 用的）。
+
+## P-3 实现 opsaxiom-deploy（agent-deploy 依赖，参照 quarantine 的品质：可测、幂等、可卸载）
+
+## P-4 实现 tools/promote.py（maturity 流水线）
+- `promote <skill>`：核验 sim 结果 + S8 → 写 maturity 与 provenance 证据；`demote` 同理。
+- 把 disk-full 的手动晋级重放一遍作为首个测试用例（结果应一致）。
+
+## P-5 仿真覆盖扩面
+- 为 host 域至少 10 个、k8s 域至少 5 个 Skill 编写可执行 sim 场景（复用 run_sim.py 的
+  node_ctx 机制），通过者由 P-4 流水线晋级 sim_verified。
+- k8s 的 transaction 型回滚（rollout undo）设计一个真实往返验证方案（无集群环境时用
+  kubectl mock/录制回放，方案先写进 sim/README 再实现）。
+
+## P-6 network 域 Skill 包（10 个，按 docs/04 §5.2 高频叶子）
+- 每个命令必须过三平台语法树；语法树未覆盖的命令先扩 tools/syntax/*.yaml（扩树属允许操作，
+  但每条新前缀在 commit message 里给出厂商文档依据）。
+- containerlab/真实设备仿真本轮仍不做（环境无 docker），bgp 金标准继续维持 draft。
+
+进度勾选区（Opus 更新）：
+- [ ] P-1  - [ ] P-2  - [ ] P-3  - [ ] P-4  - [ ] P-5  - [ ] P-6
+
+---
+
+# 第一轮（已完成，存档）
 
 > 执行者：Claude Opus 4.8。开始前先读 `HANDOFF.md` 规定的阅读顺序。
 > 通用要求：每完成一条 → git commit（message 前缀 `[O-n]`）→ 勾选本文件对应条目。
