@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.process.fd-leak
+  name: 文件描述符泄漏排查
+  taxonomy: host/process/fd-leak
+  version: 0.1.0
+  maturity: draft
+  platforms: [{os: linux}]
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [ssh]
+  facts: [os.family]
+discovery:
+  - id: fd_global
+    run: {linux: "cat /proc/sys/fs/file-nr"}
+    parser: json/file-nr-v1
+tree:
+  entry: scope_fd
+  nodes:
+    - id: scope_fd
+      type: check
+      title: 判断是全局 fd 耗尽还是单进程超限
+      run: {linux: "cat /proc/sys/fs/file-nr; ulimit -n"}
+      parser: json/file-nr-v1
+      branch:
+        - {when: "allocated > max * 0.8", goto: rank_fd}
+        - {when: "allocated <= max * 0.8", goto: rank_fd}
+      otherwise: escalate
+      cautions:
+        - "两种耗尽：系统级(/proc/sys/fs/file-max)和进程级(ulimit -n / LimitNOFILE)。报 Too many open files 时先分清是哪一种"
+        - "容器里 ulimit 看的是容器的限制；systemd 服务看 LimitNOFILE 而非登录 shell 的 ulimit"
+    - id: rank_fd
+      type: check
+      title: 按打开 fd 数排序找出泄漏进程
+      run: {linux: "for p in /proc/[0-9]*; do echo \"$(ls $p/fd 2>/dev/null | wc -l) $(cat $p/comm 2>/dev/null) ${p##*/}\"; done | sort -rn | head -10"}
+      parser: table/fd-rank-v1
+      branch:
+        - {when: "rows[0].fd_count > 10000", goto: classify_fd_type}
+        - {when: "rows[0].fd_count > 1000", goto: classify_fd_type}
+      otherwise: escalate
+      cautions:
+        - "fd 数高不一定是泄漏——高并发服务器本就持有大量连接。判断泄漏看趋势(是否只增不减)和 fd 类型分布"
+    - id: classify_fd_type
+      type: check
+      title: 分析泄漏 fd 的类型（socket / 文件 / pipe）
+      run: {linux: "ls -l /proc/{{pid}}/fd 2>/dev/null | awk '{print $NF}' | sed 's/[0-9]*$//' | sort | uniq -c | sort -rn | head"}
+      branch:
+        - {when: "any(lines[] matches 'socket')", goto: socket_leak_exit}
+        - {when: "any(lines[] matches 'deleted')", goto: deleted_fd_exit}
+        - {when: "any(lines[] matches 'pipe')", goto: pipe_leak_exit}
+      otherwise: file_leak_exit
+      cautions:
+        - "socket 泄漏最常见：连接用完没 close。看 socket 是否大量 CLOSE_WAIT(对端关了本端没关)"
+    - id: socket_leak_exit
+      type: done
+      summary: "进程 {{pid}} 泄漏大量 socket fd。若伴随大量 CLOSE_WAIT，是应用没正确 close 连接(代码 bug)。缓解靠重启该进程，根治需研发修复连接生命周期管理。"
+    - id: deleted_fd_exit
+      type: done
+      summary: "大量指向已删除文件的 fd(deleted)——进程持有已 rm 的文件句柄。这也是磁盘'删了不释放空间'的元凶。缓解靠重启/reload 该进程。"
+    - id: pipe_leak_exit
+      type: done
+      summary: "pipe/eventfd 泄漏，常见于异步框架或子进程管理 bug。交研发排查 pipe 创建后未关闭的路径。"
+    - id: file_leak_exit
+      type: done
+      summary: "普通文件 fd 泄漏。核对应用是否循环打开文件不关闭(如日志/配置反复 open)。重启缓解，研发修复。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：file-nr、ulimit、按 fd 数排序的进程、Top 进程的 fd 类型分布。"
+tests:
+  - {scenario: tests/socket-leak.yaml, expect_path: [scope_fd, rank_fd, classify_fd_type, socket_leak_exit]}
+  - {scenario: tests/deleted-fd.yaml, expect_path: [scope_fd, rank_fd, classify_fd_type, deleted_fd_exit]}
+feedback:
+  ask: "fd 泄漏进程找到了吗？"

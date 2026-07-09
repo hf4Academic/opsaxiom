@@ -1,0 +1,65 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.network-stack.timewait-flood
+  name: TIME_WAIT 堆积与端口耗尽排查
+  taxonomy: host/network-stack/timewait-flood
+  version: 0.1.0
+  maturity: draft
+  platforms: [{os: linux}]
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [ssh]
+  facts: [os.family]
+discovery:
+  - id: sock_stat
+    run: {linux: "ss -s; cat /proc/sys/net/ipv4/ip_local_port_range"}
+    parser: table/ss-summary-v1
+tree:
+  entry: measure
+  nodes:
+    - id: measure
+      type: check
+      title: 量化 TIME_WAIT 与端口占用
+      run: {linux: "ss -tan state time-wait | wc -l; ss -tan | awk 'NR>1{print $1}' | sort | uniq -c"}
+      parser: table/ss-states-v1
+      branch:
+        - {when: "timewait > 28000", goto: locate_direction}
+        - {when: "timewait <= 28000", goto: not_significant}
+      otherwise: escalate
+      cautions:
+        - "TIME_WAIT 是 TCP 正常机制(主动关闭方等 2MSL)，本身无害。只有当它耗尽本地端口(ip_local_port_range)导致新建外连失败时才是问题"
+        - "关键区分：是本机作为客户端主动发起短连接(出方向端口耗尽)，还是作为服务器(TIME_WAIT 在 server 侧一般不耗端口，因为四元组不同)"
+    - id: not_significant
+      type: done
+      summary: "TIME_WAIT 数量在正常范围，未逼近端口上限。若有连接失败，方向可能在 conntrack(转 conntrack-full)或对端。"
+    - id: locate_direction
+      type: check
+      title: 判断是出方向端口耗尽还是入方向堆积
+      run: {linux: "ss -tan state time-wait | awk 'NR>1{split($4,a,\":\"); print a[length(a)]}' | sort | uniq -c | sort -rn | head"}
+      branch:
+        - {when: "rows[0].count > 20000", goto: outbound_exhaust_exit}
+      otherwise: server_side_exit
+      cautions:
+        - "本地端口(源端口)集中在临时端口段且逼近 range 上限 → 出方向短连接耗尽端口；这才是真问题"
+    - id: outbound_exhaust_exit
+      type: done
+      summary: >-
+        本机作为客户端发起海量短连接，临时端口被 TIME_WAIT 占尽，新外连报 'Cannot assign requested address'。
+        正解按优先级：①应用改用连接池/长连接(根治)；②扩大 ip_local_port_range；
+        ③开启 net.ipv4.tcp_tw_reuse=1(仅出方向安全)。切勿开 tcp_tw_recycle(已废弃且在 NAT 后会丢连接)。
+    - id: server_side_exit
+      type: done
+      summary: "TIME_WAIT 主要在服务端且未耗尽端口(服务器四元组不同，一般不耗端口)，通常无需处理。若确有影响，应让客户端主动关闭连接，或用长连接减少连接创建。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：ss -s 汇总、TIME_WAIT 计数、本地端口段、按源端口/四元组的分布。"
+tests:
+  - {scenario: tests/outbound-port-exhaust.yaml, expect_path: [measure, locate_direction, outbound_exhaust_exit]}
+  - {scenario: tests/timewait-normal.yaml, expect_path: [measure, not_significant]}
+feedback:
+  ask: "TIME_WAIT/端口耗尽问题定位了吗？"

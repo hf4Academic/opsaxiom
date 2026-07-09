@@ -1,0 +1,64 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.process.zombie-flood
+  name: 僵尸进程堆积排查
+  taxonomy: host/process/zombie-flood
+  version: 0.1.0
+  maturity: draft
+  platforms: [{os: linux}]
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [ssh]
+  facts: [os.family]
+discovery:
+  - id: zombie_count
+    run: {linux: "ps -eo stat,ppid,pid,comm | awk '$1 ~ /Z/' | head -30"}
+    parser: table/ps-stat-v1
+tree:
+  entry: count_zombies
+  nodes:
+    - id: count_zombies
+      type: check
+      title: 统计僵尸数量并定位父进程
+      run: {linux: "ps -eo stat,ppid,pid,comm | awk '$1 ~ /Z/'"}
+      parser: table/ps-stat-v1
+      branch:
+        - {when: "count(rows) > 100", goto: find_parent}
+        - {when: "count(rows) > 0 and count(rows) <= 100", goto: find_parent}
+        - {when: "count(rows) == 0", goto: none_now}
+      otherwise: find_parent
+      cautions:
+        - "僵尸进程本身不占 CPU/内存(只占一个 PID 表项)，真正的问题是父进程没回收——少量僵尸无害，暴涨才需处理"
+        - "危害在于耗尽 PID(nr_pids)导致 fork 失败。看 /proc/sys/kernel/pid_max 与当前 PID 用量判断紧迫性"
+    - id: none_now
+      type: done
+      summary: "当前无僵尸进程，可能已被回收或告警瞬时。若反复出现，观察是哪个父进程周期性产生。"
+    - id: find_parent
+      type: check
+      title: 找出制造僵尸最多的父进程
+      run: {linux: "ps -eo stat,ppid | awk '$1 ~ /Z/ {print $2}' | sort | uniq -c | sort -rn | head -5"}
+      branch:
+        - {when: "rows[0].count > 50", goto: single_parent_exit}
+        - {when: "count(rows) > 0", goto: multi_parent_exit}
+      otherwise: escalate
+      cautions:
+        - "ppid=1 的僵尸说明原父进程已死、被 init 接管却仍没回收——通常是 init/systemd 之外的自定义 init 有 bug"
+    - id: single_parent_exit
+      type: done
+      summary: "父进程 pid {{rows0_ppid}} 制造了大量僵尸，说明它没有正确 wait() 回收子进程(常见于信号处理/多进程框架的 bug)。根治靠修复或重启该父进程——重启父进程会让 init 接管并清理僵尸。禁止 kill 僵尸本身(它已经死了，kill 无效)。"
+    - id: multi_parent_exit
+      type: done
+      summary: "多个父进程各自产生少量僵尸。核对是否某类框架/脚本共性问题。整体量不大时可观察，逼近 PID 上限时优先重启制造最多的父进程。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：僵尸总数、pid_max 与当前用量、按父进程聚合的僵尸分布。"
+tests:
+  - {scenario: tests/single-bad-parent.yaml, expect_path: [count_zombies, find_parent, single_parent_exit]}
+  - {scenario: tests/no-zombies.yaml, expect_path: [count_zombies, none_now]}
+feedback:
+  ask: "僵尸进程问题定位了吗？"
