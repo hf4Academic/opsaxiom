@@ -19,3 +19,9 @@ prefixes:
   - tracert
   - refresh bgp
   - reset bgp
+  - display vlan
+  - display transceiver
+  - display arp
+  - display ip interface
+  - display interface brief
+  - display device

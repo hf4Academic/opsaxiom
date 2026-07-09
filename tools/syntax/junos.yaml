@@ -18,3 +18,8 @@ prefixes:
   - traceroute
   - clear bgp neighbor
   - clear bgp
+  - show vlans
+  - show interfaces diagnostics optics
+  - show arp
+  - show interfaces terse
+  - show firewall

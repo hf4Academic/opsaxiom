@@ -1,0 +1,79 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.reachability.packet-loss
+  name: 丢包逐跳定位
+  taxonomy: network/reachability/packet-loss
+  version: 0.1.0
+  maturity: draft
+  platforms: [{device: cisco_ios}, {device: huawei_vrp}, {device: junos}]
+  params:
+    - {name: dst, source: alert, desc: 目标地址}
+    - {name: src, source: user, desc: 源地址/出接口}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [network-cli]
+  facts: [device.platform]
+discovery:
+  - id: ping_probe
+    run:
+      cisco_ios: "ping {{dst}} source {{src}} repeat 100"
+      huawei_vrp: "ping -a {{src}} -c 100 {{dst}}"
+      junos: "ping {{dst}} source {{src}} count 100"
+    parser: ntc/{{device.platform}}/ping
+tree:
+  entry: quantify_loss
+  nodes:
+    - id: quantify_loss
+      type: check
+      title: 量化丢包率
+      run:
+        cisco_ios: "ping {{dst}} source {{src}} repeat 100"
+        huawei_vrp: "ping -a {{src}} -c 100 {{dst}}"
+        junos: "ping {{dst}} source {{src}} count 100"
+      parser: ntc/{{device.platform}}/ping
+      branch:
+        - {when: "loss_pct == 100", goto: full_loss_exit}
+        - {when: "loss_pct > 0 and loss_pct < 100", goto: trace_hops}
+        - {when: "loss_pct == 0", goto: no_loss_exit}
+      otherwise: escalate
+      cautions:
+        - "设备自身 ping 用软件转发、优先级低，丢几个包未必代表转发面丢包——大样本(100 包)才有统计意义"
+        - "间歇丢包最难：先确认是稳定丢还是偶发。偶发丢包常与拥塞/微突发相关，不一定是故障"
+    - id: no_loss_exit
+      type: done
+      summary: "本次探测无丢包，可能问题已恢复或为瞬时。若业务仍报丢包，加大探测样本或换源/目标复现。"
+    - id: full_loss_exit
+      type: done
+      summary: "100% 丢包=完全不通。转 network/reachability(路由/接口)或检查目标是否存活。这不是'丢包'而是'不通'，排查方向不同。"
+    - id: trace_hops
+      type: check
+      title: 逐跳追踪定位丢包段
+      run:
+        cisco_ios: "traceroute {{dst}} source {{src}}"
+        huawei_vrp: "tracert -a {{src}} {{dst}}"
+        junos: "traceroute {{dst}} source {{src}}"
+      parser: ntc/{{device.platform}}/traceroute
+      branch:
+        - {when: "any(hops[].loss_pct > 50)", goto: hop_loss_exit}
+      otherwise: interface_check
+      cautions:
+        - "中间跳的丢包/高延迟可能是该跳对 ICMP 限速(control-plane policing)，不代表转发丢包——要结合业务流量验证"
+    - id: hop_loss_exit
+      type: done
+      summary: "定位到某跳开始丢包。在该跳设备上查其入/出接口错包(转 interface-errors)与拥塞。注意排除 ICMP 限速造成的假象：用实际业务端口验证。"
+    - id: interface_check
+      type: done
+      summary: "逐跳未见明显单跳丢包，可能是路径上均匀丢包(拥塞)或非对称路由。检查沿途接口计数器与队列丢弃，核对往返路径是否一致。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：丢包率、traceroute 逐跳结果、源目、沿途接口计数器。"
+tests:
+  - {scenario: tests/hop-loss.yaml, expect_path: [quantify_loss, trace_hops, hop_loss_exit]}
+  - {scenario: tests/full-loss.yaml, expect_path: [quantify_loss, full_loss_exit]}
+feedback:
+  ask: "丢包位置定位了吗？"

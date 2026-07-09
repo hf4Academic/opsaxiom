@@ -1,0 +1,75 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.switching.vlan-misconfig
+  name: VLAN 不通排查（跨交换机同网段）
+  taxonomy: network/switching/vlan-misconfig
+  version: 0.1.0
+  maturity: draft
+  platforms: [{device: cisco_ios}, {device: huawei_vrp}, {device: junos}]
+  params:
+    - {name: vlan_id, source: alert, desc: 涉及的 VLAN}
+    - {name: intf, source: user, desc: 上行/接入接口}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [network-cli]
+  facts: [device.platform]
+discovery:
+  - id: vlan_state
+    run:
+      cisco_ios: "show vlan id {{vlan_id}}"
+      huawei_vrp: "display vlan {{vlan_id}}"
+      junos: "show vlans {{vlan_id}}"
+    parser: ntc/{{device.platform}}/vlan
+tree:
+  entry: vlan_exists
+  nodes:
+    - id: vlan_exists
+      type: check
+      title: VLAN 是否存在且激活
+      run:
+        cisco_ios: "show vlan id {{vlan_id}}"
+        huawei_vrp: "display vlan {{vlan_id}}"
+        junos: "show vlans {{vlan_id}}"
+      parser: ntc/{{device.platform}}/vlan
+      branch:
+        - {when: "count(rows) == 0", goto: vlan_missing_exit}
+        - {when: "count(rows) >= 1", goto: check_trunk}
+      otherwise: escalate
+      cautions:
+        - "跨交换机同 VLAN 不通，八成是中间 trunk 没放行该 VLAN，或某台交换机上根本没创建该 VLAN"
+        - "先在本机确认 VLAN 存在，再看上行 trunk——按拓扑逐台查，别跳跃"
+    - id: vlan_missing_exit
+      type: done
+      summary: "本交换机上不存在该 VLAN。需在本机创建 VLAN 并配置相关接口。这是配置缺失(走变更流程补齐)。"
+    - id: check_trunk
+      type: check
+      title: 检查上行 trunk 是否放行该 VLAN
+      run:
+        cisco_ios: "show interfaces {{intf}} trunk"
+        huawei_vrp: "display interface {{intf}}"
+        junos: "show interfaces {{intf}} extensive"
+      parser: ntc/{{device.platform}}/trunk
+      branch:
+        - {when: "not any(allowed_vlans[] matches '{{vlan_id}}')", goto: trunk_not_allowed_exit}
+      otherwise: mac_learn_exit
+      cautions:
+        - "trunk 的 allowed vlan 列表最容易漏配——加了新 VLAN 却忘了在 trunk 上 allow。也注意 native vlan 不一致会导致 tag 混乱"
+    - id: trunk_not_allowed_exit
+      type: done
+      summary: "上行 trunk 未放行该 VLAN。需在 trunk 接口的 allowed vlan 列表加入该 VLAN(逐跳 trunk 都要放行)。这是本机可修配置(走变更流程)。"
+    - id: mac_learn_exit
+      type: done
+      summary: "VLAN 存在且 trunk 已放行。查该 VLAN 内 MAC 地址学习是否正常(show mac address-table)、接入口 VLAN 划分是否正确、是否 STP 阻塞了端口(转 stp-loop)。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：VLAN 状态、trunk allowed 列表、native vlan、接入口 VLAN 配置、MAC 表。"
+tests:
+  - {scenario: tests/trunk-not-allowed.yaml, expect_path: [vlan_exists, check_trunk, trunk_not_allowed_exit]}
+  - {scenario: tests/vlan-missing.yaml, expect_path: [vlan_exists, vlan_missing_exit]}
+feedback:
+  ask: "VLAN 不通问题定位了吗？"

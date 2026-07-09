@@ -1,0 +1,66 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.physical.optic-fault
+  name: 光模块告警排查（光功率异常）
+  taxonomy: network/physical/optic-fault
+  version: 0.1.0
+  maturity: draft
+  platforms: [{device: cisco_ios}, {device: huawei_vrp}, {device: junos}]
+  params:
+    - {name: intf, source: alert, desc: 告警接口名}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [network-cli]
+  facts: [device.platform]
+discovery:
+  - id: optics
+    run:
+      cisco_ios: "show interfaces {{intf}} transceiver"
+      huawei_vrp: "display transceiver {{intf}} verbose"
+      junos: "show interfaces diagnostics optics {{intf}}"
+    parser: ntc/{{device.platform}}/transceiver
+tree:
+  entry: read_optics
+  nodes:
+    - id: read_optics
+      type: check
+      title: 读取收发光功率并与阈值比较
+      run:
+        cisco_ios: "show interfaces {{intf}} transceiver"
+        huawei_vrp: "display transceiver {{intf}} verbose"
+        junos: "show interfaces diagnostics optics {{intf}}"
+      parser: ntc/{{device.platform}}/transceiver
+      branch:
+        - {when: "rx_power_dbm < -30", goto: no_light_exit}
+        - {when: "rx_power_dbm < rx_power_low_threshold", goto: low_rx_exit}
+        - {when: "tx_power_dbm < tx_power_low_threshold", goto: tx_fault_exit}
+        - {when: "rx_power_dbm >= rx_power_low_threshold and tx_power_dbm >= tx_power_low_threshold", goto: optics_ok}
+      otherwise: escalate
+      cautions:
+        - "光功率单位是 dBm(对数)，-40 比 -10 弱得多。收光(Rx)低看对端发光+链路衰减，发光(Tx)低看本端模块"
+        - "别忽略光模块温度：温度过高会引起误码和短寿。verbose 输出里同时看温度/电压/偏置电流"
+    - id: no_light_exit
+      type: done
+      summary: "收光极低(<-30dBm，基本无光)：对端未发光/光纤断/接头没插好。检查对端接口是否 up、光纤是否插到位、跳纤是否断。这是链路完全中断级别。"
+    - id: low_rx_exit
+      type: done
+      summary: "收光低于下限但有光：光衰过大——脏接头、光纤过长/弯折过度、光模块老化。方向：清洁两端接头、检查链路距离与模块规格匹配、必要时换模块。"
+    - id: tx_fault_exit
+      type: done
+      summary: "发光低于下限：本端光模块故障或即将失效。方向：更换本端光模块(换模块前记录当前读数供对比)。"
+    - id: optics_ok
+      type: done
+      summary: "收发光功率均在正常范围。若接口仍有问题，转 network/physical/interface-errors 查错包，或往上层(链路/协议)排查。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：收发光功率与阈值、温度/电压/偏置电流、模块型号、对端接口状态。"
+tests:
+  - {scenario: tests/no-light.yaml, expect_path: [read_optics, no_light_exit]}
+  - {scenario: tests/low-rx.yaml, expect_path: [read_optics, low_rx_exit]}
+feedback:
+  ask: "光模块问题定位了吗？"

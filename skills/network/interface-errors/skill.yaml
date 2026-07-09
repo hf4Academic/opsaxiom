@@ -1,0 +1,66 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.physical.interface-errors
+  name: 接口错包排查（CRC/input errors）
+  taxonomy: network/physical/interface-errors
+  version: 0.1.0
+  maturity: draft
+  platforms: [{device: cisco_ios}, {device: huawei_vrp}, {device: junos}]
+  params:
+    - {name: intf, source: alert, desc: 告警接口名}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [network-cli]
+  facts: [device.platform]
+discovery:
+  - id: counters
+    run:
+      cisco_ios: "show interfaces {{intf}} counters errors"
+      huawei_vrp: "display interface {{intf}}"
+      junos: "show interfaces {{intf}} extensive"
+    parser: ntc/{{device.platform}}/interface
+tree:
+  entry: read_errors
+  nodes:
+    - id: read_errors
+      type: check
+      title: 读取并分类错包类型
+      run:
+        cisco_ios: "show interfaces {{intf}} counters errors"
+        huawei_vrp: "display interface {{intf}}"
+        junos: "show interfaces {{intf}} extensive"
+      parser: ntc/{{device.platform}}/interface
+      branch:
+        - {when: "crc_errors > 0 and delta(crc_errors, 60s) > 0", goto: crc_exit}
+        - {when: "input_errors > 0 and delta(input_errors, 60s) > 0", goto: input_err_exit}
+        - {when: "output_drops > 0 and delta(output_drops, 60s) > 0", goto: congestion_exit}
+        - {when: "delta(input_errors, 60s) == 0 and delta(crc_errors, 60s) == 0", goto: stale_counters_exit}
+      otherwise: escalate
+      cautions:
+        - "关键是看错包是否'在增长'(delta)，不是累计值。历史累计错包可能来自很久以前的一次抖动，早已恢复"
+        - "先清零计数器再观察一段时间是最干净的判断法——但清零本身要谨慎(会丢历史证据)，先截图留证"
+    - id: crc_exit
+      type: done
+      summary: "CRC 错误在增长——物理层问题：线缆质量差、接头氧化、光衰、电磁干扰。方向：换线/清洁光纤接头/检查光功率(转 network/physical/optic-fault)。CRC 几乎总是物理介质问题，不是配置。"
+    - id: input_err_exit
+      type: done
+      summary: "input errors 增长但 CRC 不显著：可能是 runts/giants(帧长异常，查双工/MTU 不匹配)、或对端问题。核对两端双工与速率协商是否一致。"
+    - id: congestion_exit
+      type: done
+      summary: "output drops 增长——是拥塞而非错包：出方向缓冲区打满丢包。方向：查该口是否过载、QoS 策略、是否需要扩容或限速。不是物理故障。"
+    - id: stale_counters_exit
+      type: done
+      summary: "计数器有历史累计但当前不增长，问题已恢复或为陈旧计数。建议清零计数器后观察 24h 确认。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：接口完整计数器、错包增长速率、两端双工/速率、光功率(若光口)。"
+tests:
+  - {scenario: tests/crc-growing.yaml, expect_path: [read_errors, crc_exit]}
+  - {scenario: tests/congestion.yaml, expect_path: [read_errors, congestion_exit]}
+feedback:
+  ask: "接口错包原因定位了吗？"

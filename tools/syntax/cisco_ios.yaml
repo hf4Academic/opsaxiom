@@ -23,3 +23,10 @@ prefixes:
   - traceroute
   - clear ip bgp
   - clear bgp
+  - show vlan
+  - show interfaces transceiver
+  - show interface transceiver
+  - show interfaces counters
+  - show ip ospf neighbor
+  - show ip arp
+  - show interfaces status

@@ -1,0 +1,83 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.switching.stp-loop
+  name: 二层环路/广播风暴排查（STP）
+  taxonomy: network/switching/stp-loop
+  version: 0.1.0
+  maturity: draft
+  platforms: [{device: cisco_ios}, {device: huawei_vrp}, {device: junos}]
+  params:
+    - {name: vlan_id, source: user, desc: 疑似环路 VLAN}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [network-cli]
+  facts: [device.platform]
+discovery:
+  - id: stp_state
+    run:
+      cisco_ios: "show spanning-tree vlan {{vlan_id}}"
+      huawei_vrp: "display stp brief"
+      junos: "show spanning-tree interface"
+    parser: ntc/{{device.platform}}/stp
+tree:
+  entry: check_symptoms
+  nodes:
+    - id: check_symptoms
+      type: check
+      title: 确认是否为环路特征（高 CPU/广播激增/MAC 漂移）
+      run:
+        cisco_ios: "show interfaces counters"
+        huawei_vrp: "display interface brief"
+        junos: "show interfaces terse"
+      parser: ntc/{{device.platform}}/interface
+      branch:
+        - {when: "any(interfaces[].broadcast_pps > 10000)", goto: check_stp}
+        - {when: "any(interfaces[].util > 90)", goto: check_stp}
+        - {when: "not any(interfaces[].broadcast_pps > 10000) and not any(interfaces[].util > 90)", goto: no_storm_exit}
+      otherwise: escalate
+      cautions:
+        - "环路的杀伤是全局的：多口广播/组播流量暴涨、交换机 CPU 打满、MAC 表剧烈抖动、全网卡顿。别只盯一个口"
+        - "疑似环路时动作要快但要稳——先定位再断链，盲目拔线可能断掉正常业务"
+    - id: no_storm_exit
+      type: done
+      summary: "未见广播风暴/流量暴涨特征，当前不像活动环路。若曾发生，检查 STP 日志(TCN 频繁)与历史。"
+    - id: check_stp
+      type: check
+      title: 检查 STP 状态与拓扑变更
+      run:
+        cisco_ios: "show spanning-tree vlan {{vlan_id}}"
+        huawei_vrp: "display stp brief"
+        junos: "show spanning-tree interface"
+      parser: ntc/{{device.platform}}/stp
+      branch:
+        - {when: "any(ports[].role == 'disabled') and any(ports[].state == 'forwarding')", goto: stp_broken_exit}
+        - {when: "tcn_rate > 10", goto: tcn_flap_exit}
+      otherwise: stp_ok_but_storm_exit
+      cautions:
+        - "STP 正常时应有阻塞口打破环路；若本该阻塞的口在 forwarding，说明 STP 被破坏(BPDU 被过滤/关了 STP/单向链路)"
+        - "频繁 TCN(拓扑变更通知)会清 MAC 表引发泛洪，本身就像风暴——查是谁在频繁 up/down"
+    - id: stp_broken_exit
+      type: done
+      summary: >-
+        STP 未能阻断环路(该阻塞的口在转发)。根因：某处关了 STP、BPDU 被过滤(bpdufilter 误用)、
+        单向链路(光纤单通致 BPDU 收不到)、或接入了不跑 STP 的傻瓜交换机形成环。
+        应急：定位环路两端口，人工 shutdown 其一打破环路(高危，需确认盘位/影响，走人工变更)。根治要恢复 STP。
+    - id: tcn_flap_exit
+      type: done
+      summary: "STP 频繁拓扑变更(TCN)导致 MAC 表反复清空引发泛洪。查是哪个接口频繁 up/down(转 interface-errors/link-flap)或哪个端口没配 portfast/edge 导致每次终端上下线都触发 TCN。"
+    - id: stp_ok_but_storm_exit
+      type: done
+      summary: "STP 状态看似正常但仍有风暴：可能是 STP 之外的二层环(如聚合口配置错误)、或流量本身合法但异常大(转 traffic-anomaly)。逐口核对物理连接与聚合配置。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：广播/流量统计、STP 各口角色与状态、TCN 频率、CPU、可疑接入设备。"
+tests:
+  - {scenario: tests/stp-broken.yaml, expect_path: [check_symptoms, check_stp, stp_broken_exit]}
+  - {scenario: tests/no-storm.yaml, expect_path: [check_symptoms, no_storm_exit]}
+feedback:
+  ask: "二层环路问题定位了吗？"

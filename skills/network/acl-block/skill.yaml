@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.security-policy.acl-block
+  name: ACL 拦截排查（诊断到边界，不改策略）
+  taxonomy: network/security-policy/acl-block
+  version: 0.1.0
+  maturity: draft
+  platforms: [{device: cisco_ios}, {device: huawei_vrp}, {device: junos}]
+  params:
+    - {name: intf, source: alert, desc: 涉及接口}
+    - {name: flow, source: user, desc: 被拦流量的五元组描述}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [network-cli]
+  facts: [device.platform]
+discovery:
+  - id: acl_list
+    run:
+      cisco_ios: "show ip access-lists"
+      huawei_vrp: "display acl all"
+      junos: "show configuration firewall"
+    parser: ntc/{{device.platform}}/acl
+tree:
+  entry: find_applied_acl
+  nodes:
+    - id: find_applied_acl
+      type: check
+      title: 确认接口上应用了哪些 ACL
+      run:
+        cisco_ios: "show ip interface {{intf}}"
+        huawei_vrp: "display ip interface {{intf}}"
+        junos: "show interfaces {{intf}} extensive"
+      parser: ntc/{{device.platform}}/interface
+      branch:
+        - {when: "count(applied_acls) >= 1", goto: check_hits}
+        - {when: "count(applied_acls) == 0", goto: no_acl_exit}
+      otherwise: escalate
+      cautions:
+        - "先确认接口方向(in/out)上确实挂了 ACL——被拦不一定是 ACL，也可能是路由/NAT。别一上来就怀疑 ACL"
+        - "本 Skill 只诊断到'哪条 ACL 命中/拦截'，不修改 ACL——改 ACL 是安全策略变更，必须走 network/security-policy 变更流程并经安全团队"
+    - id: no_acl_exit
+      type: done
+      summary: "该接口方向未应用 ACL，不通的原因不在此。转 network/reachability 或 routing 排查，或检查其他方向/其他设备的 ACL。"
+    - id: check_hits
+      type: check
+      title: 查 ACL 命中计数定位拦截条目
+      run:
+        cisco_ios: "show ip access-lists"
+        huawei_vrp: "display acl all"
+        junos: "show firewall"
+      parser: ntc/{{device.platform}}/acl
+      branch:
+        - {when: "any(entries[].action == 'deny' and entries[].hits > 0)", goto: deny_hit_exit}
+        - {when: "not any(entries[].hits > 0)", goto: implicit_deny_exit}
+      otherwise: escalate
+      cautions:
+        - "看 deny 条目的命中计数增长即可定位是哪条在拦。注意每条 ACL 末尾隐含 deny any——命中不到任何 permit 也会被默认拒"
+    - id: deny_hit_exit
+      type: done
+      summary: >-
+        定位到明确的 deny 条目在拦截该流量(命中计数增长)。这条 deny 是有意还是误配需人工+安全团队判断——
+        本 Skill 到此为止，不擅自改。已生成：命中的 ACL 条目、方向、流量特征，供变更评审。
+    - id: implicit_deny_exit
+      type: done
+      summary: "无显式 deny 命中，但流量也没命中任何 permit——被 ACL 末尾的隐含 deny any 拒绝。需要人工评估是否补一条 permit(走安全变更流程)。同样不擅自改。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：接口应用的 ACL、各条目命中计数、被拦流量五元组、方向。"
+tests:
+  - {scenario: tests/deny-hit.yaml, expect_path: [find_applied_acl, check_hits, deny_hit_exit]}
+  - {scenario: tests/no-acl.yaml, expect_path: [find_applied_acl, no_acl_exit]}
+feedback:
+  ask: "ACL 拦截点定位了吗？"

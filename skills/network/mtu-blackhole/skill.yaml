@@ -1,0 +1,79 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.reachability.mtu-blackhole
+  name: MTU 黑洞排查（大包不通小包通）
+  taxonomy: network/reachability/mtu-blackhole
+  version: 0.1.0
+  maturity: draft
+  platforms: [{device: cisco_ios}, {device: huawei_vrp}, {device: junos}]
+  params:
+    - {name: dst, source: alert, desc: 目标地址}
+    - {name: src, source: user, desc: 源地址}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [network-cli]
+  facts: [device.platform]
+discovery:
+  - id: small_ping
+    run:
+      cisco_ios: "ping {{dst}} source {{src}} size 100 repeat 5"
+      huawei_vrp: "ping -a {{src}} -s 100 -c 5 {{dst}}"
+      junos: "ping {{dst}} source {{src}} size 100 count 5"
+    parser: ntc/{{device.platform}}/ping
+tree:
+  entry: test_small
+  nodes:
+    - id: test_small
+      type: check
+      title: 小包是否通（基线）
+      run:
+        cisco_ios: "ping {{dst}} source {{src}} size 100 repeat 5"
+        huawei_vrp: "ping -a {{src}} -s 100 -c 5 {{dst}}"
+        junos: "ping {{dst}} source {{src}} size 100 count 5"
+      parser: ntc/{{device.platform}}/ping
+      branch:
+        - {when: "loss_pct == 0", goto: test_large}
+        - {when: "loss_pct > 0", goto: not_mtu_exit}
+      otherwise: escalate
+      cautions:
+        - "MTU 黑洞的典型症状：能 ping 通、能建 TCP 连接、但一传大数据就卡死——因为小包过得去大包被丢且 ICMP 分片需求被拦"
+        - "先确认小包通(排除纯不通)，再测大包，对比才有意义"
+    - id: not_mtu_exit
+      type: done
+      summary: "小包就丢，不是 MTU 问题(MTU 黑洞的前提是小包通)。转 network/reachability/packet-loss 常规丢包排查。"
+    - id: test_large
+      type: check
+      title: 大包+禁分片是否通
+      run:
+        cisco_ios: "ping {{dst}} source {{src}} size 1500 df-bit repeat 5"
+        huawei_vrp: "ping -a {{src}} -s 1500 -f -c 5 {{dst}}"
+        junos: "ping {{dst}} source {{src}} size 1500 do-not-fragment count 5"
+      parser: ntc/{{device.platform}}/ping
+      branch:
+        - {when: "loss_pct == 100", goto: mtu_confirmed_exit}
+        - {when: "loss_pct == 0", goto: no_mtu_issue_exit}
+      otherwise: escalate
+      cautions:
+        - "必须带 df-bit(禁止分片)：否则中间设备会分片让大包也能过，就测不出黑洞。df-bit 大包不通=确诊 MTU 黑洞"
+    - id: mtu_confirmed_exit
+      type: done
+      summary: >-
+        确诊 MTU 黑洞：大包(禁分片)不通、小包通。根因是路径上某段 MTU 小于报文大小，且 ICMP
+        '需要分片'报文被防火墙/ACL 拦截(PMTUD 失效)。方向：二分法测出黑洞 MTU 值(逐步减小 size)、
+        找到 MTU 收窄的那一跳(常是隧道/VPN/PPPoE)、放行 ICMP type3 code4 或调整两端 MSS。
+    - id: no_mtu_issue_exit
+      type: done
+      summary: "大包(禁分片)也通，无 MTU 黑洞。若业务仍异常，往应用层或其他方向排查。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：大小包 ping 结果、路径 MTU、可疑隧道/VPN 段、ICMP 是否被过滤。"
+tests:
+  - {scenario: tests/mtu-blackhole.yaml, expect_path: [test_small, test_large, mtu_confirmed_exit]}
+  - {scenario: tests/small-loss.yaml, expect_path: [test_small, not_mtu_exit]}
+feedback:
+  ask: "MTU 黑洞确认了吗？"

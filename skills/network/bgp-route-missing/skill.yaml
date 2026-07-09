@@ -1,0 +1,76 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.routing.bgp-route-missing
+  name: BGP 收不到路由排查
+  taxonomy: network/routing/bgp-route-missing
+  version: 0.1.0
+  maturity: draft
+  platforms: [{device: cisco_ios}, {device: huawei_vrp}, {device: junos}]
+  params:
+    - {name: peer_ip, source: alert, desc: BGP 邻居}
+    - {name: prefix, source: user, desc: 期望收到的前缀}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [network-cli]
+  facts: [device.platform]
+discovery:
+  - id: bgp_state
+    run:
+      cisco_ios: "show ip bgp summary"
+      huawei_vrp: "display bgp peer"
+      junos: "show bgp summary"
+    parser: ntc/{{device.platform}}/bgp-summary
+tree:
+  entry: check_session
+  nodes:
+    - id: check_session
+      type: check
+      title: 先确认会话是否 Established
+      run:
+        cisco_ios: "show ip bgp summary"
+        huawei_vrp: "display bgp peer"
+        junos: "show bgp summary"
+      parser: ntc/{{device.platform}}/bgp-summary
+      branch:
+        - {when: "state != 'Established'", goto: session_down_exit}
+        - {when: "state == 'Established'", goto: check_received}
+      otherwise: escalate
+      cautions:
+        - "会话不 Established 谈何收路由——先排会话(转 bgp-neighbor-down)。这一步是防止在错误方向浪费时间"
+    - id: session_down_exit
+      type: done
+      summary: "会话未 Established，路由自然收不到。转 network/routing/bgp-neighbor-down 先修会话。"
+    - id: check_received
+      type: check
+      title: 检查从该邻居收到的路由（received-routes）
+      run:
+        cisco_ios: "show ip bgp neighbors {{peer_ip}} received-routes"
+        huawei_vrp: "display bgp routing-table peer {{peer_ip}} received-routes"
+        junos: "show route receive-protocol bgp {{peer_ip}}"
+      parser: ntc/{{device.platform}}/bgp-received
+      branch:
+        - {when: "count(rows[].prefix matches '{{prefix}}') >= 1", goto: filtered_in_exit}
+        - {when: "count(rows) == 0", goto: not_advertised_exit}
+      otherwise: escalate
+      cautions:
+        - "received-routes 需要对端允许(soft-reconfiguration inbound 或 route-refresh)，否则看不到被过滤前的原始路由"
+        - "关键区分：对端根本没通告(received 为空) vs 收到了但被本端入方向策略过滤掉(received 有但没进表)"
+    - id: not_advertised_exit
+      type: done
+      summary: "对端根本没向本端通告该前缀。问题在对端：其出方向策略(route-map/policy)未放行、或它自己也没这条路由。需联系对端管理员核对其 advertised-routes。本端无能为力。"
+    - id: filtered_in_exit
+      type: done
+      summary: "本端收到了该前缀但没进路由表——被本端入方向策略过滤。核对本端对该邻居的 inbound route-map/filter-policy/prefix-list，确认是否误过滤。这是本端可修的配置(走变更流程)。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：会话状态、received-routes、本端入方向策略、对端 advertised-routes(若可得)。"
+tests:
+  - {scenario: tests/not-advertised.yaml, expect_path: [check_session, check_received, not_advertised_exit]}
+  - {scenario: tests/session-down.yaml, expect_path: [check_session, session_down_exit]}
+feedback:
+  ask: "BGP 缺路由问题定位了吗？"

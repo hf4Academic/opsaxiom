@@ -1,0 +1,66 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.traffic.anomaly-detect
+  name: 流量异常定位（带宽打满/突发）
+  taxonomy: network/traffic/anomaly-detect
+  version: 0.1.0
+  maturity: draft
+  platforms: [{device: cisco_ios}, {device: huawei_vrp}, {device: junos}]
+  params:
+    - {name: intf, source: alert, desc: 告警接口}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [network-cli]
+  facts: [device.platform]
+discovery:
+  - id: intf_rate
+    run:
+      cisco_ios: "show interfaces {{intf}} counters"
+      huawei_vrp: "display interface {{intf}}"
+      junos: "show interfaces {{intf}} extensive"
+    parser: ntc/{{device.platform}}/interface
+tree:
+  entry: confirm_saturation
+  nodes:
+    - id: confirm_saturation
+      type: check
+      title: 确认接口是否真的打满
+      run:
+        cisco_ios: "show interfaces {{intf}} counters"
+        huawei_vrp: "display interface {{intf}}"
+        junos: "show interfaces {{intf}} extensive"
+      parser: ntc/{{device.platform}}/interface
+      branch:
+        - {when: "util > 90 and direction_in > direction_out", goto: inbound_exit}
+        - {when: "util > 90 and direction_out >= direction_in", goto: outbound_exit}
+        - {when: "util <= 90", goto: not_saturated_exit}
+      otherwise: escalate
+      cautions:
+        - "先分清方向：入方向打满多为外部灌入(下载/攻击/回程)，出方向打满多为内部外发(上传/备份/被当跳板)。方向决定排查侧"
+        - "设备自身的 SNMP/CLI 流量统计有平均窗口，微突发(microburst)看不出来——真要抓突发得靠更细粒度采样或 NetFlow"
+    - id: not_saturated_exit
+      type: done
+      summary: "接口利用率未持续超 90%，非带宽饱和。告警可能来自瞬时突发。若业务仍慢，查队列丢弃(输出 drop)或往上层排查。"
+    - id: inbound_exit
+      type: done
+      summary: >-
+        入方向带宽打满(外部灌入)。方向：用 NetFlow/sFlow 看 Top 源 IP 与端口——正常大流量(备份/同步)可错峰或限速；
+        异常来源(单一源猛灌、大量随机源)疑似 DDoS，转 network/traffic/ddos-suspect。本设备侧先定位大象流。
+    - id: outbound_exit
+      type: done
+      summary: >-
+        出方向带宽打满(内部外发)。方向：定位内部哪台主机在猛发——正常(上传/备份)可错峰；
+        异常(某内网 IP 突发大量外连)警惕主机被入侵当跳板/外传数据，转 sec 域联动排查。
+    - id: escalate
+      type: escalate
+      summary: "打包升级：接口双向速率与利用率、NetFlow Top talkers(若有)、突发时间点、方向。"
+tests:
+  - {scenario: tests/inbound-flood.yaml, expect_path: [confirm_saturation, inbound_exit]}
+  - {scenario: tests/not-saturated.yaml, expect_path: [confirm_saturation, not_saturated_exit]}
+feedback:
+  ask: "流量异常来源定位了吗？"

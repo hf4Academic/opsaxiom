@@ -1,0 +1,67 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.routing.ospf-adjacency-stuck
+  name: OSPF 邻接建立卡住排查
+  taxonomy: network/routing/ospf-adjacency-stuck
+  version: 0.1.0
+  maturity: draft
+  platforms: [{device: cisco_ios}, {device: huawei_vrp}, {device: junos}]
+  params:
+    - {name: neighbor, source: alert, desc: OSPF 邻居}
+    - {name: intf, source: derived, desc: 邻接接口}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [network-cli]
+  facts: [device.platform]
+discovery:
+  - id: ospf_nei
+    run:
+      cisco_ios: "show ip ospf neighbor"
+      huawei_vrp: "display ospf peer"
+      junos: "show ospf neighbor"
+    parser: ntc/{{device.platform}}/ospf-neighbor
+tree:
+  entry: read_state
+  nodes:
+    - id: read_state
+      type: check
+      title: 邻接卡在哪个状态
+      run:
+        cisco_ios: "show ip ospf neighbor"
+        huawei_vrp: "display ospf peer"
+        junos: "show ospf neighbor"
+      parser: ntc/{{device.platform}}/ospf-neighbor
+      branch:
+        - {when: "state == 'Init'", goto: init_exit}
+        - {when: "state == 'ExStart' or state == 'Exchange'", goto: mtu_exit}
+        - {when: "state == 'Down'", goto: down_exit}
+        - {when: "state == 'Full' or state == '2Way'", goto: normal_exit}
+      otherwise: escalate
+      cautions:
+        - "OSPF 状态机卡点直接指向根因：Init=单向收到 hello(对端没回，查对端/单通)；ExStart/Exchange 卡住=经典 MTU 不匹配；Down=完全没 hello"
+        - "2Way 在多路访问网络(以太网)对 DR/BDR 之外的邻居是正常终态，别当故障"
+    - id: down_exit
+      type: done
+      summary: "Down：收不到对端 hello。查接口是否 up、OSPF 是否在该接口启用、hello/dead 定时器与区域号是否两端一致、认证是否匹配。"
+    - id: init_exit
+      type: done
+      summary: "Init：本端收到对端 hello 但对端没认到本端(单向)。多为单通(查双向可达)、或对端的 hello 参数/认证/子网掩码不匹配把本端 hello 丢了。"
+    - id: mtu_exit
+      type: done
+      summary: "卡在 ExStart/Exchange：最经典的 OSPF 故障——两端接口 IP MTU 不匹配导致 DBD 交换失败。核对两端接口 MTU 是否一致(转 mtu 相关)，或配置 ospf mtu-ignore 临时绕过(治标)。"
+    - id: normal_exit
+      type: done
+      summary: "邻接已 Full/2Way(正常)。若路由仍有问题，转 network/routing 查 LSA/路由计算，而非邻接。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：邻接状态、两端接口 MTU/区域/定时器/认证、接口状态。"
+tests:
+  - {scenario: tests/exstart-mtu.yaml, expect_path: [read_state, mtu_exit]}
+  - {scenario: tests/init.yaml, expect_path: [read_state, init_exit]}
+feedback:
+  ask: "OSPF 邻接问题定位了吗？"
