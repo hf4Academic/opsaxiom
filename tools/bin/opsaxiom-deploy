@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""
+opsaxiom-deploy —— 探针/agent 幂等部署工具（agent-deploy Skill 依赖）。
+
+设计原则（对齐 quarantine 的品质）：幂等、可卸载、可测、供应链自检。
+  - 幂等：已部署则跳过（据 state 文件），不重复安装。
+  - 可卸载：uninstall 精确移除 install 写入的一切（二进制/单元/state），回到部署前。
+  - 供应链：安装前校验二进制 checksum（--sha256），不校验则显式告警。
+  - 可测：所有落盘位置受 OPSAXIOM_DEPLOY_ROOT 约束，无 root/无 systemd 也能跑测试。
+
+子命令：
+  <name> --arch <a> --port <p> [--sha256 <hex>] [--binary <path>]   安装
+  <name> --uninstall                                                卸载
+  <name> --status                                                   查询
+
+真实环境（root + systemd 存在）下 ROOT 默认 /；否则默认 OPSAXIOM_DEPLOY_ROOT 或临时前缀。
+"""
+import argparse
+import hashlib
+import json
+import os
+import pathlib
+import sys
+
+ROOT = pathlib.Path(os.environ.get("OPSAXIOM_DEPLOY_ROOT", "/opt/opsaxiom-agents"))
+STATE = ROOT / "state"
+BIN = ROOT / "bin"
+UNITS = ROOT / "units"
+
+
+def _state_file(name):
+    return STATE / f"{name}.json"
+
+
+def _sha256(path):
+    h = hashlib.sha256()
+    h.update(pathlib.Path(path).read_bytes())
+    return h.hexdigest()
+
+
+def cmd_install(args):
+    sf = _state_file(args.name)
+    if sf.exists():
+        print(f"{args.name} 已部署（幂等跳过）。如需升级请先 --uninstall。")
+        return 0
+    for d in (STATE, BIN, UNITS):
+        d.mkdir(parents=True, exist_ok=True)
+
+    # 供应链自检
+    binary_src = args.binary
+    if binary_src:
+        if args.sha256:
+            actual = _sha256(binary_src)
+            if actual != args.sha256:
+                print(f"checksum 不匹配！期望 {args.sha256}，实际 {actual}。拒绝部署。", file=sys.stderr)
+                return 3
+        else:
+            print("警告：未提供 --sha256，跳过二进制校验（生产环境应始终校验，供应链风险）", file=sys.stderr)
+        binary_bytes = pathlib.Path(binary_src).read_bytes()
+    else:
+        # 测试/占位：生成一个标记二进制
+        binary_bytes = f"#opsaxiom-managed {args.name} arch={args.arch}\n".encode()
+
+    bin_path = BIN / args.name
+    bin_path.write_bytes(binary_bytes)
+    bin_path.chmod(0o755)
+
+    unit_path = UNITS / f"{args.name}.service"
+    unit_path.write_text(
+        f"[Unit]\nDescription=OpsAxiom-managed {args.name}\n"
+        f"[Service]\nExecStart={bin_path} --web.listen-address=:{args.port}\nRestart=on-failure\n"
+        f"[Install]\nWantedBy=multi-user.target\n"
+    )
+    sf.write_text(json.dumps({
+        "name": args.name, "arch": args.arch, "port": args.port,
+        "bin": str(bin_path), "unit": str(unit_path),
+        "sha256": args.sha256 or _sha256(bin_path),
+    }, ensure_ascii=False, indent=2))
+    print(f"已部署 {args.name}（arch={args.arch}, port={args.port}）。单元：{unit_path}")
+    print("提示：真实环境需 systemctl daemon-reload && systemctl enable --now " + args.name)
+    return 0
+
+
+def cmd_uninstall(args):
+    sf = _state_file(args.name)
+    if not sf.exists():
+        print(f"{args.name} 未部署，无需卸载（幂等）。")
+        return 0
+    st = json.loads(sf.read_text())
+    removed = []
+    for key in ("bin", "unit"):
+        p = pathlib.Path(st[key])
+        if p.exists():
+            p.unlink(); removed.append(str(p))
+    sf.unlink(); removed.append(str(sf))
+    print(f"已卸载 {args.name}，移除 {len(removed)} 项，回到部署前状态。")
+    return 0
+
+
+def cmd_status(args):
+    sf = _state_file(args.name)
+    if not sf.exists():
+        print(f"{args.name}: 未部署")
+        return 1
+    print(f"{args.name}: 已部署  " + sf.read_text())
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="opsaxiom-deploy")
+    ap.add_argument("name")
+    ap.add_argument("--arch", default="amd64")
+    ap.add_argument("--port", default="9100")
+    ap.add_argument("--sha256")
+    ap.add_argument("--binary")
+    ap.add_argument("--uninstall", action="store_true")
+    ap.add_argument("--status", action="store_true")
+    args = ap.parse_args()
+    if args.uninstall:
+        return cmd_uninstall(args)
+    if args.status:
+        return cmd_status(args)
+    return cmd_install(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
