@@ -51,7 +51,9 @@ tree:
     - {when: 'any(lines[] matches ''NXDOMAIN|can.t resolve'')', goto: search_domain_exit}
     - {when: 'any(lines[] matches ''Address|answer'')', goto: partial_ok_exit}
     otherwise: escalate
-    cautions: [从出问题的 Pod 里测，而不是随便找个 Pod：DNS 问题常与特定节点/网络路径相关。测 kubernetes.default 是最基础的连通性验证]
+    cautions: [从出问题的 Pod 里测，而不是随便找个 Pod：DNS 问题常与特定节点/网络路径相关。测 kubernetes.default 是最基础的连通性验证, 'exec 假设容器内有
+        nslookup——distroless/精简镜像没有。失败时改用 `kubectl debug -it {{pod}} --image=nicolaka/netshoot -- nslookup
+        ...` 注入临时排查容器，或用同节点 DaemonSet 探针']
   - {id: pod_dns_config_exit, type: done, summary: Pod 连不上 DNS 服务(超时)。核对 Pod 的 /etc/resolv.conf nameserver
       是否指向 kube-dns ClusterIP、该 ClusterIP 是否可达(kube-proxy/iptables 规则)、节点到 CoreDNS Pod 的网络(CNI)是否通。}
   - {id: search_domain_exit, type: done, summary: 能连 DNS 但解析返回 NXDOMAIN。核对：短名依赖的 search 域(ndots)是否正确、跨

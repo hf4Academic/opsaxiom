@@ -30,8 +30,8 @@ tree:
     run: {linux: cat /proc/sys/net/netfilter/nf_conntrack_count /proc/sys/net/netfilter/nf_conntrack_max}
     parser: json/conntrack-v1
     branch:
-    - {when: count > max * 0.9, goto: analyze_entries}
-    - {when: count <= max * 0.9, goto: not_full}
+    - {when: ct_count > ct_max * 0.9, goto: analyze_entries}
+    - {when: ct_count <= ct_max * 0.9, goto: not_full}
     otherwise: escalate
     cautions: ['表满的症状是新连接被丢弃、dmesg 报 ''nf_conntrack: table full, dropping packet''，但业务表现是随机连接失败——容易误判为应用问题',
       不是所有主机都启用 conntrack：无 NAT/无 stateful 防火墙的机器可能根本没加载该模块，此时该文件不存在]

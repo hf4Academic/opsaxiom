@@ -1,0 +1,69 @@
+# Skill 生成规范（Authoring Rules）
+
+> 这份文件是"评审教训 → 下一轮生成 prompt"的飞轮载体（docs/01 §4）。
+> 每一条都来自真实踩坑（编号对应 REVIEW-QUEUE 的 F/R 系列）。批量生成 Skill 前，
+> 把本文件作为 system prompt 的一部分喂给生成模型。校验器能挡住的写进校验器，
+> 挡不住的（领域判断、风格）写在这里靠评审兜底。
+
+## A. 硬约束（校验器已强制，写错直接 ERROR）
+
+- **A1 可回滚**：每个 action 必有 `rollback`，平台键与 `run` 一致（S1）。回滚不许空转
+  （全是 echo/注释）——除非 `human_only: true` 且显式 `rollback.advisory: true`（S11）。
+- **A2 变更简报**：`risk>=medium` 必有 `preflight`（watch/abort_if/approval:required）（S2）。
+- **A3 verify**：每个 action 必有 `verify`，其 `assert` 必须是可解析表达式（S3+S5）。
+  散文说明放 `note`，不放 `assert`。
+- **A4 兜底分支**：每个 check 必有 `otherwise`（S4）。
+- **A5 表达式**：`branch.when` / `verify.assert` 只用受限文法（字段引用、比较、and/or/not、
+  matches、函数 max/min/count/any/all/avg/sum/delta）。禁止散文、禁止自造函数（S5）。
+- **A6 命令语法**：网络设备命令必须过平台语法树，别跨平台混用（S6）。
+- **A7 变量来源**：每个 `{{x}}` 的根必须来自 facts/params/ask.binds/discovery/节点输出/{sid}（S9）。
+  新增入参在 `metadata.params` 声明；ask 的产出用 `binds` 声明。
+- **A8 facts 注册**：用到的 fact 必须在 `tools/facts.yaml` 注册（含单位）（FACTS 告警）。
+
+## B. 命令编写铁律（血泪教训）
+
+- **B1 设备/实例名不写死**（F-1：raid 写死 `/dev/md0`）。用遍历/参数：
+  `for d in /dev/md[0-9]*; do ...; done`，或 `{{device}}` 入参。
+- **B2 字段名不与函数名冲突**（F-7：conntrack 用 `count`/`max` 作字段名）。
+  给解析字段起领域名：`ct_count`、`ct_max`、`tw_count`，不要 `count`/`sum`/`max`。
+- **B3 exec/命令不假设工具存在**（F-5：`kubectl exec ... nslookup` 在 distroless 挂）。
+  凡依赖目标端有某工具的命令，必须在 cautions 写明降级路径
+  （如 `kubectl debug --image=netshoot`、`pidstat` 退 `/proc`）。
+- **B4 只查不改的诊断命令优先**。discovery 与 check 只读；任何写操作只能在 action 节点，
+  且过 A1~A3。诊断命令别带副作用（别用会清计数器的命令，如某些 `clear`）。
+- **B5 管道后半段别决定分支**。`when` 基于解析器结构化输出，不基于 grep 文本碰运气。
+
+## C. 决策树结构
+
+- **C1 一个症状一个入口**，L3 叶子按用户口语命名（docs/04 §3）。
+- **C2 不要退化节点**（F-3：iops 的 latency 节点所有分支同一去向）。每个 check 的分支
+  必须导向**实质不同**的结论或下一步；做不到就删掉这个 check。
+- **C3 树要浅、要有出口**。多数诊断 3~7 节点即可；每条路径都要能到 done 或 escalate。
+- **C4 escalate 必可达**（S7）。常见错误：所有 branch + otherwise 都指向别处，escalate 悬空。
+  把 otherwise 指向 escalate 是最稳的写法。
+- **C5 分支求值抗尖峰**：多采样判断用 `count(rows[].x > 阈值) >= k` 而非 `avg`，
+  避免单次尖峰误判（avg/sum 可用，但持续性判断优先 count 模式）。
+
+## D. 领域正确性（校验器挡不住，靠评审）
+
+- **D1 边界即止**：涉及安全策略变更（改 ACL/防火墙）、物理操作（换盘/换线）、
+  跨团队资源（对端设备/DB schema）时，Skill 只诊断到边界就 done/escalate，不越权执行。
+  正面样例：bgp 的 acl_suspect、fs-readonly 的 hardware_exit。
+- **D2 危险操作宁可 human_only**：fsck、DROP、核心设备硬复位——标 `human_only`，只出指导。
+- **D3 回滚要诚实**：service_restore 型要说清"不是撤销而是恢复手段"；transaction 型
+  （rollout undo / commit confirmed）说清确认窗口；快照型要求"执行前必须已有快照"。
+- **D4 cautions 写"坑"不写"废话"**。每条 caution 是一个具体的、会让人踩坑的事实
+  （"137=OOM 不是崩溃"、"df 有空间但报 No space 多半是 inode"、"steal 在物理机恒为 0"），
+  不是"请小心操作"这种正确的废话。
+- **D5 区分症状与根因**：退出码/状态先分类，根因区分放决策树内部，别在 taxonomy 层硬分。
+
+## E. 生成流水线自检清单（生成后、提交前）
+
+1. `python tools/validate.py <skill>` 零 ERROR（含 S1-S11、S6 语法、S9 变量、FACTS）。
+2. 通读每个 caution：是否 D4 级"坑"？
+3. 每个 action：回滚真能执行吗（非空转）？verify.assert 真能判吗？
+4. 每条路径都能到终点吗？escalate 可达吗？
+5. 有 action 的，配套写 tests 场景（P-5 起要求可执行 sim）。
+
+---
+（本文件随每轮评审增补。新教训 → 新条目 → 下一轮生成 prompt。）

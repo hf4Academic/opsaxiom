@@ -41,10 +41,12 @@ tree:
     run: {linux: iostat -dx 1 3}
     parser: table/iostat-v1
     branch:
-    - {when: 'count(rows[].await > 50) >= 2', goto: find_io_process}
+    - {when: 'count(rows[].await > 50) >= 2', goto: slow_disk_exit}
     - {when: 'count(rows[].aqu_sz > 10) >= 2', goto: find_io_process}
     otherwise: find_io_process
-    cautions: [await 高=每次 IO 慢(可能盘老化/RAID 降级)；队列深(aqu-sz)=请求太多。两者处置方向不同]
+    cautions: [await 高=每次 IO 慢(盘老化/RAID 降级/介质问题)→查硬件；aqu-sz 高=请求太多→找发起方]
+  - {id: slow_disk_exit, type: done, summary: 每次 IO 延迟高(await 大)但队列不深，指向磁盘介质本身慢：盘老化、RAID 降级重建中、SSD 掉速或坏道。查
+      SMART/RAID 状态与 dmesg IO 错误，转 host/storage/raid-degraded 或换盘评估，而非找进程。}
   - id: find_io_process
     type: check
     title: 定位产生 IO 的进程
