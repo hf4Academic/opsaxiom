@@ -24,3 +24,22 @@
 - **建议**：v0.2 考虑要求 `verify.expect` 也走受限表达式（保留 `expect_human` 作为附带说明），
   或至少要求 `verify` 提供一个机器可判的 `assert` 字段 + 可选散文 `note`。
 
+
+## R-3 (O-3) 表达式缺 avg/sum 聚合函数
+
+- **发现于**：O-3 批量生成 host 域诊断 Skill 时。
+- **问题**：docs/03 §5 允许的聚合仅 `max/min/count/any/all/delta`。诊断里大量需要"多次采样取均值"
+  的判断（vmstat/iostat/mpstat 的 wa、util、steal 等），没有 `avg`/`sum` 很别扭。
+- **本轮处理**：一律改用 `count(rows[].x > 阈值) >= k` 表达"k 个以上采样超阈值"，语义上更稳健
+  （不受单次尖峰影响），已能覆盖需求，但对"求和类"指标（如总带宽）仍不便。
+- **建议（待 Fable 定夺）**：v0.2 在允许函数集加入 `avg` 与 `sum`（纯确定性、对弱模型无负担），
+  同时保留 count 模式作为推荐写法。若同意，需同步更新 docs/03 §5、tools/exprlang.py 的 _FUNCS、
+  以及本文 R-3 关闭。
+
+## R-4 (O-3) 模板变量命名：数组元素字段引用（rows0_comm 之类）
+
+- **发现于**：O-3。`done` 节点的 summary 想引用"排第一的进程名"，schema 的 `{{}}` 模板不支持
+  `{{rows[0].comm}}` 这种带下标的路径（点分变量名限制），只能退而用 `{{rows0_comm}}` 这种拍平写法，
+  需要引擎在渲染时提供别名映射。
+- **建议**：v0.2 明确模板变量语法是否允许下标/点路径（如 `{{discovery.free.available_pct}}`），
+  并规定 discovery 输出如何绑定到模板命名空间。当前 summary 里的变量渲染契约未定义，记此备忘。

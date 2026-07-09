@@ -1,0 +1,70 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.process.dstate-hang
+  name: 进程卡 D 状态（不可中断睡眠）排查
+  taxonomy: host/process/dstate-hang
+  version: 0.1.0
+  maturity: draft
+  platforms: [{os: linux}]
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [ssh]
+  facts: [os.family]
+discovery:
+  - id: dstate_procs
+    run: {linux: "ps -eo stat,pid,comm | awk '$1 ~ /^D/'"}
+    parser: table/ps-stat-v1
+tree:
+  entry: find_dstate
+  nodes:
+    - id: find_dstate
+      type: check
+      title: 找出卡 D 状态的进程
+      run: {linux: "ps -eo stat,pid,comm | awk '$1 ~ /^D/'"}
+      parser: table/ps-stat-v1
+      branch:
+        - {when: "count(rows) > 0", goto: inspect_wchan}
+        - {when: "count(rows) == 0", goto: none_now}
+      otherwise: escalate
+      cautions:
+        - "D 状态 = 进程在等内核 IO 且不可被信号打断，所以 kill -9 都杀不掉——这是新手最大的困惑点，别浪费时间尝试 kill"
+        - "少量 D 状态是正常的(瞬时 IO)；持续卡 D 才是问题，且会推高 loadavg 造成'负载高但 CPU 空闲'的假象"
+    - id: none_now
+      type: done
+      summary: "当前无持续 D 状态进程，可能瞬时 IO 已完成。若 loadavg 曾异常高而 CPU 空闲，回溯当时是否有存储抖动。"
+    - id: inspect_wchan
+      type: check
+      title: 查看进程卡在哪个内核函数（wchan/stack）
+      run: {linux: "for p in {{pids}}; do echo \"pid $p:\"; cat /proc/$p/wchan 2>/dev/null; echo; cat /proc/$p/stack 2>/dev/null | head -5; done"}
+      branch:
+        - {when: "any(lines[] matches 'nfs|rpc|sunrpc')", goto: nfs_exit}
+        - {when: "any(lines[] matches 'blk|scsi|io_schedule|wait_on_page')", goto: local_io_exit}
+        - {when: "any(lines[] matches 'down_|mutex|rwsem')", goto: lock_exit}
+      otherwise: generic_exit
+      cautions:
+        - "/proc/PID/stack 需要 root 且内核支持。wchan 给出等待的内核函数名，是判断 D 状态根因的钥匙"
+    - id: nfs_exit
+      type: done
+      summary: "进程卡在 NFS/RPC——远端 NFS 服务器无响应或网络不通，这是 D 状态最经典的原因。检查 NFS server 可达性与健康；hard mount 会永久卡住(除非 server 恢复或用 intr/soft 挂载)。根治在 NFS 服务端，不在本机。"
+    - id: local_io_exit
+      type: done
+      summary: "进程卡在本地块设备 IO(io_schedule/blk 层)。底层磁盘可能故障或极慢。检查 SMART/RAID 状态、dmesg 有无 IO error。转 host/storage 排查硬件。"
+    - id: lock_exit
+      type: done
+      summary: "进程卡在内核信号量/互斥锁，疑似内核锁竞争或死锁。收集所有 D 状态进程的 stack 看是否互相等待，多为内核/驱动 bug，记录内核版本上报。"
+    - id: generic_exit
+      type: done
+      summary: "D 状态但 wchan 不典型。收集所有 D 进程的 wchan/stack 与 dmesg，重点排查存储与网络文件系统(D 状态九成与 IO 有关)。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：D 状态进程列表、各自 wchan/stack、dmesg IO 记录、挂载类型(尤其 NFS)。"
+tests:
+  - {scenario: tests/nfs-hang.yaml, expect_path: [find_dstate, inspect_wchan, nfs_exit]}
+  - {scenario: tests/no-dstate.yaml, expect_path: [find_dstate, none_now]}
+feedback:
+  ask: "D 状态进程原因定位了吗？"

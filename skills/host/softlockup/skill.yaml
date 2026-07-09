@@ -1,0 +1,74 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.cpu.softlockup
+  name: 内核 soft/hard lockup 排查
+  taxonomy: host/cpu/softlockup
+  version: 0.1.0
+  maturity: draft
+  platforms: [{os: linux}]
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [ssh]
+  facts: [os.family, kernel.version]
+discovery:
+  - id: lockup_log
+    run: {linux: "dmesg -T | grep -iE 'soft lockup|hard LOCKUP|rcu_sched|watchdog|BUG:' | tail -20"}
+    parser: text/dmesg-lockup-v1
+tree:
+  entry: confirm_lockup
+  nodes:
+    - id: confirm_lockup
+      type: check
+      title: 确认 lockup 类型
+      run: {linux: "dmesg -T | grep -iE 'soft lockup|hard LOCKUP|rcu.*stall|watchdog' | tail -10"}
+      parser: text/dmesg-lockup-v1
+      branch:
+        - {when: "any(lines[] matches 'hard LOCKUP|NMI watchdog')", goto: hard_lockup_exit}
+        - {when: "any(lines[] matches 'soft lockup')", goto: soft_lockup_analyze}
+        - {when: "any(lines[] matches 'rcu.*stall')", goto: rcu_stall_exit}
+        - {when: "count(lines) == 0", goto: no_lockup}
+      otherwise: escalate
+      cautions:
+        - "soft lockup=某 CPU 在内核态跑了 >20s 没让出(watchdog 线程饿死)；hard lockup=CPU 连中断都不响应(更严重，常是硬件或死锁)"
+        - "lockup 常导致系统假死/命令卡住——能登进去排查已属幸运，优先抓 dmesg 和调用栈，随时可能彻底 hang"
+    - id: no_lockup
+      type: done
+      summary: "近期 dmesg 无 lockup 记录。若系统曾假死，可能未留下日志(hard lockup 常来不及写盘)，检查是否有 kdump/vmcore。"
+    - id: soft_lockup_analyze
+      type: check
+      title: 从调用栈判断 soft lockup 来源
+      run: {linux: "dmesg -T | grep -A15 'soft lockup' | tail -20"}
+      branch:
+        - {when: "any(lines[] matches 'spin_lock|mutex|down_')", goto: lock_contention_exit}
+        - {when: "any(lines[] matches 'xfs|ext4|nfs|blk|scsi')", goto: io_stack_exit}
+      otherwise: generic_soft_exit
+      cautions:
+        - "调用栈里的锁函数(spin_lock/mutex)→内核锁竞争或死锁；文件系统/块层函数→底层 IO 卡死(常伴坏盘/存储抖动)"
+    - id: lock_contention_exit
+      type: done
+      summary: "soft lockup 栈指向内核锁竞争/死锁。收集完整 dmesg 栈，多为内核 bug 或驱动问题——记录内核版本，检索已知问题，考虑升级内核。禁止随意 kill 相关进程(可能加剧死锁)。"
+    - id: io_stack_exit
+      type: done
+      summary: "soft lockup 栈指向文件系统/块层，底层 IO 卡死。检查存储健康(SMART/RAID)、多路径状态、后端存储抖动。转 host/storage 排查硬件。"
+    - id: generic_soft_exit
+      type: done
+      summary: "soft lockup 但栈不典型。保存完整 dmesg 与内核版本，检查是否 CPU 长时间高负载饿死 watchdog(转 load-high)或已知内核 bug。"
+    - id: hard_lockup_exit
+      type: escalate
+      summary: "hard lockup(NMI watchdog)——CPU 完全无响应，通常是硬件故障、内核死锁或虚拟化层问题。系统随时可能彻底 hang。立即：保存 dmesg、配置/检查 kdump 以便下次抓 vmcore、检查硬件(内存 ECC/CPU)、上报厂商。已生成硬件+内核排查清单。"
+    - id: rcu_stall_exit
+      type: done
+      summary: "RCU stall——某 CPU 长时间未响应 RCU 宽限期，常与 soft lockup 同源(长时间关抢占/中断)。收集栈，多指向驱动或内核 bug。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：dmesg lockup 记录与调用栈、内核版本、是否配置 kdump、硬件信息。"
+tests:
+  - {scenario: tests/soft-lockup-io.yaml, expect_path: [confirm_lockup, soft_lockup_analyze, io_stack_exit]}
+  - {scenario: tests/hard-lockup.yaml, expect_path: [confirm_lockup, hard_lockup_exit]}
+feedback:
+  ask: "lockup 原因定位了吗？"

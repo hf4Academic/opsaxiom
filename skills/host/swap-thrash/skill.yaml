@@ -1,0 +1,66 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.memory.swap-thrash
+  name: swap 抖动（换页风暴）排查
+  taxonomy: host/memory/swap-thrash
+  version: 0.1.0
+  maturity: draft
+  platforms: [{os: linux}]
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [ssh]
+  facts: [os.family, mem.total]
+discovery:
+  - id: swap_state
+    run: {linux: "free -m; vmstat 1 3"}
+    parser: table/vmstat-v1
+tree:
+  entry: confirm_thrash
+  nodes:
+    - id: confirm_thrash
+      type: check
+      title: 确认是否在剧烈换页
+      run: {linux: "vmstat 1 3"}
+      parser: table/vmstat-v1
+      branch:
+        - {when: "count(rows[].si + rows[].so > 1000) >= 2", goto: check_swap_usage}
+        - {when: "count(rows[].si + rows[].so > 1000) < 2", goto: not_thrashing}
+      otherwise: escalate
+      cautions:
+        - "关键是看 si/so(每秒换入换出 KB)的速率，不是 swap 用量。swap 用了不等于抖动——静止的 swap 无害，持续高速 si/so 才是灾难"
+        - "swap 抖动时系统极慢但 CPU/内存单看都不满，最迷惑人。vmstat 的 si/so 是唯一直接证据"
+    - id: not_thrashing
+      type: done
+      summary: "si/so 换页速率不高，非 swap 抖动。即使 swap 有占用也属正常(内核换出冷页)。若系统慢，转其他方向排查。"
+    - id: check_swap_usage
+      type: check
+      title: 判断内存缺口大小
+      run: {linux: "free -m | awk '/Mem:/{print \"avail\",$7} /Swap:/{print \"swapused\",$3}'"}
+      parser: table/free-v1
+      branch:
+        - {when: "available_pct < 3", goto: severe_exit}
+        - {when: "available_pct >= 3", goto: moderate_exit}
+      otherwise: escalate
+      cautions:
+        - "内存严重不足时 swap 抖动是 OOM 的前兆——系统在垂死挣扎地换页。此时逼近失控，处置要快"
+    - id: severe_exit
+      type: done
+      summary: >-
+        内存严重不足并剧烈换页，濒临 OOM/假死。紧急：定位最大内存进程(转 host/memory/leak)并按业务确认后重启缓解；
+        评估是否需临时降低 swappiness 或增加物理内存。别只加 swap——那只会让抖动持续更久而不解决根因。
+    - id: moderate_exit
+      type: done
+      summary: "有换页但内存缺口不极端，可能是 swappiness 偏高导致过早换出热页。核对 vm.swappiness(数据库类应用常设为 1~10)；根治仍是减少内存占用或扩容。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：free、vmstat si/so、swappiness、按 RSS 排序的进程。"
+tests:
+  - {scenario: tests/severe-thrash.yaml, expect_path: [confirm_thrash, check_swap_usage, severe_exit]}
+  - {scenario: tests/no-thrash.yaml, expect_path: [confirm_thrash, not_thrashing]}
+feedback:
+  ask: "swap 抖动问题定位了吗？"
