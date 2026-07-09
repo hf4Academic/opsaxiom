@@ -1,0 +1,67 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.release.hpa-not-scaling
+  name: HPA 不扩容排查
+  taxonomy: k8s/release/hpa-not-scaling
+  version: 0.1.0
+  maturity: draft
+  platforms: [{platform: kubernetes}]
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [kubectl]
+  facts: [k8s.context]
+discovery:
+  - id: hpa_state
+    run: {kubectl: "kubectl -n {{ns}} describe hpa {{hpa}} | grep -A8 -iE 'Metrics|Conditions|Events'"}
+    parser: text/hpa-v1
+tree:
+  entry: read_metrics
+  nodes:
+    - id: read_metrics
+      type: check
+      title: 检查 HPA 是否拿得到指标
+      run: {kubectl: "kubectl -n {{ns}} get hpa {{hpa}} -o jsonpath='{.status.currentMetrics}|{.status.conditions[*].reason}'"}
+      parser: text/hpa-v1
+      branch:
+        - {when: "any(lines[] matches 'unknown|<unknown>|FailedGetMetrics|unable to')", goto: metrics_unavailable_exit}
+        - {when: "any(lines[] matches 'ScalingLimited|TooManyReplicas')", goto: max_reached_exit}
+      otherwise: check_threshold
+      cautions:
+        - "HPA 不扩容第一步永远是看它有没有指标：显示 <unknown> 就是 metrics-server 或自定义指标源没数据，此时 HPA 完全瘫痪(不敢扩不敢缩)"
+        - "HPA 有稳定窗口(默认扩容立即、缩容 5 分钟)和容忍度(10%)——指标刚过阈值一点点、或刚扩过，不动是正常的"
+    - id: metrics_unavailable_exit
+      type: done
+      summary: "HPA 拿不到指标(<unknown>)。核对：metrics-server 是否部署且健康(kubectl top pods 能否出数)、Pod 是否设了 resources.requests(CPU HPA 依赖 requests 算百分比，没 requests 就没法算)、自定义指标的 adapter 是否正常。"
+    - id: max_reached_exit
+      type: done
+      summary: "HPA 已到 maxReplicas 上限(ScalingLimited)。这是配置约束不是故障——若确需更多副本，调高 maxReplicas；同时核对是否底层资源(节点)也够，否则扩了也是 Pending。"
+    - id: check_threshold
+      type: check
+      title: 有指标——判断是否真该扩容
+      run: {kubectl: "kubectl -n {{ns}} get hpa {{hpa}} -o jsonpath='{.spec.metrics[*].resource.target.averageUtilization}|{.status.currentMetrics[*].resource.current.averageUtilization}|{.status.currentReplicas}|{.spec.maxReplicas}'"}
+      branch:
+        - {when: "current_util < target_util", goto: below_threshold_exit}
+        - {when: "current_replicas >= max_replicas", goto: max_reached_exit}
+        - {when: "current_util >= target_util and current_replicas < max_replicas", goto: should_scale_exit}
+      otherwise: escalate
+      cautions:
+        - "当前利用率没超目标阈值→本来就不该扩，这不是 bug。确认你看的指标口径与 HPA 一致(HPA 按 requests 算利用率，不是按 limit 或绝对值)"
+    - id: below_threshold_exit
+      type: done
+      summary: "当前指标未达扩容阈值，HPA 不扩是正确行为。若你认为该扩，检查：阈值是否设得过高、HPA 依据的指标是否真反映负载(如按 CPU 但瓶颈其实在内存/连接数——应加对应指标)。"
+    - id: should_scale_exit
+      type: done
+      summary: "指标已超阈值且未达上限却没扩，异常。检查 HPA behavior 的 stabilizationWindow/policies 是否过于保守、是否刚扩过在冷却、controller-manager 是否正常。查 HPA events 看是否有扩容尝试被拒。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：HPA describe(metrics/conditions/events)、metrics-server 状态、Pod requests 配置、目标与当前指标。"
+tests:
+  - {scenario: tests/hpa-no-metrics.yaml, expect_path: [read_metrics, metrics_unavailable_exit]}
+  - {scenario: tests/hpa-below-threshold.yaml, expect_path: [read_metrics, check_threshold, below_threshold_exit]}
+feedback:
+  ask: "HPA 不扩容的原因定位了吗？"

@@ -1,0 +1,88 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.release.rollout-stuck
+  name: 发布卡住 / rollout 不推进排查
+  taxonomy: k8s/release/rollout-stuck
+  version: 0.1.0
+  maturity: draft
+  platforms: [{platform: kubernetes}]
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [kubectl]
+  facts: [k8s.context]
+discovery:
+  - id: rollout_status
+    run: {kubectl: "kubectl -n {{ns}} rollout status deploy/{{deploy}} --timeout=5s; kubectl -n {{ns}} get deploy {{deploy}} -o jsonpath='{.status}'"}
+    parser: json/k8s-deploy-status-v1
+tree:
+  entry: locate_stuck
+  nodes:
+    - id: locate_stuck
+      type: check
+      title: 定位卡在哪个环节
+      run: {kubectl: "kubectl -n {{ns}} get deploy {{deploy}} -o jsonpath='{.spec.replicas}|{.status.updatedReplicas}|{.status.readyReplicas}|{.status.availableReplicas}'; kubectl -n {{ns}} get rs -l app={{deploy}} --sort-by=.metadata.creationTimestamp | tail -2"}
+      parser: json/k8s-deploy-status-v1
+      branch:
+        - {when: "updated_replicas == 0", goto: new_pods_not_starting}
+        - {when: "updated_replicas > 0 and ready_replicas < spec_replicas", goto: new_pods_not_ready}
+      otherwise: check_pdb
+      cautions:
+        - "先看新 RS 的 Pod 有没有起来：updatedReplicas=0→新 Pod 根本没创建(配额/调度问题)；>0 但没 Ready→新 Pod 起来了但过不了就绪探针"
+        - "发布卡住时旧版本通常还在服务(这是 rollingUpdate 的保护)，所以业务可能没受影响——别慌，有时间慢慢排"
+    - id: new_pods_not_starting
+      type: check
+      title: 新 Pod 未创建——查为什么
+      run: {kubectl: "kubectl -n {{ns}} get rs -l app={{deploy}} --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' | xargs -I{} kubectl -n {{ns}} describe rs {} | grep -A3 -iE 'Events|Error|Failed'"}
+      branch:
+        - {when: "any(lines[] matches 'quota|exceeded|forbidden')", goto: quota_exit}
+        - {when: "any(lines[] matches 'FailedCreate|limit')", goto: quota_exit}
+      otherwise: scheduling_exit
+      cautions:
+        - "新 RS 建了但 Pod 数为 0，看 RS 的 events：常见是 ResourceQuota 超限或 LimitRange 拒绝"
+    - id: quota_exit
+      type: done
+      summary: "新 Pod 因配额/限额创建失败(ResourceQuota 或 LimitRange)。核对 namespace 配额余量与新版本 requests；发布若调高了资源请求会触发。方向：清理资源或调整配额/请求。"
+    - id: scheduling_exit
+      type: done
+      summary: "新 Pod 创建了但调度不上去。转 k8s/scheduling/pending-unschedulable 排查调度失败原因(资源/污点/亲和性)。"
+    - id: new_pods_not_ready
+      type: check
+      title: 新 Pod 起来了但不 Ready——查就绪失败
+      run: {kubectl: "kubectl -n {{ns}} get pods -l app={{deploy}} -o jsonpath='{range .items[*]}{.metadata.name}{\" \"}{.status.phase}{\" \"}{.status.containerStatuses[*].ready}{\"\\n\"}{end}' | tail -5"}
+      branch:
+        - {when: "any(lines[] matches 'CrashLoop|Error')", goto: crashloop_exit}
+        - {when: "any(lines[] matches 'Running.*false')", goto: readiness_exit}
+      otherwise: escalate
+      cautions:
+        - "新版本 Pod 起不来时，progressDeadlineSeconds 到期后 rollout 会标记为失败但不自动回滚——需要人工决定 fix-forward 还是回滚"
+    - id: crashloop_exit
+      type: done
+      summary: "新版本 Pod CrashLoop，发布引入了崩溃。转 k8s/workload/crashloop 定位崩溃原因。决策：能快速修则 fix-forward，否则 kubectl rollout undo 回滚(转 k8s/release/rollback)。旧版本仍在服务，不必惊慌。"
+    - id: readiness_exit
+      type: done
+      summary: "新 Pod Running 但 readinessProbe 不过，卡在就绪。检查新版本的健康检查端点、启动耗时是否超过探针初始延迟、依赖是否就绪。转 k8s/workload/probe-failing。"
+    - id: check_pdb
+      type: check
+      title: 检查是否被 PodDisruptionBudget 阻塞
+      run: {kubectl: "kubectl -n {{ns}} get pdb -o wide | grep -iE '{{deploy}}|ALLOWED' | head"}
+      branch:
+        - {when: "any(lines[] matches '0 +[0-9]|DISRUPTIONS')", goto: pdb_exit}
+      otherwise: escalate
+      cautions:
+        - "PDB 设置过严(minAvailable 太高)会阻止旧 Pod 被驱逐，导致滚动更新推不下去——容易被忽略的卡点"
+    - id: pdb_exit
+      type: done
+      summary: "PodDisruptionBudget 阻止了旧 Pod 驱逐，滚动更新卡住。核对 PDB 的 minAvailable/maxUnavailable 是否与副本数矛盾(如 3 副本却要求 minAvailable=3)。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：deploy status、新老 RS 状态、Pod 就绪情况、events、PDB。"
+tests:
+  - {scenario: tests/rollout-crashloop.yaml, expect_path: [locate_stuck, new_pods_not_ready, crashloop_exit]}
+  - {scenario: tests/rollout-quota.yaml, expect_path: [locate_stuck, new_pods_not_starting, quota_exit]}
+feedback:
+  ask: "发布卡住的原因定位了吗？"

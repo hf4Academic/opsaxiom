@@ -1,0 +1,91 @@
+apiVersion: skill/v0.1
+kind: Change
+metadata:
+  id: k8s.release.rollback
+  name: Deployment 回滚到上一版本
+  taxonomy: k8s/release/rollback
+  version: 0.1.0
+  maturity: draft
+  platforms: [{platform: kubernetes}]
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: high_risk_write
+  connectors: [kubectl]
+  facts: [k8s.context]
+discovery:
+  - id: rollout_history
+    run: {kubectl: "kubectl -n {{ns}} rollout history deploy/{{deploy}}"}
+    parser: text/rollout-history-v1
+tree:
+  entry: assess_current
+  nodes:
+    - id: assess_current
+      type: check
+      title: 确认当前版本异常且存在可回滚的历史版本
+      run: {kubectl: "kubectl -n {{ns}} rollout history deploy/{{deploy}} | tail -5; kubectl -n {{ns}} get deploy {{deploy}} -o jsonpath='{.status.replicas}/{.status.availableReplicas}'"}
+      parser: text/rollout-history-v1
+      branch:
+        - {when: "revision_count >= 2", goto: identify_target}
+        - {when: "revision_count < 2", goto: no_history_exit}
+      otherwise: escalate
+      cautions:
+        - "回滚前先确认新版本确实是问题根源——如果问题是外部依赖或数据，回滚代码无济于事反而白折腾"
+        - "回滚只回 Deployment 的 Pod 模板，不回滚数据库 schema/数据迁移。若新版本做了不兼容的 DB 变更，回滚可能引发更严重问题——先确认迁移是否向后兼容"
+    - id: no_history_exit
+      type: done
+      summary: "无可回滚的历史版本(revision<2)。当前版本是首版或历史被清理。只能向前修复(fix-forward)，不能回滚。"
+    - id: identify_target
+      type: check
+      title: 确认回滚目标版本
+      run: {kubectl: "kubectl -n {{ns}} rollout history deploy/{{deploy}} --revision={{target_revision}}"}
+      branch:
+        - {when: "any(lines[] matches 'Image|Containers')", goto: do_rollback}
+      otherwise: escalate
+      cautions:
+        - "默认回滚到上一版(revision-1)，但'上一版'未必是'最后一个好版本'。核对目标 revision 的镜像确实是已知正常的版本"
+    - id: do_rollback
+      type: action
+      title: 执行回滚
+      risk: high
+      preflight:
+        blast_radius: "该 Deployment 的所有 Pod 将滚动替换为目标版本；按 rollingUpdate 策略逐步进行，期间新老版本共存"
+        watch:
+          - {run: {kubectl: "kubectl -n {{ns}} rollout status deploy/{{deploy}} --timeout=10s"}, expect: "successfully rolled out", interval: 10s}
+          - {run: {kubectl: "kubectl -n {{ns}} get deploy {{deploy}} -o jsonpath='{.status.availableReplicas}'"}, expect: "可用副本数恢复到期望值"}
+        abort_if:
+          - "回滚后新 Pod 同样 CrashLoop 或不 Ready 超过 5 分钟"
+          - "业务错误率/延迟未随回滚恢复"
+        approval: required
+        est_downtime: "滚动回滚，理论零停机；若 maxUnavailable 设置激进则有短暂容量下降"
+      dryrun:
+        run: {kubectl: "kubectl -n {{ns}} rollout history deploy/{{deploy}} --revision={{target_revision}}"}
+        interpret: "展示目标版本的完整模板，确认镜像/配置正是要回到的版本"
+      run: {kubectl: "kubectl -n {{ns}} rollout undo deploy/{{deploy}} --to-revision={{target_revision}}"}
+      rollback:
+        type: transaction
+        window: 10m
+        confirm:
+          run: {kubectl: "kubectl -n {{ns}} rollout status deploy/{{deploy}} --timeout=30s"}
+        run: {kubectl: "kubectl -n {{ns}} rollout undo deploy/{{deploy}}"}
+      verify:
+        run: {kubectl: "kubectl -n {{ns}} rollout status deploy/{{deploy}} --timeout=120s && kubectl -n {{ns}} get pods -l app={{deploy}}"}
+        expect: "successfully rolled out 且 Pod 全部 Ready"
+        on_fail: rollback
+      cautions:
+        - "transaction 型回滚：本操作本身就是一次'回滚上一版'，若发现回错了版本，确认窗口内可再 rollout undo 回到操作前状态"
+        - "回滚是 K8s 原生事务(rollout undo)，天然可逆——但要在 verify 确认业务真恢复，而非只看 Pod Ready(Pod 起来≠业务正常)"
+      goto: done_ok
+    - id: done_ok
+      type: done
+      summary: "回滚完成，目标版本 Pod 全部 Ready。务必确认业务指标(错误率/延迟)真正恢复，而非只看 Pod 状态。事后：记录本次故障版本，阻止其再次发布；补充发布前的检查项。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：rollout history、当前副本状态、目标 revision 详情、业务异常证据。"
+tests:
+  - {scenario: tests/rollback-success.yaml, expect_path: [assess_current, identify_target, do_rollback, done_ok], rollback_assert: true}
+  - {scenario: tests/rollback-no-history.yaml, expect_path: [assess_current, no_history_exit]}
+feedback:
+  ask: "回滚后业务恢复了吗？"

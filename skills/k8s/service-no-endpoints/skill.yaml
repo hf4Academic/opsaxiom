@@ -1,0 +1,75 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.networking.service-no-endpoints
+  name: Service 访问不通 / 无 Endpoints 排查
+  taxonomy: k8s/networking/service-no-endpoints
+  version: 0.1.0
+  maturity: draft
+  platforms: [{platform: kubernetes}]
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [kubectl]
+  facts: [k8s.context]
+discovery:
+  - id: ep
+    run: {kubectl: "kubectl -n {{ns}} get endpoints {{svc}} -o json"}
+    parser: json/k8s-endpoints-v1
+tree:
+  entry: check_endpoints
+  nodes:
+    - id: check_endpoints
+      type: check
+      title: 检查 Service 是否有 Endpoints
+      run: {kubectl: "kubectl -n {{ns}} get endpoints {{svc}} -o jsonpath='{.subsets[*].addresses[*].ip}'"}
+      parser: json/k8s-endpoints-v1
+      branch:
+        - {when: "count(addresses) == 0", goto: check_selector}
+        - {when: "count(addresses) > 0", goto: endpoints_exist}
+      otherwise: escalate
+      cautions:
+        - "Service 通不通第一步永远是看 Endpoints：有 EP=后端选到了(问题在网络/端口)，无 EP=选择器没选到任何就绪 Pod(问题在 selector/readiness)"
+        - "无头 Service(clusterIP: None)和 ExternalName 的判断方式不同，先确认 Service 类型"
+    - id: endpoints_exist
+      type: check
+      title: 有 Endpoints——检查端口与网络策略
+      run: {kubectl: "kubectl -n {{ns}} get svc {{svc}} -o jsonpath='{.spec.ports[*].targetPort}'; kubectl -n {{ns}} get networkpolicy -o name | head"}
+      branch:
+        - {when: "any(lines[] matches 'networkpolicy')", goto: netpol_exit}
+      otherwise: port_mismatch_exit
+      cautions:
+        - "有 EP 却不通，八成是 targetPort 与容器实际监听端口不一致，或 NetworkPolicy 拦截。别再怀疑 selector"
+    - id: port_mismatch_exit
+      type: done
+      summary: "有 Endpoints 但访问不通，重点查端口：Service.targetPort 是否等于容器实际监听端口、容器是否真的在监听(exec 进去 ss -ltn)、是否绑了 127.0.0.1 而非 0.0.0.0。"
+    - id: netpol_exit
+      type: done
+      summary: "命名空间存在 NetworkPolicy，可能拦截了到该 Service 的流量。核对 policy 的 podSelector/ingress 规则是否放行调用方；default-deny 策略下需显式放行。转 k8s/networking/networkpolicy-block。"
+    - id: check_selector
+      type: check
+      title: 无 Endpoints——检查 selector 与 Pod 就绪
+      run: {kubectl: "kubectl -n {{ns}} get svc {{svc}} -o jsonpath='{.spec.selector}'; kubectl -n {{ns}} get pods -l {{selector}} -o wide"}
+      branch:
+        - {when: "any(lines[] matches 'not found|No resources')", goto: selector_mismatch_exit}
+        - {when: "any(lines[] matches 'Running') and not any(lines[] matches '1/1|2/2|Ready')", goto: not_ready_exit}
+      otherwise: selector_mismatch_exit
+      cautions:
+        - "Endpoints 只纳入 Ready 的 Pod。Pod 在 Running 但 readinessProbe 没过→不进 EP→Service 无后端。这是最隐蔽的一类"
+    - id: selector_mismatch_exit
+      type: done
+      summary: "Service.selector 没匹配到任何 Pod。核对 selector 标签与 Pod 实际标签是否完全一致(大小写/拼写)；Deployment 改了标签但 Service 没跟着改是常见原因。"
+    - id: not_ready_exit
+      type: done
+      summary: "Pod 在 Running 但未 Ready，故不纳入 Endpoints。检查 readinessProbe 为何不通过(转 k8s/workload/probe-failing)——修好就绪探针后 Pod 会自动加入 EP。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：endpoints、svc selector 与 ports、匹配 Pod 的就绪状态、NetworkPolicy。"
+tests:
+  - {scenario: tests/svc-selector-mismatch.yaml, expect_path: [check_endpoints, check_selector, selector_mismatch_exit]}
+  - {scenario: tests/svc-not-ready.yaml, expect_path: [check_endpoints, check_selector, not_ready_exit]}
+feedback:
+  ask: "Service 不通的原因定位了吗？"

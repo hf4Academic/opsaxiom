@@ -1,0 +1,58 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.workload.image-pull-fail
+  name: 镜像拉取失败排查（ImagePullBackOff）
+  taxonomy: k8s/workload/image-pull-fail
+  version: 0.1.0
+  maturity: draft
+  platforms: [{platform: kubernetes}]
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [kubectl]
+  facts: [k8s.context]
+discovery:
+  - id: pull_event
+    run: {kubectl: "kubectl -n {{ns}} describe pod {{pod}} | grep -A3 -iE 'Failed|pull'"}
+    parser: text/k8s-events-v1
+tree:
+  entry: read_reason
+  nodes:
+    - id: read_reason
+      type: check
+      title: 从 events 读取拉取失败的具体原因
+      run: {kubectl: "kubectl -n {{ns}} get events --field-selector involvedObject.name={{pod}} | grep -iE 'Failed|pull' | tail -5"}
+      parser: text/k8s-events-v1
+      branch:
+        - {when: "any(lines[] matches 'not found|manifest unknown|does not exist')", goto: tag_not_found_exit}
+        - {when: "any(lines[] matches 'unauthorized|authentication|forbidden|pull access denied')", goto: auth_exit}
+        - {when: "any(lines[] matches 'timeout|no such host|connection refused|i/o timeout')", goto: registry_unreachable_exit}
+        - {when: "any(lines[] matches 'toomanyrequests|rate limit')", goto: ratelimit_exit}
+      otherwise: escalate
+      cautions:
+        - "错误文本直接指向根因，别猜：not found=标签/名字错，unauthorized=拉取凭证问题，timeout=网络到不了 registry，rate limit=触发限流(Docker Hub 常见)"
+        - "先确认镜像全名和标签拼写——90% 的 ImagePullBackOff 是标签打错或忘了 push"
+    - id: tag_not_found_exit
+      type: done
+      summary: "镜像/标签在 registry 中不存在。核对：镜像名与标签拼写、镜像是否已 push、是否用了 latest 但没推、私有 registry 地址前缀是否正确。"
+    - id: auth_exit
+      type: done
+      summary: "拉取鉴权失败。核对：Pod 的 imagePullSecrets 是否配置且正确、Secret 是否在同一 namespace、凭证是否过期、ServiceAccount 是否关联了 pull secret。"
+    - id: registry_unreachable_exit
+      type: done
+      summary: "节点无法连通 registry(超时/DNS/拒连)。在故障节点上测试到 registry 的连通性；核对 DNS、出口防火墙、私有 registry 的证书信任。这是节点侧网络问题，非 K8s 配置。"
+    - id: ratelimit_exit
+      type: done
+      summary: "触发 registry 限流(常见于 Docker Hub 匿名拉取)。方向：配置认证拉取提高配额、使用镜像缓存/harbor 代理、或改用内部 registry。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：完整 events、镜像全名、imagePullSecrets 配置、节点到 registry 的连通性。"
+tests:
+  - {scenario: tests/image-tag-typo.yaml, expect_path: [read_reason, tag_not_found_exit]}
+  - {scenario: tests/image-auth-fail.yaml, expect_path: [read_reason, auth_exit]}
+feedback:
+  ask: "镜像拉取问题定位了吗？"

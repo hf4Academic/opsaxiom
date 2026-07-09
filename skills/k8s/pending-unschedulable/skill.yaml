@@ -1,0 +1,62 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.scheduling.pending-unschedulable
+  name: Pod 一直 Pending / 无法调度排查
+  taxonomy: k8s/scheduling/pending-unschedulable
+  version: 0.1.0
+  maturity: draft
+  platforms: [{platform: kubernetes}]
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [kubectl]
+  facts: [k8s.context]
+discovery:
+  - id: sched_event
+    run: {kubectl: "kubectl -n {{ns}} describe pod {{pod}} | grep -A5 -iE 'Events|FailedScheduling'"}
+    parser: text/k8s-events-v1
+tree:
+  entry: read_sched_msg
+  nodes:
+    - id: read_sched_msg
+      type: check
+      title: 读取调度器给出的失败原因
+      run: {kubectl: "kubectl -n {{ns}} get event --field-selector involvedObject.name={{pod}},reason=FailedScheduling -o jsonpath='{.items[-1:].message}'"}
+      parser: text/k8s-events-v1
+      branch:
+        - {when: "any(lines[] matches 'Insufficient cpu|Insufficient memory')", goto: insufficient_res_exit}
+        - {when: "any(lines[] matches 'node.*taint|untolerated')", goto: taint_exit}
+        - {when: "any(lines[] matches 'node affinity|nodeSelector|didn.t match')", goto: affinity_exit}
+        - {when: "any(lines[] matches 'volume|pvc|no persistent volumes')", goto: volume_exit}
+        - {when: "any(lines[] matches 'too many pods|no nodes available')", goto: no_capacity_exit}
+      otherwise: escalate
+      cautions:
+        - "调度器的 FailedScheduling 消息几乎直接告诉你原因，别绕：Insufficient=资源不够，taint=污点没容忍，affinity=选择器没匹配到节点"
+        - "消息里常是'X/Y nodes available'加各节点被拒原因的聚合——逐条看每个节点为什么被排除"
+    - id: insufficient_res_exit
+      type: done
+      summary: "集群没有满足 requests 的节点(CPU/内存不足)。方向：①降低 Pod 的 resources.requests(若设得虚高)；②扩容节点/开启 Cluster Autoscaler；③清理低优先级 Pod 腾资源。注意看的是 requests 不是 limits。"
+    - id: taint_exit
+      type: done
+      summary: "目标节点有污点(taint)但 Pod 没有对应 toleration。核对节点污点(kubectl describe node)与 Pod tolerations；专用节点池需显式容忍。别随意删节点污点——它可能是有意隔离。"
+    - id: affinity_exit
+      type: done
+      summary: "nodeSelector / nodeAffinity 没匹配到任何节点。核对标签选择器与节点实际标签是否一致(常见拼写/标签缺失)；requiredDuringScheduling 过严会导致无节点可选。"
+    - id: volume_exit
+      type: done
+      summary: "卷相关调度失败。核对 PVC 是否 Bound(转 k8s/storage/pvc-pending)、卷的拓扑约束(zone)是否与节点匹配、是否 ReadWriteOnce 卷已被别的节点占用。"
+    - id: no_capacity_exit
+      type: done
+      summary: "无可用节点(达 pod 上限或全部不可调度)。核对节点是否 NotReady/cordoned、每节点 max-pods 限制、是否所有节点都被污点/亲和性排除。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：FailedScheduling 完整消息、Pod requests、节点资源与污点、PVC 状态。"
+tests:
+  - {scenario: tests/pending-insufficient.yaml, expect_path: [read_sched_msg, insufficient_res_exit]}
+  - {scenario: tests/pending-taint.yaml, expect_path: [read_sched_msg, taint_exit]}
+feedback:
+  ask: "Pod 调度问题定位了吗？"
