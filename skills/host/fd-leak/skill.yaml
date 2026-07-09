@@ -5,7 +5,7 @@ metadata:
   name: 文件描述符泄漏排查
   taxonomy: host/process/fd-leak
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms:
   - {os: linux}
   authors: [opsagent-core]

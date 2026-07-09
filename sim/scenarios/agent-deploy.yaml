@@ -1,0 +1,10 @@
+skill: skills/host/agent-deploy/skill.yaml
+scenario: 全新部署探针(含真实 install→uninstall 回滚)
+expect_path: [idempotency_check, install_probe, verify_scrape, done_ok]
+real_action: install_probe
+real_action_kind: deploy
+node_ctx:
+  idempotency_check:
+    lines: [absent, PORT_FREE]
+  verify_scrape:
+    output: {value: 120}

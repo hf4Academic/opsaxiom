@@ -1,0 +1,15 @@
+{
+  "skill": "host.process.zombie-flood",
+  "action": "promote",
+  "from": "draft",
+  "to": "sim_verified",
+  "at": "2026-07-09T04:47:50",
+  "validator": "0 ERROR",
+  "scenarios": [
+    {
+      "scenario": "zombie-flood.yaml",
+      "path_ok": true,
+      "rollback_ok": null
+    }
+  ]
+}

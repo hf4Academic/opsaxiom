@@ -1,0 +1,10 @@
+skill: skills/host/swap-thrash/skill.yaml
+scenario: 严重换页濒临 OOM
+expect_path: [confirm_thrash, check_swap_usage, severe_exit]
+node_ctx:
+  confirm_thrash:
+    rows:
+    - &id001 {si: 2000, so: 1000}
+    - *id001
+    - *id001
+  check_swap_usage: {available_pct: 2}

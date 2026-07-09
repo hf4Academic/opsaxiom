@@ -1,0 +1,13 @@
+skill: skills/host/load-high/skill.yaml
+scenario: CPU 密集单进程
+expect_path: [assess_load, classify_bottleneck, find_top_consumers, single_hog_exit]
+node_ctx:
+  assess_load: {load1: 20, cores: 4}
+  classify_bottleneck:
+    rows:
+    - &id001 {wa: 1, us: 50, sy: 40, r: 1}
+    - *id001
+    - *id001
+  find_top_consumers:
+    rows:
+    - {pcpu: 80, comm: java, pid: 1}

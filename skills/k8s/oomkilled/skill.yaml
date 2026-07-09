@@ -5,7 +5,7 @@ metadata:
   name: 容器 OOMKilled 排查
   taxonomy: k8s/workload/oomkilled
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms:
   - {platform: kubernetes}
   authors: [opsagent-core]

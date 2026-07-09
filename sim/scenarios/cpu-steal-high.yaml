@@ -1,0 +1,11 @@
+skill: skills/host/cpu-steal-high/skill.yaml
+scenario: 邻居抢占(noisy neighbor)
+expect_path: [confirm_steal, check_virt, noisy_neighbor_exit]
+node_ctx:
+  confirm_steal:
+    rows:
+    - &id001 {steal: 20}
+    - *id001
+    - *id001
+  check_virt:
+    lines: [kvm]

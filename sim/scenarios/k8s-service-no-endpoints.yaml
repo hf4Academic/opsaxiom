@@ -1,0 +1,8 @@
+skill: skills/k8s/service-no-endpoints/skill.yaml
+scenario: selector 不匹配
+expect_path: [check_endpoints, check_selector, selector_mismatch_exit]
+node_ctx:
+  check_endpoints:
+    addresses: []
+  check_selector:
+    lines: [No resources found]

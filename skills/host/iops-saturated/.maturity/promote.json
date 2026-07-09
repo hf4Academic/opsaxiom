@@ -1,0 +1,15 @@
+{
+  "skill": "host.storage.iops-saturated",
+  "action": "promote",
+  "from": "draft",
+  "to": "sim_verified",
+  "at": "2026-07-09T04:47:47",
+  "validator": "0 ERROR",
+  "scenarios": [
+    {
+      "scenario": "iops-saturated.yaml",
+      "path_ok": true,
+      "rollback_ok": null
+    }
+  ]
+}

@@ -307,7 +307,13 @@ class _Eval:
         self.eat("OP1", ")")
         x = args[0]
         if name == "count":
-            return sum(1 for e in x if _truthy(e)) if isinstance(x, list) else (1 if _truthy(x) else 0)
+            # 布尔元素按 True 计数（来自逐元素比较）；非布尔按"存在"计数(非 None)，
+            # 使 count(rows)=行数（即使某行是空 dict），count(rows[].x>k)=满足个数。
+            def _cnt1(e):
+                if isinstance(e, bool):
+                    return 1 if e else 0
+                return 1 if e is not None else 0
+            return sum(_cnt1(e) for e in x) if isinstance(x, list) else _cnt1(x)
         if name in ("max", "min", "avg", "sum"):
             xs = [e for e in (x if isinstance(x, list) else [x]) if e is not None]
             if not xs:

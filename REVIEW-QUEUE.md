@@ -100,3 +100,13 @@
 - **不阻断**：assert 只被 S5 校验语法（已通过），不校验字段来源；sim 不执行 verify。
 - **建议**：解析器补齐时（后续轮次）定义这批"健康类字段"的标准命名与解析器；
   引擎实现 verify 前快照（pcent_before 之类）。届时可加一条"assert 字段须有解析器产出"的校验。
+
+## R-6 (P-5) S8 对纯诊断 Skill 不可满足——已精化，待 Fable 批准
+
+- **发现于**：P-5 给诊断 Skill 写仿真、准备晋级时。
+- **问题**：S8 原文要求 sim_verified 必须有 `rollback_assert:true` 测试，但**纯 Diagnostic Skill
+  没有 action → 没有回滚 → 永远无法晋级**。这显然违背意图（诊断 Skill 也该能 sim_verified）。
+- **本轮处理（需 Fable 追认）**：精化 S8——`rollback_assert` **仅对含 action 的 Skill 强制**；
+  纯诊断 Skill 满足"tests 非空 + 所有路径 sim 通过"即可晋级。validate.py 与 promote.py 已同步实现。
+  据此已晋级 16 个 Skill（10 host 诊断 + agent-deploy 含真实部署回滚 + 5 k8s 诊断），连同 disk-full 共 17 个 sim_verified。
+- **建议**：Fable 在 docs/03 §7 或 docs/05 §1 明确这条口径（诊断类 vs 变更类的晋级门槛差异）。

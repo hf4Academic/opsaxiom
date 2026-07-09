@@ -1,0 +1,6 @@
+skill: skills/k8s/pending-unschedulable/skill.yaml
+scenario: 资源不足无法调度
+expect_path: [read_sched_msg, insufficient_res_exit]
+node_ctx:
+  read_sched_msg:
+    lines: ['0/5 nodes available: Insufficient cpu']

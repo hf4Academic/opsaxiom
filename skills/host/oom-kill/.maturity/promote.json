@@ -1,0 +1,15 @@
+{
+  "skill": "host.memory.oom-kill",
+  "action": "promote",
+  "from": "draft",
+  "to": "sim_verified",
+  "at": "2026-07-09T04:47:44",
+  "validator": "0 ERROR",
+  "scenarios": [
+    {
+      "scenario": "oom-kill.yaml",
+      "path_ok": true,
+      "rollback_ok": null
+    }
+  ]
+}

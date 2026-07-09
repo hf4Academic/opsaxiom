@@ -5,7 +5,7 @@ metadata:
   name: 监控探针批量部署（node_exporter 示例）
   taxonomy: host/provision/agent-deploy
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms:
   - os: linux
     family: [debian, rhel]

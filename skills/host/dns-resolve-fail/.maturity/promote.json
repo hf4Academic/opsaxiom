@@ -1,0 +1,15 @@
+{
+  "skill": "host.network-stack.dns-resolve-fail",
+  "action": "promote",
+  "from": "draft",
+  "to": "sim_verified",
+  "at": "2026-07-09T04:47:48",
+  "validator": "0 ERROR",
+  "scenarios": [
+    {
+      "scenario": "dns-resolve-fail.yaml",
+      "path_ok": true,
+      "rollback_ok": null
+    }
+  ]
+}

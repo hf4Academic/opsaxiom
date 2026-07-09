@@ -1,0 +1,8 @@
+skill: skills/host/dns-resolve-fail/skill.yaml
+scenario: DNS 服务器不可达
+expect_path: [reproduce, check_server, server_unreachable_exit]
+node_ctx:
+  reproduce:
+    lines: [GETENT_FAIL]
+  check_server:
+    lines: [100% packet loss]

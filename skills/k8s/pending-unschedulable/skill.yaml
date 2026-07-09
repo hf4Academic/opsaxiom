@@ -5,7 +5,7 @@ metadata:
   name: Pod 一直 Pending / 无法调度排查
   taxonomy: k8s/scheduling/pending-unschedulable
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms:
   - {platform: kubernetes}
   authors: [opsagent-core]

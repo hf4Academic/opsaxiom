@@ -255,13 +255,15 @@ def semantic_checks(skill, rep):
             if fact not in reg:
                 rep.add(WARN, "FACTS", f"fact '{fact}' 未在 tools/facts.yaml 注册（补注册或改用已注册 fact）")
 
-    # ---- S8 成熟度与测试一致性 ----
+    # ---- S8 成熟度与测试一致性（v0.2 精化，见 REVIEW-QUEUE R-6）----
+    # rollback_assert 仅对含 action 的 Skill 强制；纯诊断 Skill 无写操作，路径覆盖即可。
     if maturity in ("sim_verified", "field_verified", "certified"):
         tests = skill.get("tests", [])
+        has_action = any(n.get("type") == "action" for n in nodes.values())
         if not tests:
             rep.add(ERROR, "S8", f"maturity={maturity} 要求 tests 非空")
-        elif not any(t.get("rollback_assert") for t in tests):
-            rep.add(ERROR, "S8", f"maturity={maturity} 要求至少一个 tests 带 rollback_assert:true")
+        elif has_action and not any(t.get("rollback_assert") for t in tests):
+            rep.add(ERROR, "S8", f"maturity={maturity}：含 action 的 Skill 须有 rollback_assert:true 测试")
 
     # ---- S9 模板变量来源（v0.2 §7.1/§7.4：ERROR）----
     exprs = set()

@@ -1,0 +1,15 @@
+{
+  "skill": "host.memory.leak",
+  "action": "promote",
+  "from": "draft",
+  "to": "sim_verified",
+  "at": "2026-07-09T04:47:45",
+  "validator": "0 ERROR",
+  "scenarios": [
+    {
+      "scenario": "memory-leak.yaml",
+      "path_ok": true,
+      "rollback_ok": null
+    }
+  ]
+}

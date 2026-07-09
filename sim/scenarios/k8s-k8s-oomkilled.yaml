@@ -1,0 +1,8 @@
+skill: skills/k8s/oomkilled/skill.yaml
+scenario: limit 过低被 OOMKilled
+expect_path: [confirm_oom, check_limit_set, limit_analysis_exit]
+node_ctx:
+  confirm_oom:
+    lines: [OOMKilled|512Mi]
+  check_limit_set:
+    lines: [512Mi|256Mi]

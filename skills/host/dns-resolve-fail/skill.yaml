@@ -5,7 +5,7 @@ metadata:
   name: 主机 DNS 解析失败排查
   taxonomy: host/network-stack/dns-resolve-fail
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms:
   - {os: linux}
   authors: [opsagent-core]

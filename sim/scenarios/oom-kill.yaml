@@ -1,0 +1,9 @@
+skill: skills/host/oom-kill/skill.yaml
+scenario: 宿主 OOM 且内存仍紧张
+expect_path: [confirm_oom, scope_oom, check_mem_trend, still_tight_exit]
+node_ctx:
+  confirm_oom:
+    lines: [Killed process 123 (java)]
+  scope_oom:
+    lines: []
+  check_mem_trend: {available_pct: 3}

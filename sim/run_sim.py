@@ -27,6 +27,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import exprlang  # noqa: E402
 
 QUARANTINE_BIN = ROOT / "tools" / "bin" / "opsaxiom-quarantine"
+DEPLOY_BIN = ROOT / "tools" / "bin" / "opsaxiom-deploy"
 
 
 class SimError(Exception):
@@ -63,6 +64,26 @@ def _real_quarantine_roundtrip(sandbox_file, notes):
         return True
 
 
+def _real_deploy_roundtrip(notes):
+    """真实执行 opsaxiom-deploy install→uninstall，验证部署与回滚(卸载)对称。"""
+    with tempfile.TemporaryDirectory() as td:
+        env = dict(os.environ, OPSAXIOM_DEPLOY_ROOT=td)
+        state = pathlib.Path(td) / "state" / "node_exporter.json"
+        subprocess.run([sys.executable, str(DEPLOY_BIN), "node_exporter", "--port", "9100"],
+                       check=True, env=env, capture_output=True)
+        if not state.exists():
+            notes.append("回滚测试失败：install 未落 state"); return False
+        subprocess.run([sys.executable, str(DEPLOY_BIN), "node_exporter", "--uninstall"],
+                       check=True, env=env, capture_output=True)
+        if state.exists() or (pathlib.Path(td) / "bin" / "node_exporter").exists():
+            notes.append("回滚测试失败：uninstall 未清干净"); return False
+        notes.append("回滚往返成功：install 落盘，uninstall 精确清除")
+        return True
+
+
+_ROUNDTRIP = {"quarantine": _real_quarantine_roundtrip, "deploy": _real_deploy_roundtrip}
+
+
 def run(skill_path, scenario_path):
     skill, nodes, entry = _load_skill(skill_path)
     sc = yaml.safe_load(pathlib.Path(scenario_path).read_text(encoding="utf-8"))
@@ -70,6 +91,7 @@ def run(skill_path, scenario_path):
     answers = sc.get("answers", {})
     base_ctx = sc.get("base_ctx", {})
     real_action = sc.get("real_action")          # 需要真实回滚验证的 action 节点 id
+    real_kind = sc.get("real_action_kind", "quarantine")   # quarantine | deploy
     sandbox_file = sc.get("sandbox_file", "victim.dat")
 
     notes, path = [], [entry]
@@ -98,7 +120,8 @@ def run(skill_path, scenario_path):
             node = answers[node]
         elif t == "action":
             if real_action == node:
-                rollback_ok = _real_quarantine_roundtrip(sandbox_file, notes)
+                fn = _ROUNDTRIP[real_kind]
+                rollback_ok = fn(sandbox_file, notes) if real_kind == "quarantine" else fn(notes)
             node = n.get("goto") or n.get("verify", {}).get("on_fail", "escalate")
         else:
             raise SimError(f"未知节点类型 {t} @ {node}")

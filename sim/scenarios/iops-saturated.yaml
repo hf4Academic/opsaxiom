@@ -1,0 +1,14 @@
+skill: skills/host/iops-saturated/skill.yaml
+scenario: 高延迟指向慢盘
+expect_path: [confirm_saturation, latency_vs_throughput, slow_disk_exit]
+node_ctx:
+  confirm_saturation:
+    rows:
+    - &id001 {util: 95, await: 60, aqu_sz: 2}
+    - *id001
+    - *id001
+  latency_vs_throughput:
+    rows:
+    - &id002 {await: 60, aqu_sz: 2}
+    - *id002
+    - *id002

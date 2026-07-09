@@ -1,0 +1,7 @@
+skill: skills/host/conntrack-full/skill.yaml
+scenario: TIME_WAIT 占满表
+expect_path: [confirm_full, analyze_entries, timewait_dominant_exit]
+node_ctx:
+  confirm_full: {ct_count: 95000, ct_max: 100000}
+  analyze_entries:
+    lines: [50000 TIME_WAIT]

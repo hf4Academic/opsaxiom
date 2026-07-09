@@ -5,7 +5,7 @@ metadata:
   name: 镜像拉取失败排查（ImagePullBackOff）
   taxonomy: k8s/workload/image-pull-fail
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms:
   - {platform: kubernetes}
   authors: [opsagent-core]

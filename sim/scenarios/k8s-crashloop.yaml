@@ -1,0 +1,7 @@
+skill: skills/k8s/crashloop/skill.yaml
+scenario: OOMKilled 导致 CrashLoop
+expect_path: [read_exit, oom_or_killed, oom_exit]
+node_ctx:
+  read_exit: {exit_code: 137}
+  oom_or_killed:
+    lines: [OOMKilled]

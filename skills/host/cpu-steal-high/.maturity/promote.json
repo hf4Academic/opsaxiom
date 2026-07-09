@@ -1,0 +1,15 @@
+{
+  "skill": "host.cpu.steal-high",
+  "action": "promote",
+  "from": "draft",
+  "to": "sim_verified",
+  "at": "2026-07-09T04:47:54",
+  "validator": "0 ERROR",
+  "scenarios": [
+    {
+      "scenario": "cpu-steal-high.yaml",
+      "path_ok": true,
+      "rollback_ok": null
+    }
+  ]
+}

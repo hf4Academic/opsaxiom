@@ -1,0 +1,15 @@
+{
+  "skill": "host.cpu.load-high",
+  "action": "promote",
+  "from": "sim_verified",
+  "to": "sim_verified",
+  "at": "2026-07-09T04:47:43",
+  "validator": "0 ERROR",
+  "scenarios": [
+    {
+      "scenario": "load-high.yaml",
+      "path_ok": true,
+      "rollback_ok": null
+    }
+  ]
+}

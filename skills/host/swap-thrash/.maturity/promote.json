@@ -1,0 +1,15 @@
+{
+  "skill": "host.memory.swap-thrash",
+  "action": "promote",
+  "from": "draft",
+  "to": "sim_verified",
+  "at": "2026-07-09T04:47:55",
+  "validator": "0 ERROR",
+  "scenarios": [
+    {
+      "scenario": "swap-thrash.yaml",
+      "path_ok": true,
+      "rollback_ok": null
+    }
+  ]
+}

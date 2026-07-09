@@ -5,7 +5,7 @@ metadata:
   name: CPU steal 过高排查（云主机）
   taxonomy: host/cpu/steal-high
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms:
   - {os: linux}
   authors: [opsagent-core]

@@ -1,0 +1,15 @@
+{
+  "skill": "host.provision.agent-deploy",
+  "action": "promote",
+  "from": "draft",
+  "to": "sim_verified",
+  "at": "2026-07-09T04:47:57",
+  "validator": "0 ERROR",
+  "scenarios": [
+    {
+      "scenario": "agent-deploy.yaml",
+      "path_ok": true,
+      "rollback_ok": true
+    }
+  ]
+}

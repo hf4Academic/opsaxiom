@@ -1,0 +1,10 @@
+skill: skills/host/fd-leak/skill.yaml
+scenario: socket fd 泄漏
+expect_path: [scope_fd, rank_fd, classify_fd_type, socket_leak_exit]
+node_ctx:
+  scope_fd: {allocated: 9000, max: 10000}
+  rank_fd:
+    rows:
+    - {fd_count: 20000, pid: 1}
+  classify_fd_type:
+    lines: [socket, socket, socket]

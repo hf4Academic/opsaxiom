@@ -1,0 +1,15 @@
+{
+  "skill": "k8s.workload.oomkilled",
+  "action": "promote",
+  "from": "draft",
+  "to": "sim_verified",
+  "at": "2026-07-09T04:48:01",
+  "validator": "0 ERROR",
+  "scenarios": [
+    {
+      "scenario": "k8s-k8s-oomkilled.yaml",
+      "path_ok": true,
+      "rollback_ok": null
+    }
+  ]
+}

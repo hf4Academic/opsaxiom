@@ -1,0 +1,6 @@
+skill: skills/k8s/image-pull-fail/skill.yaml
+scenario: 标签不存在
+expect_path: [read_reason, tag_not_found_exit]
+node_ctx:
+  read_reason:
+    lines: [manifest unknown]

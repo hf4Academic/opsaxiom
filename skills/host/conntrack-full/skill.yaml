@@ -5,7 +5,7 @@ metadata:
   name: conntrack 表满排查
   taxonomy: host/network-stack/conntrack-full
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms:
   - {os: linux}
   authors: [opsagent-core]

@@ -5,7 +5,7 @@ metadata:
   name: 磁盘 IO 打满排查
   taxonomy: host/storage/iops-saturated
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms:
   - {os: linux}
   authors: [opsagent-core]

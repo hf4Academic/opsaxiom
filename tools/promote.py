@@ -66,10 +66,15 @@ def promote(skill_path):
         print(f"✘ 校验未过，拒绝晋级：{[e[2] for e in rep.errors]}")
         return 1
 
-    # 4. S8
+    # 4. S8（含 action 才要求 rollback_assert；纯诊断路径覆盖即可，见 R-6）
     tests = skill.get("tests", [])
-    if not tests or not any(t.get("rollback_assert") for t in tests):
-        print("✘ S8 未满足：tests 为空或无 rollback_assert，无法晋级 sim_verified")
+    nodes = skill.get("tree", {}).get("nodes", [])
+    has_action = any(n.get("type") == "action" for n in nodes)
+    if not tests:
+        print("✘ S8 未满足：tests 为空")
+        return 1
+    if has_action and not any(t.get("rollback_assert") for t in tests):
+        print("✘ S8 未满足：含 action 的 Skill 须有 rollback_assert 测试")
         return 1
 
     # 2/3. 仿真证据
@@ -87,7 +92,7 @@ def promote(skill_path):
         if not ok:
             print(f"✘ 场景 {sc.name} 未通过：{r['path']} vs {r['expect']}")
             return 1
-    if any(t.get("rollback_assert") for t in tests) and not rollback_seen:
+    if has_action and any(t.get("rollback_assert") for t in tests) and not rollback_seen:
         print("✘ 该 Skill 声明了 rollback_assert，但没有场景实际验证回滚往返")
         return 1
 
