@@ -87,6 +87,11 @@ def main():
         add_diagnose(sub)
     except Exception:
         pass
+    try:
+        from doctor import add_doctor  # V-1
+        add_doctor(sub)
+    except Exception:
+        pass
     args = ap.parse_args()
     return args.fn(args)
 

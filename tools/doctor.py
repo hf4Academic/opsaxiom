@@ -1,0 +1,84 @@
+"""
+opsaxiom doctor —— 部署后自检（V-1）。红黄绿输出，也是日后排障第一命令。
+
+检查项分三类：
+  必需（红）：python 版本、pyyaml/jsonschema、tools/bin 可执行、~/.opsaxiom 可写
+  推荐（黄）：cryptography（Ed25519 签名，缺则 attest 降级 HMAC）、pytest、ntc-templates
+  连接器（黄/灰）：ssh/kubectl/mysql/redis-cli 是否在 PATH（缺只影响对应域的真实执行）
+"""
+import os
+import pathlib
+import shutil
+import sys
+
+HERE = pathlib.Path(__file__).resolve().parent
+ROOT = HERE.parent
+
+OK, WARN, BAD = "🟢", "🟡", "🔴"
+
+
+def _check_import(mod):
+    try:
+        __import__(mod)
+        return True
+    except Exception:
+        return False
+
+
+def run():
+    rows = []          # (level, 名称, 详情)
+
+    # --- 必需 ---
+    pyok = sys.version_info >= (3, 8)
+    rows.append((OK if pyok else BAD, "Python ≥ 3.8",
+                 f"{sys.version_info.major}.{sys.version_info.minor}"))
+    for mod in ("yaml", "jsonschema"):
+        ok = _check_import(mod)
+        rows.append((OK if ok else BAD, f"依赖 {mod}", "已装" if ok else "缺失！pip install -r tools/requirements.txt"))
+
+    binp = ROOT / "tools" / "bin" / "opsaxiom"
+    binok = binp.exists() and os.access(binp, os.X_OK)
+    rows.append((OK if binok else BAD, "opsaxiom 可执行", str(binp) if binok else "不可执行，chmod +x"))
+
+    home = pathlib.Path(os.environ.get("OPSAXIOM_HOME", pathlib.Path.home() / ".opsaxiom"))
+    try:
+        home.mkdir(parents=True, exist_ok=True)
+        (home / ".probe").write_text("x"); (home / ".probe").unlink()
+        homeok = True
+    except Exception:
+        homeok = False
+    rows.append((OK if homeok else BAD, "~/.opsaxiom 可写", str(home) if homeok else "不可写"))
+
+    # --- 推荐 ---
+    crypto = _check_import("cryptography")
+    rows.append((OK if crypto else WARN, "cryptography (Ed25519)",
+                 "已装" if crypto else "缺失→attest 降级 HMAC(不可跨主体验证)"))
+    for mod in ("pytest", "ntc_templates"):
+        ok = _check_import(mod)
+        rows.append((OK if ok else WARN, f"可选 {mod}", "已装" if ok else "未装(部分功能受限)"))
+
+    # --- 连接器 ---
+    for tool, dom in [("ssh", "host/aicomp"), ("kubectl", "k8s"), ("mysql", "middleware/mysql"),
+                      ("redis-cli", "middleware/redis")]:
+        present = shutil.which(tool) is not None
+        rows.append((OK if present else WARN, f"连接器 {tool}",
+                     "在 PATH" if present else f"未找到(影响 {dom} 域真实执行，导航档不受影响)"))
+
+    # 输出
+    print("OpsAxiom doctor —— 部署自检\n")
+    for lvl, name, detail in rows:
+        print(f"  {lvl} {name:<26} {detail}")
+    reds = sum(1 for r in rows if r[0] == BAD)
+    warns = sum(1 for r in rows if r[0] == WARN)
+    print()
+    if reds:
+        print(f"🔴 {reds} 项必需检查未通过——请先修复再使用。")
+        return 1
+    print(f"🟢 必需项全部通过（{warns} 项推荐/连接器提示，不阻断使用）。")
+    print("下一步：opsaxiom diagnose \"<你的问题>\"  或直接  opsaxiom  进入交互态。")
+    return 0
+
+
+def add_doctor(subparsers):
+    p = subparsers.add_parser("doctor", help="部署后自检（红黄绿）")
+    p.set_defaults(fn=lambda args: run())
