@@ -37,16 +37,28 @@
 
 ## 项目状态
 
-- 设计阶段完成（Fable 5）：黄金准则、架构、Schema、分类、认证体系。
-- 首轮批量执行完成（Opus 4.8）：31 个 Skill（host 20 / k8s 10 / network 1）、校验器、
-  解析器库、命令语法树、仿真执行器 + 隔离工具。校验 31/31、pytest 90/90 全绿。
-- 下一步：Fable 5 对抗评审（见 HANDOFF.md 与 REVIEW-QUEUE.md）。
+- **61 个 Skill**（host 20 / k8s 10 / network 11 / middleware 10 / aicomp 10），37 个 `sim_verified`。
+- 完整工具链：校验器（结构 + 语义 S1–S12 + 投影语义 + 字段契约 + 命令语法树）、
+  解析器库、仿真执行器（context_walk + 真实靶机）、maturity 流水线、attestation CLI。
+- **运行时 CLI 已落地（导航档 MVP）**：`opsaxiom diagnose "<症状>"` 匹配 Skill，
+  `opsaxiom run <id>` 逐步指导排查/变更（Agent 只出方案与变更简报，写操作由你亲自执行）。
+- 经四轮"Opus 生成 / Fable 对抗评审"迭代，累计沉淀 9 条生成规范教训（docs/07）。
+
+## 试一下运行时（导航档）
+
+```bash
+# 按症状找 Skill
+python3 tools/bin/opsaxiom diagnose "磁盘满了 No space left"
+# 走一遍排查（脚本驱动的演示；去掉 --answers 即为真人交互）
+python3 tools/bin/opsaxiom run host.storage.capacity.disk-full \
+  --answers demos/disk-full-guided.answers.yaml
+```
 
 ## 开发者快速上手
 
 ```bash
 pip install -r tools/requirements.txt
-python3 tools/validate.py skills/            # 校验全部 Skill（结构 + 语义 S1–S10 + 命令语法树）
+python3 tools/validate.py skills/            # 校验全部 Skill（结构 + 语义 S1–S12 + 命令语法树）
 python3 -m pytest tools -q                   # 运行全部测试
 python3 sim/run_sim.py sim/scenarios/disk-full-inode-exhaustion.yaml   # 跑一条仿真场景
 ```

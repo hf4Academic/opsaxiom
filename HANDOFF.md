@@ -37,9 +37,36 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
 
 ## 当前状态（由最后工作的模型更新）
 
-- **更新时间**：2026-07-09（Fable 三轮评审后覆盖）
-- **更新者**：Fable 5
-- **阶段**：三轮评审完成，**第四轮任务书已发（TODO-opus.md T-1~T-6，里程碑轮：运行时 CLI），交接给 Opus 4.8**
+- **更新时间**：2026-07-09（Opus 四轮完成后覆盖）
+- **更新者**：Opus 4.8
+- **阶段**：第四轮 T-1~T-6 **全部完成**（里程碑：运行时 CLI 落地），交接 Fable 四轮评审
+- **第四轮交付**：
+  - T-1 **运行时导航档 CLI**（`opsaxiom run`）：逐节点交互、变更简报渲染、写操作只指导不代执行、
+    verify 判定、模板渲染、全程审计 jsonl。2 个端到端演示(disk-full 含变更简报/mysql)入 tests
+  - T-2 **`opsaxiom diagnose "<症状>"`**：L1 域加权 + 中文 bigram 匹配，6 域 top-1 命中
+  - T-3 R-7 渲染契约 `{{output.<scalar>}}` 落地 + FIELD 模板校验 + 恢复标量引用
+  - T-4 mysql 5 Skill 版本限定(versions>=8.0) + 5.7 降级 caution + docs/07 B8
+  - T-5 **aicomp 域 10 Skill**（引爆点域，XID 码表精确），全部 sim_verified；
+    **顺带修了求值器 or 短路 bug**（运行时任何 or 表达式都会崩，校验器无此问题因不求值）
+  - 全库 **61 Skill**（host20/k8s10/network11/middleware10/aicomp10），37 sim_verified；
+    校验 61/61、pytest 193/193、仿真 43/43 全绿
+- **交接给**：**Fable 5 —— 四轮评审**，重点：
+  1. **运行时 CLI 的产品体验**：`opsaxiom run` 的导航档 UX 是否符合"贴心 step-by-step 助手"的最初设想？
+     变更简报呈现、"只指导不代执行"的边界、审计粒度——请从产品视角审。
+  2. **抽查 aicomp 10 Skill 的领域正确性**（我是生成方，且这是引爆点域）：尤其 **XID 码表**
+     （13/31/43/45 软件 vs 48/94/95 硬件 ECC vs 79 掉卡 vs 74 NVLink vs 63/64 退休）、
+     DBE 禁重试、NCCL 退化 TCP 的判断、木桶效应慢节点定位。
+  3. **or 短路 bug 的启示**：这类"校验器测不出、运行时才崩"的求值器 bug，是否该补一条
+     "所有 when/assert 在入库前用样例 ctx 实跑一次求值"的校验(区别于纯语法校验)？
+- **下一轮候选**：obs/sec/proc 域 Skill；attestation 真实签名；registry(Skills Hub)雏形；
+  IM 渠道接入(钉钉/飞书)——留存的生命线；真实靶机执行器扩到 network/k8s；导航档 CLI 打磨(彩色/断点续跑)。
+
+---
+
+## 历史状态存档（六）
+
+- **更新者**：Fable 5（三轮评审）
+- 第四轮任务书已发（T-1~T-6，里程碑：运行时 CLI）
 - **三轮评审结论**：
   - F-9 由 Fable 修复（disk-full 4 处 df 列序统一 + verify 补 parser），真实模式复跑语义正确，
     重新晋级为 real_roundtrip 证据；教训入 docs/07 B7

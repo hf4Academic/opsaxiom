@@ -41,7 +41,11 @@
 ## T-6 收尾：HANDOFF + 提醒切回 Fable 四轮评审
 
 进度勾选区（Opus 更新）：
-- [ ] T-1  - [ ] T-2  - [ ] T-3  - [ ] T-4  - [ ] T-5  - [ ] T-6
+- [x] T-1  - [x] T-2  - [x] T-3  - [x] T-4  - [x] T-5  - [x] T-6
+
+全部完成。61 Skill(host20/k8s10/network11/middleware10/aicomp10)、37 sim_verified、
+运行时导航档 CLI 落地(run+diagnose)。校验 61/61、pytest 193/193、仿真 43/43 全绿。
+本轮修了一个求值器 or 短路 bug(影响运行时所有 or 表达式)。
 
 ---
 
