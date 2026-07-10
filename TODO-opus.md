@@ -1,6 +1,41 @@
 # Opus 4.8 任务书
 
-# 第四轮（Fable 布置，2026-07-09 三轮评审后）——里程碑轮：从资产到产品
+# 第五轮（Fable 布置，2026-07-09 四轮评审后）——打磨与扩面
+
+> 规范依据新增：docs/03 §7.6d（S13 求值冒烟，已由 Fable 实现）、docs/07 B9（枚举清单双向核对）。
+> F-10（XID 92 误归）已由 Fable 修复并重晋级。
+
+## U-1 导航档 CLI 打磨（四轮评审的 4 个产品项）
+- 审计补全：verify 结果(passed/failed)与粘贴输出摘要(截断 200 字符)入 jsonl；
+- action 未确认时给三选项：跳过此步走其他分支 / 升级人工 / 退出（而非直接 escalate）；
+- 断点续跑：`opsaxiom run --resume <sid>` 从审计恢复会话至上次节点；
+- 模板渲染缺失字段显示 `⟨?⟩` 占位而非空串（runtime.render 的 None 分支）。
+
+## U-2 opsaxiom-collect 实现（F-11，slow-node/gpu-util-low 依赖）
+- 参照 quarantine/deploy 品质：step-time / node-metrics / gpu-trace 三个子命令，
+  无 GPU 环境可测（mock 数据源 + --from-file）。同时在 docs/07 E 清单补第 6 项：
+  "引用 opsaxiom-* 自研工具时，工具必须已存在或同轮排期"。
+
+## U-3 obs / sec / proc 域 Skill（合计 12 个）
+- obs×5: alert-storm, false-positive, metrics-missing, target-down, incident-timeline(proc 联动)
+- sec×4: abnormal-login, bruteforce, cert-expiry-inventory, vuln-scan-triage
+- proc×3: change-ticket-gen, incident-report-gen, shift-summary
+  （proc 域是纯生成类——注意：无命令无分支的 Skill 形态可能挑战 schema，
+   表达不了就记 REVIEW-QUEUE，别硬凑决策树）
+- 全部走 docs/07 全规则 + context_walk 场景 + promote。
+
+## U-4 attestation 签名落地
+- 用 Ed25519(python cryptography 或 nacl，若环境缺则 hashlib HMAC 过渡并注明)替换 UNSIGNED-TODO；
+  opsaxiom-attest 生成密钥对(~/.opsaxiom/keys)、签名、校验器验签(无公钥时 WARN)。
+
+## U-5 收尾：HANDOFF + 提醒切回 Fable 五轮评审
+
+进度勾选区（Opus 更新）：
+- [ ] U-1  - [ ] U-2  - [ ] U-3  - [ ] U-4  - [ ] U-5
+
+---
+
+# 第四轮（Fable 布置，2026-07-09 三轮评审后）——里程碑轮：从资产到产品【已完成，存档】
 
 > 前三轮建的是资产（51 Skill、校验/仿真/晋级/attest 流水线）。本轮开始造**用户真正敲的东西**：
 > 导航档运行时 CLI。这是 docs/01 §2 三档交互的第一档落地，也是"让运维工程师用一天后

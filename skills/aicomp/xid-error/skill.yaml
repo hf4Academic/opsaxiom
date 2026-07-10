@@ -32,8 +32,9 @@ tree:
     parser: gpu/xid-v1
     branch:
     - {when: xid_code == 79, goto: fell_off_exit}
-    - {when: xid_code == 48 or xid_code == 92 or xid_code == 94 or xid_code == 95, goto: ecc_hw_exit}
-    - {when: xid_code == 63 or xid_code == 64, goto: ecc_retire_exit}
+    - {when: xid_code == 48 or xid_code == 94 or xid_code == 95, goto: ecc_hw_exit}
+    # 92 = High single-bit ECC error rate：可纠正错误率偏高，是退化预警不是不可纠正错误（F-10）
+    - {when: xid_code == 63 or xid_code == 64 or xid_code == 92, goto: ecc_retire_exit}
     - {when: xid_code == 74, goto: nvlink_exit}
     - {when: xid_code == 13 or xid_code == 31 or xid_code == 43 or xid_code == 45, goto: app_exit}
     otherwise: unknown_xid_exit
@@ -43,8 +44,9 @@ tree:
       OS 终止。方向：查该 GPU 上的训练/推理进程日志、CUDA 代码越界、显存踩踏。通常单任务受影响，重启任务多可恢复，非硬件故障。}
   - {id: ecc_hw_exit, type: done, summary: XID 属不可纠正 ECC/硬件类(48=双比特 ECC DBE / 94=contained / 95=uncontained
       ECC 错误)。 这是硬件级显存错误，uncontained(95)会污染其他上下文。方向：立即 drain 该卡上的任务、 对该 GPU 做 nvidia-smi -r 复位或重启节点、持续出现则报修/换卡(RMA)。别当软件问题重试。}
-  - {id: ecc_retire_exit, type: done, summary: XID 63/64 属 ECC 页退休/行重映射(63=记录重映射事件，通常自愈；64=行重映射失败)。显存在退化。方向：63
-      观察退休页数增长趋势，64 说明重映射资源耗尽需换卡。查 nvidia-smi -q -d ECC 的 retired pages。}
+  - {id: ecc_retire_exit, type: done, summary: XID 63/64/92 属显存退化监控类(63=记录行重映射事件，通常自愈；64=行重映射失败；92=可纠正
+      单比特错误率偏高预警)。方向：63/92 观察退休页与 SBE 增长趋势(转 ecc-error)，64 说明重映射资源耗尽需换卡。查 nvidia-smi -q -d ECC。这类不必立即
+      drain，但要纳入监控。}
   - {id: nvlink_exit, type: done, summary: XID 74 属 NVLink 错误。多卡通信链路异常，会拖慢/中断 NCCL。方向：nvidia-smi nvlink
       -s 看链路状态与错误计数、检查 NVLink/NVSwitch 拓扑、必要时复位。转 aicomp/fabric/nvlink 深入。}
   - {id: fell_off_exit, type: escalate, summary: XID 79：GPU has fallen off the bus——GPU 从 PCIe 总线掉线，最严重的硬件故障之一。整卡不可用。立即：drain

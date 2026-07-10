@@ -1,9 +1,9 @@
 {
   "skill": "aicomp.gpu.xid-error",
   "action": "promote",
-  "from": "draft",
+  "from": "sim_verified",
   "to": "sim_verified",
-  "at": "2026-07-10T09:42:20",
+  "at": "2026-07-10T09:50:41",
   "validator": "0 ERROR",
   "evidence": "context_walk",
   "scenarios": [

@@ -182,6 +182,11 @@ def semantic_checks(skill, rep):
                     pok, perr = exprlang.check_projection(v["assert"])
                     if not pok:
                         rep.add(ERROR, "S12", f"action '{nid}' verify.assert 投影语义违规：{perr}  ← {v['assert']!r}")
+                    else:
+                        try:
+                            exprlang.evaluate(v["assert"], {})
+                        except Exception as e:
+                            rep.add(ERROR, "S13", f"action '{nid}' verify.assert 求值冒烟失败：{e}")
             # S11 回滚不得空转（v0.2 §7.5）
             if rb:
                 advisory = rb.get("advisory") is True
@@ -214,6 +219,13 @@ def semantic_checks(skill, rep):
                     pok, perr = exprlang.check_projection(when)
                     if not pok:
                         rep.add(ERROR, "S12", f"check '{nid}' branch[{i}] 投影语义违规：{perr}  ← {when!r}")
+                    else:
+                        # S13 求值冒烟(四轮评审，or-bug 启示)：空 ctx 实跑求值器，
+                        # 缺字段→None 是正常的；解析/求值器结构性异常必须在入库前暴露
+                        try:
+                            exprlang.evaluate(when, {})
+                        except Exception as e:
+                            rep.add(ERROR, "S13", f"check '{nid}' branch[{i}] 求值冒烟失败：{e}  ← {when!r}")
 
     # ---- S7 goto 引用完整性 + 可达性 ----
     valid_targets = set(nodes) | {"escalate", "done", "rollback"}

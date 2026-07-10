@@ -32,6 +32,9 @@
 - **B4 只查不改的诊断命令优先**。discovery 与 check 只读；任何写操作只能在 action 节点，
   且过 A1~A3。诊断命令别带副作用（别用会清计数器的命令，如某些 `clear`）。
 - **B5 管道后半段别决定分支**。`when` 基于解析器结构化输出，不基于 grep 文本碰运气。
+- **B9 分支里的枚举清单必须与 caution 里的清单逐项一致**（F-10：xid-error 的 caution 写硬件类
+  是 48/79/94/95，分支却多塞了 92——而 92 是可纠正错误率预警，误归会导致对好卡执行 drain+RMA）。
+  错误码/状态码分组时，逐码对照官方文档，且 branch 与 caution 双向核对。
 - **B8 用到版本/发行版特有的表、命令、字段，必须声明版本限定 + 给降级路径**（三轮评审 nit：
   mysql Skill 用了 8.0 的 performance_schema.data_lock_waits 等，5.7 没有）。
   `platforms` 写清 `versions`（如 `>=8.0`），并在相关节点 caution 里给旧版本等价命令。
