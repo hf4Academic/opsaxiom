@@ -177,6 +177,10 @@ def semantic_checks(skill, rep):
                 ok, err = exprlang.validate_when(v["assert"])
                 if not ok:
                     rep.add(ERROR, "S5", f"action '{nid}' verify.assert 非法：{err}  ← {v['assert']!r}")
+                else:
+                    pok, perr = exprlang.check_projection(v["assert"])
+                    if not pok:
+                        rep.add(ERROR, "S12", f"action '{nid}' verify.assert 投影语义违规：{perr}  ← {v['assert']!r}")
             # S11 回滚不得空转（v0.2 §7.5）
             if rb:
                 advisory = rb.get("advisory") is True
@@ -205,6 +209,10 @@ def semantic_checks(skill, rep):
                 ok, err = exprlang.validate_when(when)
                 if not ok:
                     rep.add(ERROR, "S5", f"check '{nid}' branch[{i}] when 非法：{err}  ← {when!r}")
+                else:
+                    pok, perr = exprlang.check_projection(when)
+                    if not pok:
+                        rep.add(ERROR, "S12", f"check '{nid}' branch[{i}] 投影语义违规：{perr}  ← {when!r}")
 
     # ---- S7 goto 引用完整性 + 可达性 ----
     valid_targets = set(nodes) | {"escalate", "done", "rollback"}

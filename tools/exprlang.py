@@ -368,6 +368,147 @@ def evaluate(expr, ctx):
     return _Eval(_tokenize(expr), ctx).run()
 
 
+# ============================================================================
+# S12 投影语义静态检测（docs/03 §7.6a，评审 F-8）
+# 规则：列表值（`[]` 投影，或含列表操作数的比较/matches/算术）不得作为 and/or/not 的操作数，
+# 也不得是整个表达式的最终结果——必须先经聚合函数（max/min/count/any/all/avg/sum）归约为标量。
+# 这拦截 `any(a[].x and a[].y)`（and 的操作数是列表）与 `a[].x > 0` 裸作 when（顶层是列表）
+# 这类"看似对、求值错"的写法。`any(A) and any(B)` 各自合法(每个 any 归约为标量)——
+# 那是语义误用(同元素 vs 独立存在)，无法静态判定，靠 docs/07 B6 + 评审兜底。
+# ============================================================================
+class ProjectionError(Exception):
+    pass
+
+
+_AGG = {"max", "min", "count", "any", "all", "avg", "sum"}  # 归约为标量；delta 也返回标量
+
+
+class _ProjCheck:
+    """返回每个子表达式是否'列表值'，并在违规处抛 ProjectionError。"""
+
+    def __init__(self, toks):
+        self.toks, self.i = toks, 0
+
+    @property
+    def cur(self):
+        return self.toks[self.i]
+
+    def eat(self, kind=None, val=None):
+        t = self.cur
+        if kind and t.kind != kind:
+            raise ProjectionError(f"期望 {kind}")
+        if val and t.val != val:
+            raise ProjectionError(f"期望 {val!r}")
+        self.i += 1
+        return t
+
+    def run(self):
+        is_list = self.p_or()
+        if self.cur.kind != "EOF":
+            raise ProjectionError("多余 token")
+        if is_list:
+            raise ProjectionError("整个表达式求值为列表——需用聚合函数(count/any/all/max...)归约为标量")
+        return False
+
+    def p_or(self):
+        a = self.p_and()
+        while self.cur.kind == "KW" and self.cur.val == "or":
+            self.eat(); b = self.p_and()
+            if a or b:
+                raise ProjectionError("or 的操作数是列表(投影未归约)——见 docs/07 B6")
+            a = False
+        return a
+
+    def p_and(self):
+        a = self.p_not()
+        while self.cur.kind == "KW" and self.cur.val == "and":
+            self.eat(); b = self.p_not()
+            if a or b:
+                raise ProjectionError("and 的操作数是列表(投影未归约)——同元素多条件请用解析器派生标量字段，见 docs/07 B6")
+            a = False
+        return a
+
+    def p_not(self):
+        if self.cur.kind == "KW" and self.cur.val == "not":
+            self.eat(); b = self.p_not()
+            if b:
+                raise ProjectionError("not 的操作数是列表(投影未归约)")
+            return False
+        return self.p_cmp()
+
+    def p_cmp(self):
+        a = self.p_add()
+        if self.cur.kind == "OP2" or (self.cur.kind == "OP1" and self.cur.val in "><"):
+            self.eat(); b = self.p_add()
+            return a or b            # 逐元素比较：任一侧列表则结果列表
+        if self.cur.kind == "KW" and self.cur.val == "matches":
+            self.eat(); self.eat("STRING")
+            return a                 # 左侧列表则结果列表
+        return a
+
+    def p_add(self):
+        a = self.p_mul()
+        while self.cur.kind == "OP1" and self.cur.val in "+-":
+            self.eat(); b = self.p_mul(); a = a or b
+        return a
+
+    def p_mul(self):
+        a = self.p_unary()
+        while self.cur.kind == "OP1" and self.cur.val in "*/":
+            self.eat(); b = self.p_unary(); a = a or b
+        return a
+
+    def p_unary(self):
+        if self.cur.kind == "OP1" and self.cur.val == "-":
+            self.eat(); return self.p_unary()
+        return self.p_atom()
+
+    def p_atom(self):
+        t = self.cur
+        if t.kind in ("NUMBER", "DURATION", "STRING"):
+            self.eat(); return False
+        if t.kind == "OP1" and t.val == "(":
+            self.eat("OP1", "("); inner = self.p_or(); self.eat("OP1", ")"); return inner
+        if t.kind == "NAME":
+            self.eat()
+            if self.cur.kind == "OP1" and self.cur.val == "(":
+                name = t.val
+                self.eat("OP1", "(")
+                if not (self.cur.kind == "OP1" and self.cur.val == ")"):
+                    self.p_or()          # 参数可为列表（聚合的意义就在此），但内部 and/or 仍受检
+                    while self.cur.kind == "OP1" and self.cur.val == ",":
+                        self.eat(); self.p_or()
+                self.eat("OP1", ")")
+                return False if name in _AGG or name == "delta" else False  # 函数结果均为标量
+            return self._fieldref_is_list()
+        raise ProjectionError("意外 token")
+
+    def _fieldref_is_list(self):
+        is_list = False
+        while True:
+            if self.cur.kind == "OP1" and self.cur.val == ".":
+                self.eat(); self.eat("NAME")
+            elif self.cur.kind == "OP1" and self.cur.val == "[":
+                self.eat("OP1", "[")
+                if self.cur.kind == "NUMBER":
+                    self.eat("NUMBER")      # 下标 → 取单元素，不是列表
+                else:
+                    is_list = True          # `[]` 投影 → 列表
+                self.eat("OP1", "]")
+            else:
+                break
+        return is_list
+
+
+def check_projection(expr):
+    """S12：返回 (ok, error)。ok=True 表示投影语义安全。"""
+    try:
+        _ProjCheck(_tokenize(expr)).run()
+        return True, None
+    except (ProjectionError, ExprError) as e:
+        return False, str(e)
+
+
 def parse_template_ref(s):
     """解析 {{...}} 内部的字段引用（v0.2 §7.4，与 branch.when 同文法的字段引用子集）。
     返回 (ok, root, second)：ok=是否合法字段引用；root=根标识符；

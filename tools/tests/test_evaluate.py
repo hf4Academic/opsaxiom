@@ -70,3 +70,20 @@ def test_parse_template_ref():
     assert not ok
     ok, _, _ = parse_template_ref("a|b")             # | 非法
     assert not ok
+
+
+def test_s12_projection_check():
+    from exprlang import check_projection as cp
+    # 合法：投影经聚合归约
+    for e in ["max(rows[].ipcent) > 90", "count(rows[].pcpu > 10) >= 2",
+              "any(lines[] matches 'x')", "rows[0].pcent >= 90",
+              "state == 'up' and prefixes >= 1", "avg(rows[].v) > 15"]:
+        ok, err = cp(e)
+        assert ok, f"应合法却被拦: {e} ({err})"
+    # 非法：F-8 类——投影未归约即参与 and/or 或裸作顶层
+    for e in ["any(entries[].action == 'deny' and entries[].hits > 0)",
+              "rows[].pcent > 90",
+              "ports[].role == 'x' and ports[].state == 'y'",
+              "rows[].a > 1 or rows[].b > 2"]:
+        ok, _ = cp(e)
+        assert not ok, f"F-8 类应拦截却通过: {e}"
