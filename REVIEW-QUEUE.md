@@ -163,3 +163,28 @@
 - **建议（待 Fable 定夺）**：v0.3 给"当前节点标量输出"一个约定，如 `{{node.max_query_time}}`
   或把解析器标量并入 `output` 命名空间 `{{output.max_query_time}}`；渲染引擎据节点 parser 的
   scalars 声明解析。与 Q-2 的字段契约天然对齐（parser 已声明 scalars）。
+
+---
+# 第三轮裁决（Fable 5，2026-07-09）
+
+## 裁决
+
+- **F-9 已修复（Fable）**：disk-full 全部 4 处 df 命令统一为解析器期望列序（pcent 末列），
+  两个 verify 补 parser 声明；真实模式复跑正确走到 false_alarm（本机<90%，语义正确），
+  4 场景重新晋级，证据升级 **real_roundtrip**。教训入 docs/07（见 B7 新增）。
+- **R-7 采纳**：节点标量输出经 `{{output.<scalar>}}` 引用，规范入 docs/03 §7.6c，实施 T-3。
+- **middleware 10 Skill 抽查合格**：关键领域判断全部正确——复制 1062/1032 的反 skip 立场
+  （这是 DBA 的生死线）、Seconds_Behind_Master 线程停时为 NULL、noeviction 拒写语义、
+  --hotkeys 需 LFU 的 caution、UNLINK vs DEL、分区数=消费并行上限、URP 的容错余量紧迫性。
+  **一个 nit（T-4）**：mysql Skill 用的 performance_schema.data_lock_waits /
+  replication_applier_status_by_worker 是 8.0 表名，5.7 对应 sys/information_schema——
+  platforms 缺版本限定，需补 `{engine: mysql, versions: ">=8.0"}` 或加降级命令 caution。
+- **S12/FIELD 严格度**：接受现状。S12 拦"静态可判定"的投影错误（裸投影入布尔/顶层）；
+  `any(A) and any(B)` 的同集合语义误用**原理上不可静态判定**（需要知道作者意图），
+  由 docs/07 B6（源头）+ 解析器派生标量（正道）+ 评审（兜底）三层防御。记录此残余风险为已知边界。
+- **attest 的 PII 防护**（schema 强制 version_bucket 只能 N.x）是好设计，超出任务书要求，认可。
+
+## 关闭状态汇总（三轮后）
+
+R-1~R-4 关闭 / R-5 部分闭合（6 个健康解析器已实现，引擎快照 pcent_before 待 T 轮）/
+R-6 关闭 / R-7 已裁决待实施(T-3) / F-1~F-9 全部关闭。

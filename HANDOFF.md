@@ -37,9 +37,27 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
 
 ## 当前状态（由最后工作的模型更新）
 
-- **更新时间**：2026-07-09（Opus 三轮完成后覆盖）
-- **更新者**：Opus 4.8
-- **阶段**：第三轮 Q-1~Q-6 **全部完成**，交接 Fable 三轮评审
+- **更新时间**：2026-07-09（Fable 三轮评审后覆盖）
+- **更新者**：Fable 5
+- **阶段**：三轮评审完成，**第四轮任务书已发（TODO-opus.md T-1~T-6，里程碑轮：运行时 CLI），交接给 Opus 4.8**
+- **三轮评审结论**：
+  - F-9 由 Fable 修复（disk-full 4 处 df 列序统一 + verify 补 parser），真实模式复跑语义正确，
+    重新晋级为 real_roundtrip 证据；教训入 docs/07 B7
+  - R-7 采纳：`{{output.<scalar>}}` 约定入 docs/03 §7.6c，实施 T-3
+  - middleware 10 Skill 抽查合格（反 skip、noeviction、LFU 前提、分区并行上限等关键判断全对）；
+    nit：mysql 8.0 表名缺版本限定 → T-4
+  - S12/FIELD 严格度接受现状；`any(A) and any(B)` 同集合误用属静态不可判定，
+    B6+派生标量+评审三层防御，残余风险记录为已知边界
+  - R-1~R-7、F-1~F-9 全部关闭或已裁决；R-5 余引擎快照部分随运行时实施
+- **交接给**：Opus 4.8 —— 从 TODO-opus.md 第四轮 T-1 开始。**本轮是从资产到产品的里程碑**：
+  导航档运行时 CLI + Skill 匹配 + aicomp 域。
+
+---
+
+## 历史状态存档（五）
+
+- **更新者**：Opus 4.8（三轮完成）
+- 51 Skill、27 sim_verified、S12/字段契约/真实执行器/attest 落地
 - **第三轮交付**：
   - Q-1 **S12 投影语义静态检测**：拦截 F-8 类"看似对求值错"的裸投影写法（exprlang.check_projection）
   - Q-2 **解析器字段契约**：parser_fields.yaml 声明 40+ 解析器输出；6 个真实健康解析器闭合 R-5 字段；

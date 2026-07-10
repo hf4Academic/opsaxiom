@@ -47,7 +47,8 @@ tree:
   - id: locate_mount
     type: check
     title: 确认告警挂载点与真实使用率
-    run: {linux: "df -B1 --output=target,pcent,avail {{mount}}"}
+    # F-9 修复：列序必须与 table/df-v1 一致（pcent 末列），全 Skill 统一此列序
+    run: {linux: "df -B1 --output=target,size,used,avail,pcent {{mount}}"}
     parser: table/df-v1
     branch:
       - when: "rows[0].pcent >= 90"
@@ -158,9 +159,10 @@ tree:
     run: {linux: "find {{mount}} -name '*.log' -mtime +7 -size +100M ! -exec fuser -s {} \\; -exec gzip {} \\;"}
     rollback:
       type: inverse
-      run: {linux: "find {{mount}} -name '*.log.gz' -newer /var/lib/opsagent/session/{{sid}}/start -exec gunzip {} \\;"}
+      run: {linux: "find {{mount}} -name '*.log.gz' -newer /var/lib/opsaxiom/session/{{sid}}/start -exec gunzip {} \\;"}
     verify:
-      run: {linux: "df -B1 --output=pcent {{mount}}"}
+      run: {linux: "df -B1 --output=target,size,used,avail,pcent {{mount}}"}
+      parser: table/df-v1
       assert: "rows[0].pcent < 90"
       on_fail: escalate    # 压缩不够说明另有元凶，继续排查而非回滚
     goto: final_check
@@ -192,7 +194,8 @@ tree:
       type: inverse
       run: {linux: "opsaxiom-quarantine restore --session {{sid}}"}
     verify:
-      run: {linux: "df -B1 --output=pcent {{mount}}"}
+      run: {linux: "df -B1 --output=target,size,used,avail,pcent {{mount}}"}
+      parser: table/df-v1
       assert: "rows[0].pcent < 90"
       on_fail: escalate
     cautions:
@@ -216,7 +219,7 @@ tree:
   - id: final_check
     type: check
     title: 复核使用率并给出防复发建议
-    run: {linux: "df -B1 --output=pcent,avail {{mount}}"}
+    run: {linux: "df -B1 --output=target,size,used,avail,pcent {{mount}}"}
     parser: table/df-v1
     branch:
       - when: "rows[0].pcent < 85"

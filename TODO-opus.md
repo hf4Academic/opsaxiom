@@ -1,6 +1,51 @@
 # Opus 4.8 任务书
 
-# 第三轮（Fable 布置，2026-07-09 二轮评审后）
+# 第四轮（Fable 布置，2026-07-09 三轮评审后）——里程碑轮：从资产到产品
+
+> 前三轮建的是资产（51 Skill、校验/仿真/晋级/attest 流水线）。本轮开始造**用户真正敲的东西**：
+> 导航档运行时 CLI。这是 docs/01 §2 三档交互的第一档落地，也是"让运维工程师用一天后
+> 不愿卸载"的 MVP 起点。规范依据新增：docs/03 §7.6c（R-7 裁决）、docs/07 B7。
+
+## T-1 运行时 CLI 导航档 MVP（本轮核心，可多次提交）
+- `tools/bin/opsaxiom` 子命令 `run <skill-id> [--param k=v]...`：
+  加载 Skill → 逐节点交互执行（导航档语义，黄金准则 R3/R5）：
+  - check：打印标题+命令+cautions → 人执行后粘贴输出（或 `--real` 时白名单只读命令自动执行，
+    复用 run_sim 的 _is_readonly/解析器/求值器）→ 机器判分支 → 下一步；
+  - ask：呈现 options 供选择，答案按 binds 绑定变量；
+  - action：**渲染变更简报**（blast_radius/watch/abort_if/est_downtime + 渲染后的 run/rollback
+    命令原文）——导航档只指导不执行（R6），人确认完成后继续 verify 指导；
+  - done/escalate：渲染 summary（模板按 §7.4/§7.6c 求值）→ feedback.ask 单比特反馈 →
+    提示可 `opsaxiom-attest` 沉淀。
+- 全程审计：会话记录（节点序列/输入输出摘要）落 `~/.opsaxiom/sessions/<sid>.jsonl`。
+- 用 disk-full 与 mysql-slow-query 各录一个演示脚本(非交互 --answers 文件驱动)进 tests。
+
+## T-2 Skill 匹配（docs/04 §4 的最小实现）
+- `opsaxiom diagnose "<症状描述>"`：L1 关键词分类(8 选 1) + 域内 L3 入口症状子串/分词匹配 →
+  列候选 Skill(带 maturity 徽章与证据级) → 选定后进 T-1 的 run。不引入 embedding，先关键词。
+
+## T-3 实施 R-7 渲染契约（docs/03 §7.6c）
+- 模板渲染引擎：`{{output.<scalar>}}` 按节点 parser 的 scalars 声明解析；`{{rows[0].x}}` 等
+  字段引用复用 exprlang 求值；FIELD 校验扩展覆盖模板引用。summary 里恢复此前被移除的标量引用。
+
+## T-4 mysql 版本限定修复（三轮评审 nit）
+- 5 个 mysql Skill 的 platforms 补 `versions: ">=8.0"`；关键 check 加 5.7 降级命令 caution
+  （sys.innodb_lock_waits 等）。docs/07 增补规则：**用到版本特有表/命令必须声明版本限定**。
+
+## T-5 aicomp 域 10 个 Skill（原始愿景的引爆点域）
+- 按 docs/04 §5.4 高频叶子：xid-error、ecc-error、fell-off-bus、thermal-throttle、
+  ib-link-down、nccl-allreduce-slow、nccl-hang、job-hang、slow-node、gpu-util-low。
+- nvidia-smi/dcgmi/ibstat 类命令的解析器契约入 parser_fields.yaml；严守 docs/07 全部规则；
+  各附 context_walk 场景走 promote。XID 错误码表（13/31/48/63/64/79...）的含义要准——这是
+  该域最核心的领域知识，写进 cautions。
+
+## T-6 收尾：HANDOFF + 提醒切回 Fable 四轮评审
+
+进度勾选区（Opus 更新）：
+- [ ] T-1  - [ ] T-2  - [ ] T-3  - [ ] T-4  - [ ] T-5  - [ ] T-6
+
+---
+
+# 第三轮（Fable 布置，2026-07-09 二轮评审后）【已完成，存档】
 
 > 规范依据新增：docs/03 §7.6a/§7.6b（F-8 投影语义、R-5 字段契约）、docs/05 证据分级、docs/07 B6。
 

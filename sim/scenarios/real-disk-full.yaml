@@ -1,0 +1,7 @@
+skill: skills/host/disk-full/skill.yaml
+scenario: 真实模式：本机 df 真跑（F-9 修复后）
+mode: real
+bindings:
+  mount: /
+  sid: simreal
+  threshold: 90
