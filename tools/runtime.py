@@ -89,6 +89,22 @@ class IO:
             return str(self.answers.get(node, "n")).strip().lower() in ("y", "yes", "是")
         return input("[y/N]: ").strip().lower() in ("y", "yes")
 
+    def attest_intake(self, node, prompt):
+        """V-3 一键认证：返回预填字段的补充 dict，或 None 表示跳过。
+
+        脚本模式：answers[node+':attest'] 为 dict（补 os_family/scale/attestor）或缺省=跳过。
+        交互模式：先 y/N，y 则只问 os-family 与规模两个分桶。
+        """
+        if self.answers is not None:
+            info = self.answers.get(node + ":attest")
+            return info if isinstance(info, dict) else None
+        self._p(f"\n{prompt} [y/N]")
+        if input("> ").strip().lower() not in ("y", "yes", "是"):
+            return None
+        return {"os_family": input("  os 家族 [linux]: ").strip() or "linux",
+                "scale": input("  规模(主机数) [1]: ").strip() or "1",
+                "attestor": input("  你的标识 (gh:user) [anonymous]: ").strip() or "anonymous"}
+
     def action_decision(self, node, prompt):
         """变更节点决策（U-1：不再是 y/n 二选一）。返回 proceed|skip|escalate|quit。
 
@@ -321,7 +337,32 @@ class Session:
             self.io._p(f"\n{fb} 👍/👎")
             ans = self.io.paste(n["id"] + ":fb", "").strip() if self.io.answers is not None else ""
             self._log(n["id"], "feedback", answer=ans)
-        self.io._p("（可运行 opsaxiom-attest 把这次验证沉淀为公共资产）")
+        # V-3：一键认证——仅 done（真的解决了）才追问，从会话预填字段
+        if kind == "done":
+            self._offer_attest(n)
+
+    def _offer_attest(self, n):
+        """run 终点接单：确认→从会话预填→只补 2 个分桶→签名落盘（docs/08 §2）。"""
+        info = self.io.attest_intake(n["id"], "要把这次验证沉淀为社区凭据吗？")
+        if not info:
+            self.io._p("（可稍后：opsaxiom attest --from-session %s）" % self.sid)
+            return
+        rollback = "rollback_guide" in self.path
+        mode = {"guided": "navigator", "real": "copilot"}.get(self.mode, "navigator")
+        attest_bin = str(HERE / "bin" / "opsaxiom-attest")
+        cmd = [sys.executable, attest_bin,
+               "--skill", self.skill["metadata"]["id"],
+               "--skill-version", str(self.skill["metadata"].get("version", "0.1.0")),
+               "--outcome", "resolved", "--mode", mode,
+               "--os-family", str(info.get("os_family", "linux")),
+               "--scale", str(info.get("scale", "1")),
+               "--attestor", str(info.get("attestor", "anonymous"))]
+        if rollback:
+            cmd.append("--rollback-exercised")
+        import subprocess
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        self.io._p(r.stdout.strip() or r.stderr.strip())
+        self._log(n["id"], "attest", ok=(r.returncode == 0))
 
     def run(self, start=None):
         node, guard = (start or self.entry), 0
@@ -363,4 +404,8 @@ class Session:
         sf = self._sess_dir() / f"{self.sid}.state.json"
         if self.outcome in ("done", "escalate", "rolled_back") and sf.exists():
             sf.unlink()
+        # meta.json 留存供 attest --from-session 预填（不随 state 清理）
+        (self._sess_dir() / f"{self.sid}.meta.json").write_text(json.dumps(
+            {"skill_id": self.skill["metadata"]["id"], "mode": self.mode,
+             "path": self.path, "outcome": self.outcome}, ensure_ascii=False), encoding="utf-8")
         return {"path": self.path, "outcome": self.outcome, "audit_file": str(f)}

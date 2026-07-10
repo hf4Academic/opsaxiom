@@ -156,6 +156,9 @@ def _skill_dir(skill_id):
 
 
 def _prompt(field, default=None, choices=None):
+    # 无 TTY（被 run 子进程/脚本调用）时不阻塞，直接取默认值
+    if not sys.stdin.isatty():
+        return default
     hint = f" {choices}" if choices else ""
     d = f" [{default}]" if default else ""
     val = input(f"{field}{hint}{d}: ").strip()
@@ -189,6 +192,36 @@ def build(args):
     return sdir, att
 
 
+def _prefill_from_session(args):
+    """从 ~/.opsaxiom/sessions/<sid>.state.json 或审计预填 args（V-3 异步入口）。"""
+    home = pathlib.Path(os.environ.get("OPSAXIOM_HOME", pathlib.Path.home() / ".opsaxiom"))
+    sd = home / "sessions"
+    # meta.json（会话结束留存）优先，其次 state.json（中途退出）
+    import json as _j
+    skill_id = mode = None
+    rollback = False
+    for cand in (sd / f"{args.from_session}.meta.json", sd / f"{args.from_session}.state.json"):
+        if cand.exists():
+            st = _j.loads(cand.read_text(encoding="utf-8"))
+            skill_id = st.get("skill_id")
+            mode = {"guided": "navigator", "real": "copilot"}.get(st.get("mode"), None)
+            rollback = "rollback_guide" in (st.get("path") or [])
+            break
+    aud_p = sd / f"{args.from_session}.jsonl"
+    if aud_p.exists() and "rollback_guide" in aud_p.read_text(encoding="utf-8"):
+        rollback = True
+    if skill_id and not args.skill:
+        args.skill = skill_id
+    if mode and not args.mode:
+        args.mode = mode
+    if rollback:
+        args.rollback_exercised = True
+    if not args.outcome:
+        args.outcome = "resolved"
+    print(f"（已从会话 {args.from_session} 预填：skill={args.skill} mode={args.mode} "
+          f"rollback={args.rollback_exercised}）", file=sys.stderr)
+
+
 def main():
     ap = argparse.ArgumentParser(prog="opsaxiom-attest")
     ap.add_argument("--skill"); ap.add_argument("--skill-version")
@@ -201,7 +234,11 @@ def main():
     ap.add_argument("--date", help="覆盖日期(测试用，YYYY-MM-DD)")
     ap.add_argument("--keygen", action="store_true", help="仅生成/查看签名密钥对后退出")
     ap.add_argument("--verify", metavar="FILE", help="验证一个 attestation 文件的签名")
+    ap.add_argument("--from-session", metavar="SID", help="从会话状态预填 skill/mode/回滚")
     args = ap.parse_args()
+
+    if args.from_session:
+        _prefill_from_session(args)
 
     if args.keygen:
         _, pub = ensure_keypair()
