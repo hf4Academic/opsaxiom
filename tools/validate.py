@@ -299,6 +299,41 @@ def semantic_checks(skill, rep):
             rep.add(ERROR, "S9",
                     f"模板变量 '{root}' 无来源（需在 facts/params/ask.binds/discovery 声明）：{{{{{e}}}}}")
 
+    # ---- Q-2 字段来源校验（when/assert 引用的字段须由该节点 parser 产出，WARN 一轮）----
+    try:
+        import parsers as _parsers
+        param_names = {p.get("name") for p in meta.get("params", []) or []}
+        fact_roots = set()
+        for fct in skill.get("requirements", {}).get("facts", []):
+            fact_roots.add(fct.split(".")[-1]); fact_roots.add(fct.split(".")[0])
+        base_ok = param_names | fact_roots | _BUILTIN_VARS | {"output"}
+        for nid, n in nodes.items():
+            if n.get("type") != "check":
+                continue
+            decl = _parsers.get_fields(n.get("parser", "")) if n.get("parser") else None
+            if not decl:
+                continue
+            rows_fields = set(decl.get("rows", []))
+            scalars = set(decl.get("scalars", []))
+            lists = decl.get("lists", {}) or {}
+            has_lines = decl.get("lines", False)
+            for i, br in enumerate(n.get("branch", [])):
+                for root, sub in exprlang.field_refs(br.get("when", "")):
+                    if root.endswith("_before") or root in base_ok or root in scalars:
+                        continue
+                    if root == "rows":
+                        if sub and rows_fields and sub not in rows_fields:
+                            rep.add(WARN, "FIELD", f"check '{nid}' branch[{i}] rows.{sub} 不在解析器 {n['parser']} 声明的行字段 {sorted(rows_fields)}")
+                        continue
+                    if root == "lines":
+                        continue
+                    if root in lists:
+                        continue
+                    rep.add(WARN, "FIELD",
+                            f"check '{nid}' branch[{i}] 字段 '{root}' 无来源（解析器 {n['parser']} 未声明，也非 fact/param）")
+    except Exception:
+        pass
+
     # ---- S6 命令语法树（O-5：网络平台强制，其他平台跳过）----
     checked_net = 0
     all_nodes = list(nodes.values())

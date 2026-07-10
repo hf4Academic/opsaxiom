@@ -46,3 +46,31 @@ def test_ntc_wrapper_degrades_gracefully():
     assert p is not None
     out = p("BGP router identifier 1.1.1.1\n")
     assert "rows" in out
+
+
+# ---- Q-2 健康/派生字段解析器 ----
+def test_health_parsers():
+    assert parsers.get_parser("text/systemctl-active-v1")("active\ninactive")["service_active"] is True
+    assert parsers.get_parser("text/systemctl-active-v1")("inactive\nfailed")["service_active"] is False
+    mo = parsers.get_parser("text/mount-opts-v1")("ro,relatime\n[1.2] EXT4-fs error x")
+    assert mo["mount_rw"] is False and mo["fs_errors"] == 1
+    ct = parsers.get_parser("json/conntrack-v1")("95000\n100000")
+    assert ct["ct_count"] == 95000 and ct["ct_max"] == 100000
+    ro = parsers.get_parser("json/rollout-status-v1")("successfully rolled out\na Running true\nb Running false")
+    assert ro["rollout_succeeded"] is True and ro["unready_pods"] == 1
+
+
+def test_parser_field_declarations_present():
+    # 6 个真实健康解析器都带字段声明
+    for name in ["text/systemctl-active-v1", "json/systemctl-show-v1", "text/mount-opts-v1",
+                 "json/conntrack-v1", "json/loadavg-v1", "json/rollout-status-v1"]:
+        assert parsers.get_fields(name), f"{name} 缺字段声明"
+
+
+def test_field_refs_ignores_strings_and_funcs():
+    from exprlang import field_refs
+    refs = dict(field_refs("count(rows[].path matches '/var/log') >= 1 and load1 > cores"))
+    assert "rows" in refs and refs["rows"] == "path"
+    assert "load1" in refs and "cores" in refs
+    assert "count" not in refs        # 函数名不算字段
+    assert "var" not in refs          # 字符串字面量内的词不算字段

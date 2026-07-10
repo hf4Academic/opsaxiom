@@ -81,6 +81,9 @@ def parse_du(text):
 
 
 def install(register):
-    register("table/df-v1", parse_df)
-    register("table/df-inode-v1", parse_df_inode)
-    register("table/du-v1", parse_du)
+    register("table/df-v1", parse_df,
+             {"rows": ["target", "size", "used", "avail", "pcent"], "lines": False})
+    register("table/df-inode-v1", parse_df_inode,
+             {"rows": ["target", "itotal", "iused", "ipcent"], "lines": False})
+    register("table/du-v1", parse_du,
+             {"rows": ["size", "path"], "lines": False})

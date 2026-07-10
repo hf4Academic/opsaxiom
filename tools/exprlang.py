@@ -500,6 +500,46 @@ class _ProjCheck:
         return is_list
 
 
+def field_refs(expr):
+    """提取字段引用 (root, sub)：sub 是 root 之后的第一个 .field（无则 None）。
+    忽略字符串字面量内的词与函数名。用于 Q-2 字段来源校验。"""
+    try:
+        toks = _tokenize(expr)
+    except ExprError:
+        return []
+    out, i = [], 0
+    while i < len(toks):
+        t = toks[i]
+        if t.kind == "NAME":
+            # 函数调用？（后跟 '('）→ 跳过函数名本身
+            if i + 1 < len(toks) and toks[i + 1].kind == "OP1" and toks[i + 1].val == "(":
+                i += 1
+                continue
+            root = t.val
+            sub = None
+            j = i + 1
+            # 消费访问器，捕获第一个 .field
+            while j < len(toks):
+                tj = toks[j]
+                if tj.kind == "OP1" and tj.val == "." and j + 1 < len(toks) and toks[j + 1].kind == "NAME":
+                    if sub is None:
+                        sub = toks[j + 1].val
+                    j += 2
+                elif tj.kind == "OP1" and tj.val == "[":
+                    j += 1
+                    if j < len(toks) and toks[j].kind == "NUMBER":
+                        j += 1
+                    if j < len(toks) and toks[j].kind == "OP1" and toks[j].val == "]":
+                        j += 1
+                else:
+                    break
+            out.append((root, sub))
+            i = j
+        else:
+            i += 1
+    return out
+
+
 def check_projection(expr):
     """S12：返回 (ok, error)。ok=True 表示投影语义安全。"""
     try:

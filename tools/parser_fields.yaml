@@ -1,0 +1,52 @@
+# 解析器字段契约（Q-2）——声明每个解析器的输出字段，供校验器检查 when/assert 引用是否真有来源。
+# 结构：<parser-name>: {rows:[行字段], scalars:[顶层标量], lists:{名:[]}, lines:bool}
+# 已在代码中带声明注册的解析器（health.py/table.py）以代码为准；此文件覆盖尚未实现的契约。
+# lists 的空 subfields 表示"允许任意子字段"（WARN 阶段从宽）。
+parsers:
+  # ---- host: table/* ----
+  table/free-v1: {scalars: [available_pct, mem_total, slab_unreclaim_mb]}
+  table/vmstat-v1: {rows: [r, si, so, sy, us, wa]}
+  table/ps-v1: {rows: [pcpu, pid, comm]}
+  table/ps-rss-v1: {rows: [rss, pid, comm], scalars: [mem_total]}
+  table/ps-stat-v1: {rows: [stat, ppid, pid, comm, count]}
+  table/iostat-v1: {rows: [util, await, aqu_sz]}
+  table/iotop-v1: {rows: [io_pct, pid, comm]}
+  table/mpstat-v1: {rows: [steal, us, sy, wa]}
+  table/fd-rank-v1: {rows: [fd_count, pid, comm]}
+  table/ss-states-v1: {scalars: [timewait]}
+  table/ss-summary-v1: {scalars: [timewait]}
+  # ---- host: json/* ----
+  json/file-nr-v1: {scalars: [allocated, max]}
+  # ---- host: text/* （诊断类只用 lines[] matches + count(lines)）----
+  text/dmesg-oom-v1: {lines: true}
+  text/dmesg-fs-v1: {lines: true}
+  text/dmesg-lockup-v1: {lines: true}
+  text/journal-v1: {lines: true}
+  text/systemctl-status-v1: {lines: true}
+  text/resolv-v1: {lines: true}
+  text/timedatectl-v1: {lines: true}
+  text/mdstat-v1: {lines: true}
+  text/x509-v1: {scalars: [days_left], lines: true}
+  # ---- k8s ----
+  json/k8s-deploy-status-v1: {scalars: [updated_replicas, ready_replicas, spec_replicas, available_replicas]}
+  json/k8s-container-state-v1: {scalars: [exit_code], lines: true}
+  json/k8s-endpoints-v1: {scalars: [addresses]}
+  json/k8s-pod-list-v1: {lines: true}
+  json/k8s-resources-v1: {lines: true}
+  text/k8s-events-v1: {lines: true}
+  text/pod-logs-v1: {lines: true}
+  text/rollout-history-v1: {scalars: [revision_count]}
+  text/hpa-v1: {scalars: [target_util, current_util, current_replicas, max_replicas], lines: true}
+  # ---- network: ntc/{{device.platform}}/* （名字含模板，与 skill 内字面量一致）----
+  ntc/{{device.platform}}/bgp-summary: {scalars: [state, prefixes]}
+  ntc/{{device.platform}}/bgp-neighbor: {scalars: [state, admin_state]}
+  ntc/{{device.platform}}/bgp-received: {rows: [prefix]}
+  ntc/{{device.platform}}/ospf-neighbor: {scalars: [state]}
+  ntc/{{device.platform}}/ping: {scalars: [loss_pct]}
+  ntc/{{device.platform}}/traceroute: {scalars: [loss_pct], lists: {hops: [loss_pct]}}
+  ntc/{{device.platform}}/interface: {scalars: [link_state, crc_errors, input_errors, output_drops, util, direction_in, direction_out, applied_acls], lists: {interfaces: [broadcast_pps, util]}}
+  ntc/{{device.platform}}/transceiver: {scalars: [rx_power_dbm, tx_power_dbm, rx_power_low_threshold, tx_power_low_threshold]}
+  ntc/{{device.platform}}/vlan: {rows: [vlan_id, name, status]}
+  ntc/{{device.platform}}/trunk: {scalars: [], lists: {allowed_vlans: []}}
+  ntc/{{device.platform}}/stp: {scalars: [inconsistent_ports, tcn_rate]}
+  ntc/{{device.platform}}/acl: {scalars: [deny_hit_count], lists: {entries: [action, hits]}}
