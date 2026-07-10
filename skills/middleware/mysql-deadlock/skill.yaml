@@ -6,59 +6,56 @@ metadata:
   taxonomy: middleware/mysql/deadlock
   version: 0.1.0
   maturity: sim_verified
-  platforms: [{engine: mysql}]
+  platforms:
+  - {engine: mysql, versions: '>=8.0'}
   params:
-    - {name: dsn, source: user, desc: 实例连接串}
+  - {name: dsn, source: user, desc: 实例连接串}
   authors: [opsagent-core]
   license: Apache-2.0
   provenance: {generated_by: claude-opus-4-8}
-  expires_review: "2027-07-01"
+  expires_review: '2027-07-01'
 requirements:
   capability_level: read
   connectors: [mysql]
 discovery:
-  - id: locks
-    run: {mysql: "SELECT COUNT(*) waits FROM performance_schema.data_lock_waits"}
-    parser: mysql/lockwait-v1
+- id: locks
+  run: {mysql: SELECT COUNT(*) waits FROM performance_schema.data_lock_waits}
+  parser: mysql/lockwait-v1
 tree:
   entry: check_waits
   nodes:
-    - id: check_waits
-      type: check
-      title: 当前是否存在锁等待
-      run: {mysql: "SELECT COUNT(*) waits FROM performance_schema.data_lock_waits"}
-      parser: mysql/lockwait-v1
-      branch:
-        - {when: "lock_waits > 0", goto: find_blocker}
-        - {when: "lock_waits == 0", goto: history_exit}
-      otherwise: escalate
-      cautions:
-        - "死锁(deadlock)和锁等待超时(lock wait timeout)是两回事：死锁 InnoDB 会自动回滚一方并记入 SHOW ENGINE INNODB STATUS；锁等待超时是等太久报错。先分清"
-        - "当前无等待≠没问题：死锁往往瞬时发生后自动解开，要看 SHOW ENGINE INNODB STATUS 的 LATEST DETECTED DEADLOCK 复盘"
-    - id: history_exit
-      type: done
-      summary: "当前无锁等待。若业务报死锁，看 SHOW ENGINE INNODB STATUS 的 LATEST DETECTED DEADLOCK 段，分析两个事务的加锁顺序，通常是加锁顺序不一致导致。交研发统一加锁顺序。"
-    - id: find_blocker
-      type: check
-      title: 定位阻塞源事务
-      run: {mysql: "SELECT COUNT(*) blockers FROM performance_schema.data_lock_waits w JOIN information_schema.INNODB_TRX t ON w.BLOCKING_ENGINE_TRANSACTION_ID=t.trx_id WHERE t.trx_started < NOW()-INTERVAL 30 SECOND"}
-      parser: mysql/blocker-v1
-      branch:
-        - {when: "long_blocker > 0", goto: long_txn_exit}
-      otherwise: contention_exit
-      cautions:
-        - "阻塞源若是长事务(trx_started 很早)，多为忘了提交/应用 hang 住持锁不放——这是最典型的锁等待元凶"
-    - id: long_txn_exit
-      type: done
-      summary: "存在长事务持锁不放，阻塞其他事务。查该事务 SQL 与来源(是否应用未提交/事务过大)。方向：修复应用事务管理、缩小事务、必要时人工 kill 阻塞源事务(需确认其未提交的写入影响)。"
-    - id: contention_exit
-      type: done
-      summary: "锁等待但无明显长事务，属高并发下的热点行竞争。方向：优化事务缩短持锁时间、减少热点行更新(如计数器分桶)、调整加锁顺序避免死锁。"
-    - id: escalate
-      type: escalate
-      summary: "打包升级：data_lock_waits、INNODB_TRX 长事务、SHOW ENGINE INNODB STATUS 死锁段、涉及的表与索引。"
+  - id: check_waits
+    type: check
+    title: 当前是否存在锁等待
+    run: {mysql: SELECT COUNT(*) waits FROM performance_schema.data_lock_waits}
+    parser: mysql/lockwait-v1
+    branch:
+    - {when: lock_waits > 0, goto: find_blocker}
+    - {when: lock_waits == 0, goto: history_exit}
+    otherwise: escalate
+    cautions: [死锁(deadlock)和锁等待超时(lock wait timeout)是两回事：死锁 InnoDB 会自动回滚一方并记入 SHOW ENGINE INNODB STATUS；锁等待超时是等太久报错。先分清,
+      当前无等待≠没问题：死锁往往瞬时发生后自动解开，要看 SHOW ENGINE INNODB STATUS 的 LATEST DETECTED DEADLOCK 复盘]
+  - {id: history_exit, type: done, summary: 当前无锁等待。若业务报死锁，看 SHOW ENGINE INNODB STATUS 的 LATEST DETECTED
+      DEADLOCK 段，分析两个事务的加锁顺序，通常是加锁顺序不一致导致。交研发统一加锁顺序。}
+  - id: find_blocker
+    type: check
+    title: 定位阻塞源事务
+    run: {mysql: SELECT COUNT(*) blockers FROM performance_schema.data_lock_waits w JOIN information_schema.INNODB_TRX
+        t ON w.BLOCKING_ENGINE_TRANSACTION_ID=t.trx_id WHERE t.trx_started < NOW()-INTERVAL 30 SECOND}
+    parser: mysql/blocker-v1
+    branch:
+    - {when: long_blocker > 0, goto: long_txn_exit}
+    otherwise: contention_exit
+    cautions: [阻塞源若是长事务(trx_started 很早)，多为忘了提交/应用 hang 住持锁不放——这是最典型的锁等待元凶, 8.0 用 performance_schema.data_lock_waits；5.7
+        无此表，改用 information_schema.INNODB_LOCK_WAITS + INNODB_TRX 关联]
+  - {id: long_txn_exit, type: done, summary: 存在长事务持锁不放，阻塞其他事务。查该事务 SQL 与来源(是否应用未提交/事务过大)。方向：修复应用事务管理、缩小事务、必要时人工
+      kill 阻塞源事务(需确认其未提交的写入影响)。}
+  - {id: contention_exit, type: done, summary: 锁等待但无明显长事务，属高并发下的热点行竞争。方向：优化事务缩短持锁时间、减少热点行更新(如计数器分桶)、调整加锁顺序避免死锁。}
+  - {id: escalate, type: escalate, summary: 打包升级：data_lock_waits、INNODB_TRX 长事务、SHOW ENGINE INNODB STATUS
+      死锁段、涉及的表与索引。}
 tests:
-  - {scenario: tests/long-txn.yaml, expect_path: [check_waits, find_blocker, long_txn_exit]}
-  - {scenario: tests/no-wait.yaml, expect_path: [check_waits, history_exit]}
-feedback:
-  ask: "死锁/锁等待问题定位了吗？"
+- scenario: tests/long-txn.yaml
+  expect_path: [check_waits, find_blocker, long_txn_exit]
+- scenario: tests/no-wait.yaml
+  expect_path: [check_waits, history_exit]
+feedback: {ask: 死锁/锁等待问题定位了吗？}

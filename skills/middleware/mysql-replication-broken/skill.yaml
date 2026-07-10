@@ -6,67 +6,61 @@ metadata:
   taxonomy: middleware/mysql/replication-broken
   version: 0.1.0
   maturity: sim_verified
-  platforms: [{engine: mysql}]
+  platforms:
+  - {engine: mysql, versions: '>=8.0'}
   params:
-    - {name: dsn, source: user, desc: 从库连接串}
+  - {name: dsn, source: user, desc: 从库连接串}
   authors: [opsagent-core]
   license: Apache-2.0
   provenance: {generated_by: claude-opus-4-8}
-  expires_review: "2027-07-01"
+  expires_review: '2027-07-01'
 requirements:
   capability_level: read
   connectors: [mysql]
 discovery:
-  - id: slave
-    run: {mysql: "SHOW SLAVE STATUS"}
-    parser: mysql/slave-status-v1
+- id: slave
+  run: {mysql: SHOW SLAVE STATUS}
+  parser: mysql/slave-status-v1
 tree:
   entry: read_error
   nodes:
-    - id: read_error
-      type: check
-      title: 读取中断的线程与错误码
-      run: {mysql: "SHOW SLAVE STATUS"}
-      parser: mysql/slave-status-v1
-      branch:
-        - {when: "io_running == 'No'", goto: io_broken}
-        - {when: "sql_running == 'No'", goto: sql_broken}
-        - {when: "io_running == 'Yes' and sql_running == 'Yes'", goto: recovered_exit}
-      otherwise: escalate
-      cautions:
-        - "IO 线程断=连不上主库/认证/binlog 问题；SQL 线程断=回放某条语句失败。看 Last_IO_Error / Last_SQL_Error 的具体错误码"
-        - "最忌讳的操作：不看错误就 SET GLOBAL sql_slave_skip_counter 跳过——跳过错误语句会造成主从数据不一致，是掩埋而非修复"
-    - id: recovered_exit
-      type: done
-      summary: "两个线程当前均 Yes，可能已恢复。核对是否有历史 Last_Error 记录，确认数据一致性(pt-table-checksum)。"
-    - id: io_broken
-      type: done
-      summary: "IO 线程中断。常见：主库不可达/防火墙、复制账号权限/密码变更、主库 binlog 被 purge 导致从库请求的位点不存在、GTID 空洞。据 Last_IO_Error 具体处置；位点丢失往往需要重做从库。"
-    - id: sql_broken
-      type: check
-      title: SQL 线程中断——判断错误类型
-      run: {mysql: "SELECT LAST_ERROR_NUMBER n FROM performance_schema.replication_applier_status_by_worker LIMIT 1"}
-      parser: mysql/repl-error-v1
-      branch:
-        - {when: "last_error_number == 1062", goto: dup_key_exit}
-        - {when: "last_error_number == 1032", goto: missing_row_exit}
-      otherwise: generic_sql_exit
-      cautions:
-        - "1062(主键冲突)与 1032(找不到行)是从库数据已与主库不一致的信号——跳过只会让不一致扩大"
-    - id: dup_key_exit
-      type: done
-      summary: "1062 主键冲突：从库已存在该主键(数据不一致)。根因常是双写/从库被误写。正确做法是查清不一致范围并修复数据，而非盲目 skip。必要时重建从库。"
-    - id: missing_row_exit
-      type: done
-      summary: "1032 找不到要更新/删除的行：从库缺数据。同样是不一致信号。用 pt-table-sync 校准或重建从库，别 skip。"
-    - id: generic_sql_exit
-      type: done
-      summary: "SQL 线程其他错误。据 Last_SQL_Error 判断(如 DDL 不兼容、字符集、缺表)。修复前务必评估对数据一致性的影响。"
-    - id: escalate
-      type: escalate
-      summary: "打包升级：SHOW SLAVE STATUS、Last_IO_Error/Last_SQL_Error、错误码、GTID 状态、主库 binlog 状态。"
+  - id: read_error
+    type: check
+    title: 读取中断的线程与错误码
+    run: {mysql: SHOW SLAVE STATUS}
+    parser: mysql/slave-status-v1
+    branch:
+    - {when: io_running == 'No', goto: io_broken}
+    - {when: sql_running == 'No', goto: sql_broken}
+    - {when: io_running == 'Yes' and sql_running == 'Yes', goto: recovered_exit}
+    otherwise: escalate
+    cautions: [IO 线程断=连不上主库/认证/binlog 问题；SQL 线程断=回放某条语句失败。看 Last_IO_Error / Last_SQL_Error 的具体错误码, 最忌讳的操作：不看错误就
+        SET GLOBAL sql_slave_skip_counter 跳过——跳过错误语句会造成主从数据不一致，是掩埋而非修复]
+  - {id: recovered_exit, type: done, summary: 两个线程当前均 Yes，可能已恢复。核对是否有历史 Last_Error 记录，确认数据一致性(pt-table-checksum)。}
+  - {id: io_broken, type: done, summary: IO 线程中断。常见：主库不可达/防火墙、复制账号权限/密码变更、主库 binlog 被 purge 导致从库请求的位点不存在、GTID
+      空洞。据 Last_IO_Error 具体处置；位点丢失往往需要重做从库。}
+  - id: sql_broken
+    type: check
+    title: SQL 线程中断——判断错误类型
+    run: {mysql: SELECT LAST_ERROR_NUMBER n FROM performance_schema.replication_applier_status_by_worker
+        LIMIT 1}
+    parser: mysql/repl-error-v1
+    branch:
+    - {when: last_error_number == 1062, goto: dup_key_exit}
+    - {when: last_error_number == 1032, goto: missing_row_exit}
+    otherwise: generic_sql_exit
+    cautions: [1062(主键冲突)与 1032(找不到行)是从库数据已与主库不一致的信号——跳过只会让不一致扩大, 8.0 用 performance_schema.replication_applier_status_by_worker
+        取 LAST_ERROR_NUMBER；5.7 直接看 SHOW SLAVE STATUS 的 Last_SQL_Errno]
+  - {id: dup_key_exit, type: done, summary: 1062 主键冲突：从库已存在该主键(数据不一致)。根因常是双写/从库被误写。正确做法是查清不一致范围并修复数据，而非盲目
+      skip。必要时重建从库。}
+  - {id: missing_row_exit, type: done, summary: 1032 找不到要更新/删除的行：从库缺数据。同样是不一致信号。用 pt-table-sync 校准或重建从库，别
+      skip。}
+  - {id: generic_sql_exit, type: done, summary: SQL 线程其他错误。据 Last_SQL_Error 判断(如 DDL 不兼容、字符集、缺表)。修复前务必评估对数据一致性的影响。}
+  - {id: escalate, type: escalate, summary: 打包升级：SHOW SLAVE STATUS、Last_IO_Error/Last_SQL_Error、错误码、GTID
+      状态、主库 binlog 状态。}
 tests:
-  - {scenario: tests/dup-key.yaml, expect_path: [read_error, sql_broken, dup_key_exit]}
-  - {scenario: tests/io-broken.yaml, expect_path: [read_error, io_broken]}
-feedback:
-  ask: "复制中断问题定位了吗？"
+- scenario: tests/dup-key.yaml
+  expect_path: [read_error, sql_broken, dup_key_exit]
+- scenario: tests/io-broken.yaml
+  expect_path: [read_error, io_broken]
+feedback: {ask: 复制中断问题定位了吗？}

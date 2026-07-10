@@ -6,7 +6,7 @@ metadata:
   taxonomy: middleware/mysql/connection-exhausted
   version: 0.1.0
   maturity: sim_verified
-  platforms: [{engine: mysql}]
+  platforms: [{engine: mysql, versions: ">=8.0"}]
   params:
     - {name: dsn, source: user, desc: 实例连接串}
   authors: [opsagent-core]
