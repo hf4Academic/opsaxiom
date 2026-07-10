@@ -1,0 +1,4 @@
+skill: skills/host/swap-thrash/skill.yaml
+scenario: 真实模式：本机 vmstat/free
+mode: real
+bindings: {}

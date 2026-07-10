@@ -80,6 +80,51 @@ def parse_du(text):
     return {"rows": rows}
 
 
+def parse_vmstat(text):
+    """`vmstat 1 N` → rows[{r,si,so,us,sy,wa}]（表头两行跳过）。"""
+    rows = []
+    for line in text.strip().splitlines():
+        parts = line.split()
+        if len(parts) < 17 or not parts[0].isdigit():
+            continue   # 跳过表头/非数据行
+        rows.append({"r": _int(parts[0]), "si": _int(parts[6]), "so": _int(parts[7]),
+                     "us": _int(parts[12]), "sy": _int(parts[13]), "wa": _int(parts[15])})
+    return {"rows": rows}
+
+
+def parse_free(text):
+    """`free -m` → available_pct / mem_total(MB) / slab_unreclaim_mb(缺省 0)。"""
+    mem_total = avail = None
+    for line in text.splitlines():
+        p = line.split()
+        if p and p[0].startswith("Mem"):
+            mem_total = _int(p[1])
+            if len(p) >= 7:
+                avail = _int(p[6])
+    available_pct = round(avail / mem_total * 100, 1) if (avail and mem_total) else None
+    m = re.search(r"SUnreclaim:\s*(\d+)", text)
+    slab = int(m.group(1)) // 1024 if m else 0
+    return {"mem_total": mem_total, "available_pct": available_pct, "slab_unreclaim_mb": slab}
+
+
+def _ps_rows(text, valcol):
+    rows = []
+    for line in text.strip().splitlines():
+        p = line.split(None, 2)
+        if len(p) < 2 or not p[0].isdigit():
+            continue
+        row = {"pid": _int(p[0]), valcol: _num(p[1]), "comm": p[2] if len(p) > 2 else ""}
+        rows.append(row)
+    return {"rows": rows}
+
+
+def _num(s):
+    try:
+        return float(s) if "." in s else int(s)
+    except (ValueError, TypeError):
+        return None
+
+
 def install(register):
     register("table/df-v1", parse_df,
              {"rows": ["target", "size", "used", "avail", "pcent"], "lines": False})
@@ -87,3 +132,11 @@ def install(register):
              {"rows": ["target", "itotal", "iused", "ipcent"], "lines": False})
     register("table/du-v1", parse_du,
              {"rows": ["size", "path"], "lines": False})
+    register("table/vmstat-v1", parse_vmstat,
+             {"rows": ["r", "si", "so", "us", "sy", "wa"], "lines": False})
+    register("table/free-v1", parse_free,
+             {"scalars": ["mem_total", "available_pct", "slab_unreclaim_mb"], "lines": False})
+    register("table/ps-v1", lambda t: _ps_rows(t, "pcpu"),
+             {"rows": ["pid", "pcpu", "comm"], "lines": False})
+    register("table/ps-rss-v1", lambda t: _ps_rows(t, "rss"),
+             {"rows": ["pid", "rss", "comm"], "lines": False})

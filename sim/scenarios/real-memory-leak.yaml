@@ -1,0 +1,4 @@
+skill: skills/host/memory-leak/skill.yaml
+scenario: 真实模式：本机 free/ps
+mode: real
+bindings: {mem_total: 16000}

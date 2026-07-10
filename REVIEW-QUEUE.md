@@ -139,3 +139,17 @@
   又恰是"树逻辑"层错误，context_walk 仿真若场景写得顺着错误语义走，也可能测不出来。
 - **对应解析器契约新增字段**：stp 解析器须产出 `inconsistent_ports`、`tcn_rate`；
   acl 解析器须产出 `deny_hit_count`（并入 R-5 的字段契约清单）。
+
+## F-9 (Q-3, 真实执行器发现) disk-full 的 locate_mount 命令列序与 df-v1 解析器不匹配
+
+- **发现于**：Q-3 真实靶机执行器首次在本机跑 disk-full——它落到了 escalate 而非预期分支。
+- **根因**：`locate_mount` 的命令是 `df -B1 --output=target,pcent,avail {{mount}}`（pcent 在中间），
+  但它声明的解析器 `table/df-v1` 期望 pcent 在**最后一列**（discovery 的 df 命令是
+  `--output=target,size,used,avail,pcent`）。同一 Skill 里两条 df 命令列序不同却共用一个解析器，
+  真实解析时 locate_mount 的 pcent 落空 → rows 为空 → 走 otherwise escalate。
+- **意义**：这正是 context_walk 测不出、real 模式一跑就现形的一类 bug（评审二轮预言过）。
+  证明真实执行器的价值。
+- **处置建议（留给 Fable，因属金标准）**：把 locate_mount 命令列序改为
+  `--output=target,avail,pcent`（pcent 末列），或给它单独的解析器。一行修复。
+- **现状**：3 个纯诊断（load-high/swap-thrash/memory-leak）真实模式跑通并升级证据为
+  real_roundtrip；disk-full 待此 F-9 修复后可补跑升级。

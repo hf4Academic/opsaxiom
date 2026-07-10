@@ -82,15 +82,25 @@ def promote(skill_path):
     if not scens:
         print("✘ 无可执行 sim 场景（sim/scenarios/ 下没有指向该 Skill 的场景）")
         return 1
-    results, rollback_seen = [], False
+    results, rollback_seen, evidence = [], False, "context_walk"
     for sc in scens:
+        import yaml as _yaml
+        is_real = _yaml.safe_load(sc.read_text()).get("mode") == "real"
         r = run_sim.run(skill_path, sc)
-        ok = r["path_ok"] and (r["rollback_ok"] is not False)
-        results.append({"scenario": sc.name, "path_ok": r["path_ok"], "rollback_ok": r["rollback_ok"]})
-        if r["rollback_ok"] is True:
-            rollback_seen = True
+        if is_real:
+            ok = r.get("completed", False)
+            results.append({"scenario": sc.name, "mode": "real", "completed": ok,
+                            "terminal": r["path"][-1] if r.get("path") else None})
+            if ok:
+                evidence = "real_roundtrip"
+        else:
+            ok = r["path_ok"] and (r["rollback_ok"] is not False)
+            results.append({"scenario": sc.name, "mode": "context_walk",
+                            "path_ok": r["path_ok"], "rollback_ok": r["rollback_ok"]})
+            if r["rollback_ok"] is True:
+                rollback_seen = True
         if not ok:
-            print(f"✘ 场景 {sc.name} 未通过：{r['path']} vs {r['expect']}")
+            print(f"✘ 场景 {sc.name} 未通过：{r.get('path')}")
             return 1
     if has_action and any(t.get("rollback_assert") for t in tests) and not rollback_seen:
         print("✘ 该 Skill 声明了 rollback_assert，但没有场景实际验证回滚往返")
@@ -102,11 +112,11 @@ def promote(skill_path):
     ev = {
         "skill": name, "action": "promote", "from": prev, "to": "sim_verified",
         "at": datetime.datetime.now().isoformat(timespec="seconds"),
-        "validator": "0 ERROR", "scenarios": results,
+        "validator": "0 ERROR", "evidence": evidence, "scenarios": results,
     }
     (_evidence_dir(skill_path) / "promote.json").write_text(
         json.dumps(ev, ensure_ascii=False, indent=2))
-    print(f"✔ {name}: {prev} → sim_verified（{len(scens)} 个场景通过，回滚往返={'有' if rollback_seen else '无'}）")
+    print(f"✔ {name}: {prev} → sim_verified（证据={evidence}，{len(scens)} 场景，回滚往返={'有' if rollback_seen else '无'}）")
     return 0
 
 

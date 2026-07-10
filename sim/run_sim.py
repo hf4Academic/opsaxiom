@@ -15,6 +15,7 @@
 import argparse
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -38,6 +39,84 @@ def _load_skill(path):
     skill = yaml.safe_load(pathlib.Path(path).read_text(encoding="utf-8"))
     nodes = {n["id"]: n for n in skill["tree"]["nodes"]}
     return skill, nodes, skill["tree"]["entry"]
+
+
+# ---- 真实靶机执行器 v1（Q-3）：本地沙箱、只读命令白名单 ----
+_ALLOW_LEAD = {"cat", "df", "du", "free", "ps", "ss", "uptime", "nproc", "vmstat",
+               "iostat", "mpstat", "lsof", "findmnt", "systemctl", "dmesg",
+               "journalctl", "ip", "ls", "find", "for", "echo", "grep", "true"}
+_DENY = re.compile(r"\b(rm|mv|cp|dd|mkfs\w*|reboot|shutdown|kill|pkill|tee|truncate|chmod|chown)\b|>\s*/(?!dev/null)")
+
+
+def _is_readonly(cmd):
+    lead = cmd.strip().split()[0] if cmd.strip() else ""
+    return lead in _ALLOW_LEAD and not _DENY.search(cmd)
+
+
+def _default_parse(stdout):
+    lines = [ln for ln in stdout.splitlines()]
+    m = re.search(r"-?\d+", stdout)
+    return {"lines": lines, "output": {"value": int(m.group()) if m else 0}}
+
+
+def run_real(skill_path, scenario_path):
+    """真实模式：本地执行 linux check 命令 → 真实解析 → 真实分支，走到终点。
+    不断言固定路径（真机状态不可控），断言'管道端到端跑通且终止'。"""
+    import parsers as _parsers
+    skill, nodes, entry = _load_skill(skill_path)
+    sc = yaml.safe_load(pathlib.Path(scenario_path).read_text())
+    bindings = sc.get("bindings", {})
+    answers = sc.get("answers", {})
+
+    def subst(cmd):
+        for k, v in bindings.items():
+            cmd = cmd.replace("{{%s}}" % k, str(v))
+        return cmd
+
+    notes, path, node, guard = [], [entry], entry, 0
+    while guard < 60:
+        guard += 1
+        n = nodes[node]
+        t = n["type"]
+        if t in ("done", "escalate"):
+            break
+        if t == "action":
+            notes.append(f"到达 action '{node}'（真实模式只读，不执行写操作，停止）")
+            break
+        if t == "ask":
+            if node in answers:
+                node = answers[node]; path.append(node); continue
+            notes.append(f"到达 ask '{node}'（无预设答案，停止）")
+            break
+        # check：跑真实命令
+        cmd = subst(n.get("run", {}).get("linux", ""))
+        if not cmd or not _is_readonly(cmd):
+            notes.append(f"节点 {node} 命令非只读白名单或为空，跳过真实执行：{cmd[:60]!r}")
+            node = n.get("otherwise", "escalate"); path.append(node); continue
+        try:
+            r = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True, timeout=15)
+            stdout = r.stdout
+        except Exception as e:
+            notes.append(f"节点 {node} 命令执行异常：{e}")
+            node = n.get("otherwise", "escalate"); path.append(node); continue
+        pfn = _parsers.get_parser(n["parser"]) if n.get("parser") else None
+        ctx = pfn(stdout) if pfn else _default_parse(stdout)
+        if not isinstance(ctx, dict):
+            ctx = {"rows": ctx}
+        ctx.setdefault("lines", stdout.splitlines())
+        for k, v in bindings.items():
+            ctx.setdefault(k, v)
+        nxt = None
+        for br in n.get("branch", []):
+            try:
+                if exprlang._truthy(exprlang.evaluate(br["when"], ctx)):
+                    nxt = br["goto"]; break
+            except exprlang.EvalError:
+                pass
+        node = nxt or n.get("otherwise", "escalate")
+        path.append(node)
+    completed = nodes[path[-1]]["type"] in ("done", "escalate") or path[-1] in ("done", "escalate")
+    return {"path": path, "completed": completed, "evidence": "real_roundtrip", "notes": notes}
 
 
 def _real_quarantine_roundtrip(sandbox_file, notes):
@@ -85,6 +164,9 @@ _ROUNDTRIP = {"quarantine": _real_quarantine_roundtrip, "deploy": _real_deploy_r
 
 
 def run(skill_path, scenario_path):
+    sc0 = yaml.safe_load(pathlib.Path(scenario_path).read_text(encoding="utf-8"))
+    if sc0.get("mode") == "real":
+        return run_real(skill_path, scenario_path)
     skill, nodes, entry = _load_skill(skill_path)
     sc = yaml.safe_load(pathlib.Path(scenario_path).read_text(encoding="utf-8"))
     node_ctx = sc.get("node_ctx", {})

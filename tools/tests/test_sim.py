@@ -86,3 +86,14 @@ def test_deploy_checksum_gate():
         r = subprocess.run([sys.executable, str(DBIN), "probe", "--binary", str(fake),
                             "--sha256", "deadbeef"], env=env, capture_output=True, text=True)
         assert r.returncode == 3 and "checksum 不匹配" in r.stderr   # 篡改/错误校验和被拦
+
+
+def test_real_mode_runs_end_to_end():
+    """真实模式在本机跑通纯诊断 Skill，产出 real_roundtrip 证据且终止。"""
+    import yaml
+    for name in ["real-load-high", "real-swap-thrash"]:
+        sc = ROOT / "sim" / "scenarios" / f"{name}.yaml"
+        d = yaml.safe_load(sc.read_text())
+        r = run_sim.run(ROOT / d["skill"], sc)
+        assert r["completed"], f"{name} 未跑到终止: {r['path']}"
+        assert r["evidence"] == "real_roundtrip"

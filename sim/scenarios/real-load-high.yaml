@@ -1,0 +1,4 @@
+skill: skills/host/load-high/skill.yaml
+scenario: 真实模式：本机 loadavg/vmstat/ps
+mode: real
+bindings: {cores: 4}
