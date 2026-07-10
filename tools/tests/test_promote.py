@@ -22,7 +22,8 @@ def test_promote_rejects_when_no_scenario():
 
 
 def test_scenarios_lookup():
-    assert len(promote._scenarios_for(ROOT / "skills/host/disk-full/skill.yaml")) == 3
+    # 3 个 context_walk + 1 个 real（F-9 修复后恢复）
+    assert len(promote._scenarios_for(ROOT / "skills/host/disk-full/skill.yaml")) == 4
     assert promote._scenarios_for(ROOT / "skills/host/raid-degraded/skill.yaml") == []
     assert len(promote._scenarios_for(ROOT / "skills/host/agent-deploy/skill.yaml")) == 1
     # load-high 现有 context + real 两个场景
