@@ -14,8 +14,12 @@ opsaxiom-attest —— 生成实地验证记录（attestation）骨架（Q-4，d
 签名：本骨架写 signature: "UNSIGNED-TODO"（真实签名在后续轮次接入）。
 """
 import argparse
+import base64
 import datetime
 import hashlib
+import hmac
+import json
+import os
 import pathlib
 import re
 import sys
@@ -25,6 +29,101 @@ import yaml
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 OUTCOMES = ["resolved", "partial", "failed", "made_worse"]
 MODES = ["navigator", "copilot", "autopilot"]
+
+# ---- 签名（U-4）：优先 Ed25519(cryptography)，缺库降级 HMAC 过渡并标注 ----
+try:
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey, Ed25519PublicKey)
+    from cryptography.exceptions import InvalidSignature
+    _HAVE_ED = True
+except Exception:                       # pragma: no cover - 环境无 cryptography
+    _HAVE_ED = False
+
+
+def _key_dir():
+    d = pathlib.Path(os.environ.get("OPSAXIOM_HOME", pathlib.Path.home() / ".opsaxiom")) / "keys"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _b64(b):
+    return base64.b64encode(b).decode()
+
+
+def _canonical(att):
+    """签名覆盖的规范字节：去掉 signature 字段后 JSON 稳定序列化。"""
+    payload = {k: v for k, v in att.items() if k != "signature"}
+    return json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
+
+
+def ensure_keypair():
+    """幂等生成 Ed25519 密钥对；返回 (priv_obj_or_secret, pub_b64)。无 cryptography 走 HMAC。"""
+    kd = _key_dir()
+    if _HAVE_ED:
+        priv_p, pub_p = kd / "attest_ed25519", kd / "attest_ed25519.pub"
+        if not priv_p.exists():
+            priv = Ed25519PrivateKey.generate()
+            raw = priv.private_bytes_raw()
+            priv_p.write_bytes(raw)
+            priv_p.chmod(0o600)
+            pub_raw = priv.public_key().public_bytes_raw()
+            pub_p.write_text(_b64(pub_raw))
+            print(f"已生成 Ed25519 attestation 密钥对：{priv_p}（私钥 0600，勿外传）", file=sys.stderr)
+        priv = Ed25519PrivateKey.from_private_bytes(priv_p.read_bytes())
+        return priv, pub_p.read_text().strip()
+    # 降级：HMAC-SHA256(本地随机密钥)——仅过渡，非公钥体系，无法跨主体验证
+    sec_p = kd / "attest_hmac.key"
+    if not sec_p.exists():
+        sec_p.write_bytes(hashlib.sha256(os.urandom(32)).digest())
+        sec_p.chmod(0o600)
+        print("警告：未装 cryptography，降级 HMAC 过渡签名（不可跨主体验证，仅防篡改）", file=sys.stderr)
+    return sec_p.read_bytes(), "hmac-local"
+
+
+def sign_att(att):
+    key, pub_b64 = ensure_keypair()
+    msg = _canonical(att)
+    if _HAVE_ED:
+        sig = key.sign(msg)
+        return f"ed25519:{pub_b64}:{_b64(sig)}"
+    return f"hmac:{pub_b64}:{_b64(hmac.new(key, msg, hashlib.sha256).digest())}"
+
+
+def verify_att(att):
+    """验签。返回 (ok, note)。签名自带公钥→可验完整性；是否可信看本地 keyring。"""
+    sig = att.get("signature", "")
+    if not sig or sig == "UNSIGNED-TODO":
+        return False, "未签名（UNSIGNED-TODO 或空）"
+    try:
+        scheme, key_b64, sig_b64 = sig.split(":", 2)
+    except ValueError:
+        return False, "签名格式非法（应为 <scheme>:<key>:<sig>）"
+    msg = _canonical(att)
+    if scheme == "ed25519":
+        if not _HAVE_ED:
+            return False, "本机无 cryptography，无法验 Ed25519 签名"
+        try:
+            Ed25519PublicKey.from_public_bytes(base64.b64decode(key_b64)).verify(
+                base64.b64decode(sig_b64), msg)
+        except (InvalidSignature, Exception):
+            return False, "签名无效（内容被篡改或密钥不符）"
+        trusted = _in_keyring(key_b64)
+        return True, ("签名有效且签名者在 keyring（可信）" if trusted
+                      else "签名有效，但签名者不在本地 keyring（TOFU，未建立信任）")
+    if scheme == "hmac":
+        return False, "HMAC 过渡签名无法跨主体验证（仅原主机可校验）"
+    return False, f"未知签名方案 {scheme}"
+
+
+def _in_keyring(pub_b64):
+    """本地信任 keyring：keys/trusted/*.pub 每行一个公钥 b64。"""
+    kr = _key_dir() / "trusted"
+    if not kr.is_dir():
+        return False
+    for f in kr.glob("*.pub"):
+        if pub_b64.strip() in f.read_text().split():
+            return True
+    return False
 
 
 def bucket_version(v):
@@ -82,11 +181,11 @@ def build(args):
         "deviations": list(args.deviation or []),
         "rollback_exercised": bool(args.rollback_exercised),
         "attestor": args.attestor or _prompt("attestor (gh:user / sso:id)", "anonymous"),
-        "signature": "UNSIGNED-TODO",   # 真实分离签名在后续轮次接入
     }
     if att["outcome"] not in OUTCOMES or att["mode"] not in MODES:
         print(f"outcome/mode 非法", file=sys.stderr)
         return None, None
+    att["signature"] = sign_att(att)     # U-4：Ed25519 签名，覆盖除 signature 外全部字段
     return sdir, att
 
 
@@ -100,7 +199,22 @@ def main():
     ap.add_argument("--attestor")
     ap.add_argument("--deviation", action="append")
     ap.add_argument("--date", help="覆盖日期(测试用，YYYY-MM-DD)")
+    ap.add_argument("--keygen", action="store_true", help="仅生成/查看签名密钥对后退出")
+    ap.add_argument("--verify", metavar="FILE", help="验证一个 attestation 文件的签名")
     args = ap.parse_args()
+
+    if args.keygen:
+        _, pub = ensure_keypair()
+        print(f"公钥: {pub}")
+        print(f"密钥目录: {_key_dir()}")
+        print("把公钥加入他人 keys/trusted/<name>.pub 即可让其验签为'可信'。")
+        return 0
+
+    if args.verify:
+        att = yaml.safe_load(pathlib.Path(args.verify).read_text(encoding="utf-8"))
+        ok, note = verify_att(att)
+        print(f"{'✔' if ok else '✘'} {args.verify}: {note}")
+        return 0 if ok else 1
 
     sdir, att = build(args)
     if not att:
@@ -112,7 +226,7 @@ def main():
     out = adir / f"{date}-{h}.yaml"
     out.write_text(yaml.dump(att, allow_unicode=True, sort_keys=False), encoding="utf-8")
     print(f"已生成 attestation: {out.relative_to(ROOT)}")
-    print("提示：env_fingerprint 只含分桶信息，无标识性数据（docs/05 §2）。签名待接入。")
+    print(f"提示：env_fingerprint 只含分桶信息，无标识性数据（docs/05 §2）。已 {att['signature'].split(':',1)[0]} 签名。")
     return 0
 
 
