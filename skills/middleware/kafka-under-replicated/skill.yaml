@@ -1,0 +1,64 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.kafka.under-replicated
+  name: Kafka 副本不同步（URP）排查
+  taxonomy: middleware/kafka/under-replicated
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{engine: kafka}]
+  params:
+    - {name: broker, source: user, desc: bootstrap-server}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [kafka]
+discovery:
+  - id: urp
+    run: {kafka: "kafka-topics.sh --bootstrap-server {{broker}} --describe --under-replicated-partitions"}
+    parser: kafka/urp-v1
+tree:
+  entry: measure
+  nodes:
+    - id: measure
+      type: check
+      title: 确认 URP 规模
+      run: {kafka: "kafka-topics.sh --bootstrap-server {{broker}} --describe --under-replicated-partitions"}
+      parser: kafka/urp-v1
+      branch:
+        - {when: "urp_count > 0", goto: check_brokers}
+        - {when: "urp_count == 0", goto: healthy_exit}
+      otherwise: escalate
+      cautions:
+        - "URP=ISR(同步副本集)小于副本数，意味着容错余量下降——再挂一个副本可能丢数据或分区不可用。这是与时间赛跑"
+        - "先看 URP 是集中在某个 broker(该 broker 出问题)还是分散(集群级问题如网络/负载)"
+    - id: healthy_exit
+      type: done
+      summary: "无 under-replicated 分区，副本同步健康。若曾告警，可能是短暂抖动已恢复。"
+    - id: check_brokers
+      type: check
+      title: 判断是单 broker 问题还是集群级
+      run: {kafka: "kafka-broker-api-versions.sh --bootstrap-server {{broker}} 2>&1 | grep -c 'id'"}
+      parser: kafka/broker-count-v1
+      branch:
+        - {when: "brokers_down > 0", goto: broker_down_exit}
+      otherwise: replication_slow_exit
+      cautions:
+        - "有 broker 下线 → URP 是必然结果，先恢复 broker；broker 都在但仍 URP → 副本同步慢(网络/磁盘/负载)"
+    - id: broker_down_exit
+      type: done
+      summary: "有 broker 下线导致其上副本脱离 ISR。方向：恢复下线 broker(查其进程/磁盘/GC)。恢复后副本会自动追平重新入 ISR。副本恢复期间避免再重启其他 broker。"
+    - id: replication_slow_exit
+      type: done
+      summary: "broker 都在但副本同步慢(follower 追不上 leader)。方向：查 follower broker 的磁盘 IO/网络/GC 是否瓶颈、replica.lag.time.max.ms 是否过小误踢、是否某分区流量过大。转 host 域查资源。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：URP 分区清单、各 broker 状态、ISR 变化、follower 资源(IO/网络/GC)、分区流量分布。"
+tests:
+  - {scenario: tests/broker-down.yaml, expect_path: [measure, check_brokers, broker_down_exit]}
+  - {scenario: tests/healthy.yaml, expect_path: [measure, healthy_exit]}
+feedback:
+  ask: "Kafka 副本同步问题定位了吗？"

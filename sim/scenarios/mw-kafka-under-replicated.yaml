@@ -1,0 +1,6 @@
+skill: skills/middleware/kafka-under-replicated/skill.yaml
+scenario: broker 下线
+expect_path: [measure, check_brokers, broker_down_exit]
+node_ctx:
+  measure: {urp_count: 5}
+  check_brokers: {brokers_down: 1}

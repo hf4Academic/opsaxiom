@@ -1,0 +1,6 @@
+skill: skills/middleware/kafka-consumer-lag/skill.yaml
+scenario: 有分区无消费者
+expect_path: [measure, check_consumers, no_consumer_exit]
+node_ctx:
+  measure: {total_lag: 200000, lag_growing: 1}
+  check_consumers: {unassigned_partitions: 2, member_count: 1}

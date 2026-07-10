@@ -153,3 +153,13 @@
   `--output=target,avail,pcent`（pcent 末列），或给它单独的解析器。一行修复。
 - **现状**：3 个纯诊断（load-high/swap-thrash/memory-leak）真实模式跑通并升级证据为
   real_roundtrip；disk-full 待此 F-9 修复后可补跑升级。
+
+## R-7 (Q-5) 检查节点的标量输出无模板引用约定
+
+- **发现于**：Q-5 写 middleware Skill 时，done.summary 想引用 `{{max_query_time}}`（解析器标量输出）。
+- **问题**：§7.4 只给了 rows/output/lines 三个"节点输出裸引用根"，解析器产出的**标量字段**
+  （max_query_time/seconds_behind 等）在 summary 里无合法模板写法，S9 判其无来源。
+- **本轮处理**：把这类引用从 summary 移除（改为泛化描述），不阻断。
+- **建议（待 Fable 定夺）**：v0.3 给"当前节点标量输出"一个约定，如 `{{node.max_query_time}}`
+  或把解析器标量并入 `output` 命名空间 `{{output.max_query_time}}`；渲染引擎据节点 parser 的
+  scalars 声明解析。与 Q-2 的字段契约天然对齐（parser 已声明 scalars）。

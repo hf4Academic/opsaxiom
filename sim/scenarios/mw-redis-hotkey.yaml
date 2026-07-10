@@ -1,0 +1,5 @@
+skill: skills/middleware/redis-hotkey/skill.yaml
+scenario: 热 key
+expect_path: [detect, assess_impact]
+node_ctx:
+  detect: {top_key_ratio: 50}

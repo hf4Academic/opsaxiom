@@ -1,0 +1,68 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.mysql.replication-lag
+  name: MySQL 主从延迟排查
+  taxonomy: middleware/mysql/replication-lag
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{engine: mysql}]
+  params:
+    - {name: dsn, source: user, desc: 从库连接串}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [mysql]
+discovery:
+  - id: slave
+    run: {mysql: "SHOW SLAVE STATUS"}
+    parser: mysql/slave-status-v1
+tree:
+  entry: read_lag
+  nodes:
+    - id: read_lag
+      type: check
+      title: 读取延迟与复制线程状态
+      run: {mysql: "SHOW SLAVE STATUS"}
+      parser: mysql/slave-status-v1
+      branch:
+        - {when: "io_running == 'No' or sql_running == 'No'", goto: broken_exit}
+        - {when: "seconds_behind > 60", goto: analyze_lag}
+        - {when: "seconds_behind <= 60", goto: ok_exit}
+      otherwise: escalate
+      cautions:
+        - "Seconds_Behind_Master 只在 SQL 线程运行时有意义；线程停了它显示 NULL——先确认两个线程都 Yes 再谈延迟"
+        - "延迟大先分清是 IO 线程拉不过来还是 SQL 线程回放不过来，两者根因不同"
+    - id: broken_exit
+      type: done
+      summary: "复制线程已停(IO 或 SQL 为 No)，不是延迟是中断。转 middleware/mysql/replication-broken 查 Last_Error。"
+    - id: ok_exit
+      type: done
+      summary: "延迟在可接受范围。若业务对一致性敏感，考虑读写分离时的延迟容忍或半同步。"
+    - id: analyze_lag
+      type: check
+      title: 判断延迟来源（回放慢 / 大事务 / 单线程瓶颈）
+      run: {mysql: "SELECT COUNT(*) workers FROM performance_schema.replication_applier_status_by_worker WHERE SERVICE_STATE='ON'"}
+      parser: mysql/repl-workers-v1
+      branch:
+        - {when: "parallel_workers <= 1", goto: single_thread_exit}
+      otherwise: big_txn_exit
+      cautions:
+        - "从库回放默认单线程，主库并发写入时从库追不上是常态。开并行复制(slave_parallel_workers)是主要解法"
+    - id: single_thread_exit
+      type: done
+      summary: "从库单线程回放跟不上主库并发写入。方向：开启并行复制(基于 WRITESET 的 slave_parallel_type/workers)、检查从库硬件是否弱于主库、避免主库大批量写。"
+    - id: big_txn_exit
+      type: done
+      summary: "已并行但仍延迟，疑似大事务阻塞回放或从库资源瓶颈。查是否有超大事务(binlog event 大)、从库 IO/CPU 是否打满(转 host 域)。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：SHOW SLAVE STATUS 全量、并行 worker 状态、从库资源、主库写入速率。"
+tests:
+  - {scenario: tests/single-thread.yaml, expect_path: [read_lag, analyze_lag, single_thread_exit]}
+  - {scenario: tests/broken.yaml, expect_path: [read_lag, broken_exit]}
+feedback:
+  ask: "主从延迟问题定位了吗？"

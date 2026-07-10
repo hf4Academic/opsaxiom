@@ -1,0 +1,5 @@
+skill: skills/middleware/redis-bigkey/skill.yaml
+scenario: 大集合
+expect_path: [scan, coll_exit]
+node_ctx:
+  scan: {max_bytes: 1000, max_elements: 20000}

@@ -1,0 +1,6 @@
+skill: skills/middleware/mysql-replication-broken/skill.yaml
+scenario: 1062 主键冲突
+expect_path: [read_error, sql_broken, dup_key_exit]
+node_ctx:
+  read_error: {io_running: 'Yes', sql_running: 'No'}
+  sql_broken: {last_error_number: 1062}

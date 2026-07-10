@@ -1,0 +1,64 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.mysql.connection-exhausted
+  name: MySQL 连接数耗尽排查
+  taxonomy: middleware/mysql/connection-exhausted
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{engine: mysql}]
+  params:
+    - {name: dsn, source: user, desc: 实例连接串}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [mysql]
+discovery:
+  - id: conn
+    run: {mysql: "SHOW STATUS LIKE 'Threads_connected'; SHOW VARIABLES LIKE 'max_connections'"}
+    parser: mysql/conn-v1
+tree:
+  entry: measure
+  nodes:
+    - id: measure
+      type: check
+      title: 量化连接使用率
+      run: {mysql: "SELECT COUNT(*) used, @@max_connections mx FROM information_schema.PROCESSLIST"}
+      parser: mysql/conn-v1
+      branch:
+        - {when: "connected > max_connections * 0.9", goto: analyze}
+        - {when: "connected <= max_connections * 0.9", goto: not_full}
+      otherwise: escalate
+      cautions:
+        - "报 Too many connections 时，先确认是真的高并发还是连接泄漏(Sleep 态连接堆积)——两者解法相反"
+        - "别急着调大 max_connections：如果是泄漏，调大只是推迟爆炸，还会加重内存(每连接有开销)"
+    - id: not_full
+      type: done
+      summary: "连接使用率未超 90%。若曾报错，可能瞬时突发已过；核对连接池配置是否合理。"
+    - id: analyze
+      type: check
+      title: 区分泄漏(Sleep 堆积) vs 真实高并发
+      run: {mysql: "SELECT COUNT(*) sleeping FROM information_schema.PROCESSLIST WHERE COMMAND='Sleep' AND TIME>60"}
+      parser: mysql/conn-sleep-v1
+      branch:
+        - {when: "long_sleep > max_connections * 0.3", goto: leak_exit}
+      otherwise: high_concurrency_exit
+      cautions:
+        - "大量 Sleep 且 TIME 很大 → 应用连接用完不释放(连接池 bug/未关连接)，这是泄漏"
+    - id: leak_exit
+      type: done
+      summary: "大量长时间 Sleep 连接，疑似应用连接泄漏(连接池配置错误或代码未释放)。方向：查应用连接池 max/idle 配置、排查未 close 的连接。临时缓解可调低 wait_timeout 让 MySQL 主动回收空闲连接。根治在应用侧。"
+    - id: high_concurrency_exit
+      type: done
+      summary: "连接以活跃查询为主，是真实高并发。方向：引入/优化连接池复用连接、评估读写分离分流、必要时适度调大 max_connections(评估内存)。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：Threads_connected、max_connections、按 COMMAND/TIME 聚合的连接分布、应用连接池配置。"
+tests:
+  - {scenario: tests/leak.yaml, expect_path: [measure, analyze, leak_exit]}
+  - {scenario: tests/not-full.yaml, expect_path: [measure, not_full]}
+feedback:
+  ask: "连接数问题定位了吗？"

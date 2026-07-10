@@ -1,0 +1,70 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.kafka.consumer-lag
+  name: Kafka 消费积压排查
+  taxonomy: middleware/kafka/consumer-lag
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{engine: kafka}]
+  params:
+    - {name: broker, source: user, desc: bootstrap-server}
+    - {name: group, source: alert, desc: 消费组}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [kafka]
+discovery:
+  - id: lag
+    run: {kafka: "kafka-consumer-groups.sh --bootstrap-server {{broker}} --describe --group {{group}}"}
+    parser: kafka/group-describe-v1
+tree:
+  entry: measure
+  nodes:
+    - id: measure
+      type: check
+      title: 量化积压并看是否在增长
+      run: {kafka: "kafka-consumer-groups.sh --bootstrap-server {{broker}} --describe --group {{group}}"}
+      parser: kafka/group-describe-v1
+      branch:
+        - {when: "total_lag > 100000 and lag_growing == 1", goto: check_consumers}
+        - {when: "total_lag > 100000 and lag_growing == 0", goto: backlog_draining_exit}
+        - {when: "total_lag <= 100000", goto: ok_exit}
+      otherwise: escalate
+      cautions:
+        - "关键是积压在'涨还是消'：涨=消费能力<生产速率(需扩消费者/优化)；不涨在消=突发已过正在追平(等待即可)"
+        - "先确认消费者是否都活着——有分区 CONSUMER-ID 为空说明该分区没人消费(消费者挂了/rebalance 卡住)"
+    - id: ok_exit
+      type: done
+      summary: "积压在可接受范围。若业务对实时性敏感，核对端到端延迟与消费者吞吐是否匹配峰值。"
+    - id: backlog_draining_exit
+      type: done
+      summary: "有积压但正在消化(lag 不增)，多为突发流量/消费者重启后追平。观察是否能在可接受时间内追平即可，无需干预。"
+    - id: check_consumers
+      type: check
+      title: 积压在涨——查消费者是否健康、分区是否均衡
+      run: {kafka: "kafka-consumer-groups.sh --bootstrap-server {{broker}} --describe --group {{group}} --members"}
+      parser: kafka/group-members-v1
+      branch:
+        - {when: "unassigned_partitions > 0", goto: no_consumer_exit}
+        - {when: "member_count > 0", goto: throughput_exit}
+      otherwise: escalate
+      cautions:
+        - "分区数是消费并行度上限：消费者数 > 分区数则多余消费者空闲，扩了也没用——先看分区数与消费者数的关系"
+    - id: no_consumer_exit
+      type: done
+      summary: "有分区无消费者(CONSUMER-ID 空/rebalance 卡住)。查消费者进程是否存活、是否频繁 rebalance(会话超时/处理慢触发)、是否卡在再均衡。恢复消费者或调 max.poll.interval.ms。"
+    - id: throughput_exit
+      type: done
+      summary: "消费者在但吞吐跟不上生产。方向：①增加消费者实例(不超过分区数)，不够则先加分区；②优化单条消息处理耗时(批量/异步);③检查下游(DB/接口)是否是瓶颈拖慢消费。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：各分区 LAG、消费者成员与分配、分区数、生产/消费速率、rebalance 频率。"
+tests:
+  - {scenario: tests/no-consumer.yaml, expect_path: [measure, check_consumers, no_consumer_exit]}
+  - {scenario: tests/draining.yaml, expect_path: [measure, backlog_draining_exit]}
+feedback:
+  ask: "Kafka 积压问题定位了吗？"

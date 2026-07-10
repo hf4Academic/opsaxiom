@@ -1,0 +1,68 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.mysql.slow-query
+  name: MySQL 慢查询排查
+  taxonomy: middleware/mysql/slow-query
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{engine: mysql}]
+  params:
+    - {name: dsn, source: user, desc: 连接串/实例标识}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [mysql]
+discovery:
+  - id: status
+    run: {mysql: "SHOW GLOBAL STATUS LIKE 'Slow_queries'; SHOW PROCESSLIST"}
+    parser: mysql/status-v1
+tree:
+  entry: assess
+  nodes:
+    - id: assess
+      type: check
+      title: 确认是否存在慢查询与长事务
+      run: {mysql: "SELECT COUNT(*) running, MAX(TIME) max_time FROM information_schema.PROCESSLIST WHERE COMMAND='Query'"}
+      parser: mysql/status-v1
+      branch:
+        - {when: "max_query_time > 10", goto: find_slow}
+        - {when: "max_query_time <= 10", goto: not_slow}
+      otherwise: escalate
+      cautions:
+        - "先看当前是否有正在跑的长查询(PROCESSLIST 的 TIME)，再翻慢日志——现行长查询才是当下的痛点"
+        - "别只看 Slow_queries 计数(累计值)；关注增长速率与当前 running 状态"
+    - id: not_slow
+      type: done
+      summary: "当前无明显长查询。若历史有慢日志，离线分析 slow log(pt-query-digest)找 TopN。"
+    - id: find_slow
+      type: check
+      title: 判断慢的成因（锁等待 / 全表扫描 / 资源）
+      run: {mysql: "SELECT state, COUNT(*) c FROM information_schema.PROCESSLIST GROUP BY state ORDER BY c DESC"}
+      parser: mysql/procstate-v1
+      branch:
+        - {when: "waiting_lock > 0", goto: lock_exit}
+        - {when: "sending_data > 0", goto: scan_exit}
+      otherwise: resource_exit
+      cautions:
+        - "state=Waiting for lock → 锁竞争(转 deadlock/长事务)；state=Sending data → 大量数据检索(索引/全表扫描)；都不是→查资源(CPU/IO)"
+    - id: lock_exit
+      type: done
+      summary: "慢在锁等待。查阻塞源事务(SELECT * FROM performance_schema.data_lock_waits)与长事务(information_schema.INNODB_TRX)。方向：优化事务粒度、避免大事务、必要时人工 kill 阻塞源(需确认业务)。"
+    - id: scan_exit
+      type: done
+      summary: "慢在数据检索(可能缺索引/全表扫描)。用 EXPLAIN 看执行计划(type=ALL 即全表扫描)、检查 WHERE 列是否有索引、是否隐式类型转换导致索引失效。交研发优化 SQL/加索引。"
+    - id: resource_exit
+      type: done
+      summary: "非锁非扫描，疑似资源瓶颈或整体负载。核对主机 CPU/IO(转 host 域)、缓冲池命中率(Innodb_buffer_pool_read_requests)、是否并发过高。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：PROCESSLIST、慢日志摘要、当前长查询的 EXPLAIN、锁等待、资源指标。"
+tests:
+  - {scenario: tests/lock-wait.yaml, expect_path: [assess, find_slow, lock_exit]}
+  - {scenario: tests/no-slow.yaml, expect_path: [assess, not_slow]}
+feedback:
+  ask: "MySQL 慢查询定位了吗？"

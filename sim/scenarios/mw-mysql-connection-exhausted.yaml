@@ -1,0 +1,6 @@
+skill: skills/middleware/mysql-connection-exhausted/skill.yaml
+scenario: 连接泄漏
+expect_path: [measure, analyze, leak_exit]
+node_ctx:
+  measure: {connected: 95, max_connections: 100}
+  analyze: {long_sleep: 40, max_connections: 100}

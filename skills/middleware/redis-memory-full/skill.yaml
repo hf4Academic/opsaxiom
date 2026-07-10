@@ -1,0 +1,65 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.redis.memory-full
+  name: Redis 内存满 / 开始淘汰排查
+  taxonomy: middleware/redis/memory-full
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{engine: redis}]
+  params:
+    - {name: addr, source: user, desc: Redis 地址}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [redis]
+discovery:
+  - id: mem
+    run: {redis: "redis-cli -h {{addr}} INFO memory"}
+    parser: redis/info-memory-v1
+tree:
+  entry: assess
+  nodes:
+    - id: assess
+      type: check
+      title: 评估内存使用与淘汰
+      run: {redis: "redis-cli -h {{addr}} INFO memory; redis-cli -h {{addr}} INFO stats"}
+      parser: redis/info-memory-v1
+      branch:
+        - {when: "used_memory > maxmemory * 0.95 and maxmemory > 0", goto: check_policy}
+        - {when: "evicted_keys_rate > 0", goto: check_policy}
+        - {when: "used_memory <= maxmemory * 0.95 or maxmemory == 0", goto: not_full}
+      otherwise: escalate
+      cautions:
+        - "先看 maxmemory 是否设了(设 0=无限，靠系统内存兜底，风险更大)。逼近 maxmemory 时行为取决于 maxmemory-policy——noeviction 会直接拒写"
+        - "used_memory 之外还要看 mem_fragmentation_ratio：>1.5 说明碎片严重，实际占用远超数据量"
+    - id: not_full
+      type: done
+      summary: "内存未逼近上限且无淘汰。若有 OOM 类报错，检查是否 maxmemory 未设而系统内存不足。"
+    - id: check_policy
+      type: check
+      title: 检查淘汰策略与增长来源
+      run: {redis: "redis-cli -h {{addr}} CONFIG GET maxmemory-policy"}
+      parser: redis/config-v1
+      branch:
+        - {when: "policy_is_noeviction == 1", goto: noeviction_exit}
+      otherwise: eviction_exit
+      cautions:
+        - "noeviction 下内存满会拒绝写命令(报 OOM command not allowed)——业务写失败但不丢已有数据；allkeys-lru 等会淘汰 key 换取可写但可能丢数据"
+    - id: noeviction_exit
+      type: done
+      summary: "策略为 noeviction 且内存满，写命令被拒(OOM command not allowed)。方向：扩内存/调大 maxmemory、清理大 key(转 bigkey)、或改淘汰策略(评估丢 key 风险)。这是当前写失败的直接原因。"
+    - id: eviction_exit
+      type: done
+      summary: "正在按 LRU/LFU 等策略淘汰 key。若淘汰了不该淘汰的数据(如无 TTL 的持久数据被当缓存淘汰)，说明容量规划不足或策略不当。方向：扩容、区分缓存与持久数据(分实例)、给缓存设合理 TTL。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：INFO memory(used/maxmemory/fragmentation)、evicted_keys、maxmemory-policy、大 key 情况。"
+tests:
+  - {scenario: tests/noeviction.yaml, expect_path: [assess, check_policy, noeviction_exit]}
+  - {scenario: tests/not-full.yaml, expect_path: [assess, not_full]}
+feedback:
+  ask: "Redis 内存问题定位了吗？"

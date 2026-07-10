@@ -1,0 +1,6 @@
+skill: skills/middleware/mysql-replication-lag/skill.yaml
+scenario: 单线程回放跟不上
+expect_path: [read_lag, analyze_lag, single_thread_exit]
+node_ctx:
+  read_lag: {io_running: 'Yes', sql_running: 'Yes', seconds_behind: 120}
+  analyze_lag: {parallel_workers: 1}

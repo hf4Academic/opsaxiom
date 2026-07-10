@@ -1,0 +1,6 @@
+skill: skills/middleware/mysql-slow-query/skill.yaml
+scenario: 锁等待致慢
+expect_path: [assess, find_slow, lock_exit]
+node_ctx:
+  assess: {max_query_time: 15}
+  find_slow: {waiting_lock: 2, sending_data: 0}

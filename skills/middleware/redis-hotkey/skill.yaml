@@ -1,0 +1,54 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.redis.hotkey
+  name: Redis 热 key 排查
+  taxonomy: middleware/redis/hotkey
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{engine: redis}]
+  params:
+    - {name: addr, source: user, desc: Redis 地址}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [redis]
+discovery:
+  - id: hot
+    run: {redis: "redis-cli -h {{addr}} --hotkeys"}
+    parser: redis/hotkeys-v1
+tree:
+  entry: detect
+  nodes:
+    - id: detect
+      type: check
+      title: 检测是否存在热 key
+      run: {redis: "redis-cli -h {{addr}} INFO stats; redis-cli -h {{addr}} --hotkeys"}
+      parser: redis/hotkeys-v1
+      branch:
+        - {when: "top_key_ratio > 30", goto: assess_impact}
+        - {when: "top_key_ratio <= 30", goto: no_hotkey}
+      otherwise: escalate
+      cautions:
+        - "热 key = 单个 key 的访问占比过高，导致其所在分片/实例 CPU 打满而其他分片空闲——集群里表现为负载极度不均"
+        - "--hotkeys 需要 maxmemory-policy 为 LFU 才准；否则用 MONITOR(慎用，影响性能)或客户端埋点统计"
+    - id: no_hotkey
+      type: done
+      summary: "访问分布相对均匀，无明显热 key。若单分片仍高负载，查是否大 key 的 O(N) 操作(转 bigkey)或慢命令。"
+    - id: assess_impact
+      type: done
+      summary: >-
+        存在热 key(单 key 访问占比过高)。方向按场景：①读热点→本地缓存(客户端/进程内)挡住大部分读、
+        或多副本分摊读；②写热点→拆分(如计数器分桶后聚合)；③热点集中在单分片→评估 key 设计与分片策略。
+        应急可对热 key 做客户端缓存降低对 Redis 的直接压力。
+    - id: escalate
+      type: escalate
+      summary: "打包升级：--hotkeys 结果、各实例/分片负载分布、热 key 的读写比例、key 命名模式。"
+tests:
+  - {scenario: tests/hot.yaml, expect_path: [detect, assess_impact]}
+  - {scenario: tests/no-hot.yaml, expect_path: [detect, no_hotkey]}
+feedback:
+  ask: "Redis 热 key 定位了吗？"

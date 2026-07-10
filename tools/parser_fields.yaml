@@ -50,3 +50,23 @@ parsers:
   ntc/{{device.platform}}/trunk: {scalars: [], lists: {allowed_vlans: []}}
   ntc/{{device.platform}}/stp: {scalars: [inconsistent_ports, tcn_rate]}
   ntc/{{device.platform}}/acl: {scalars: [deny_hit_count], lists: {entries: [action, hits]}}
+  # ---- middleware: mysql ----
+  mysql/status-v1: {scalars: [max_query_time, slow_queries]}
+  mysql/procstate-v1: {scalars: [waiting_lock, sending_data]}
+  mysql/slave-status-v1: {scalars: [io_running, sql_running, seconds_behind]}
+  mysql/repl-workers-v1: {scalars: [parallel_workers]}
+  mysql/repl-error-v1: {scalars: [last_error_number]}
+  mysql/conn-v1: {scalars: [connected, max_connections]}
+  mysql/conn-sleep-v1: {scalars: [long_sleep, max_connections]}
+  mysql/lockwait-v1: {scalars: [lock_waits]}
+  mysql/blocker-v1: {scalars: [long_blocker]}
+  # ---- middleware: redis ----
+  redis/bigkeys-v1: {scalars: [max_bytes, max_elements]}
+  redis/info-memory-v1: {scalars: [used_memory, maxmemory, evicted_keys_rate]}
+  redis/config-v1: {scalars: [policy_is_noeviction]}
+  redis/hotkeys-v1: {scalars: [top_key_ratio]}
+  # ---- middleware: kafka ----
+  kafka/group-describe-v1: {scalars: [total_lag, lag_growing]}
+  kafka/group-members-v1: {scalars: [unassigned_partitions, member_count]}
+  kafka/urp-v1: {scalars: [urp_count]}
+  kafka/broker-count-v1: {scalars: [brokers_down]}

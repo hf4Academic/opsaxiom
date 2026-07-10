@@ -1,0 +1,6 @@
+skill: skills/middleware/mysql-deadlock/skill.yaml
+scenario: 长事务持锁
+expect_path: [check_waits, find_blocker, long_txn_exit]
+node_ctx:
+  check_waits: {lock_waits: 3}
+  find_blocker: {long_blocker: 1}

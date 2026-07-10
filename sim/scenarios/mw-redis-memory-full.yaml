@@ -1,0 +1,6 @@
+skill: skills/middleware/redis-memory-full/skill.yaml
+scenario: noeviction 拒写
+expect_path: [assess, check_policy, noeviction_exit]
+node_ctx:
+  assess: {used_memory: 960, maxmemory: 1000, evicted_keys_rate: 0}
+  check_policy: {policy_is_noeviction: 1}

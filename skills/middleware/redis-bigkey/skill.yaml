@@ -1,0 +1,55 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.redis.bigkey
+  name: Redis 大 key 排查
+  taxonomy: middleware/redis/bigkey
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{engine: redis}]
+  params:
+    - {name: addr, source: user, desc: Redis 地址}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [redis]
+discovery:
+  - id: bigkeys
+    run: {redis: "redis-cli -h {{addr}} --bigkeys"}
+    parser: redis/bigkeys-v1
+tree:
+  entry: scan
+  nodes:
+    - id: scan
+      type: check
+      title: 扫描是否存在大 key
+      run: {redis: "redis-cli -h {{addr}} --bigkeys"}
+      parser: redis/bigkeys-v1
+      branch:
+        - {when: "max_bytes > 10485760", goto: string_or_coll}
+        - {when: "max_elements > 10000", goto: coll_exit}
+        - {when: "max_bytes <= 10485760 and max_elements <= 10000", goto: no_bigkey}
+      otherwise: escalate
+      cautions:
+        - "大 key 分两类：单值大(大 String，>10MB)和元素多(大 Hash/List/Set/ZSet，元素>1万)。危害不同：前者网络/内存尖峰，后者操作阻塞主线程"
+        - "--bigkeys 是采样，别当全量；生产上慎用 KEYS *(阻塞)，用 SCAN 渐进扫描。删大 key 用 UNLINK(异步)不用 DEL(同步阻塞)"
+    - id: no_bigkey
+      type: done
+      summary: "未发现明显大 key。若仍有延迟尖峰，查慢命令(转 redis slow-command)或热 key(转 redis hotkey)。"
+    - id: string_or_coll
+      type: done
+      summary: "存在大 String(单值 >10MB)。危害：读写时网络与内存尖峰、可能阻塞。方向：拆分大 value、评估是否该放 Redis(大 blob 更适合对象存储)、删除用 UNLINK 异步删避免阻塞。"
+    - id: coll_exit
+      type: done
+      summary: "存在大集合(元素过多)。危害：HGETALL/LRANGE 等 O(N) 操作阻塞单线程，拖慢所有请求。方向：拆分集合(如按 hash 分片)、避免全量取(用 HSCAN/分页)、删除用 UNLINK。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：--bigkeys 结果、大 key 的类型与大小/元素数、相关命令的调用模式。"
+tests:
+  - {scenario: tests/big-coll.yaml, expect_path: [scan, coll_exit]}
+  - {scenario: tests/no-bigkey.yaml, expect_path: [scan, no_bigkey]}
+feedback:
+  ask: "Redis 大 key 定位了吗？"
