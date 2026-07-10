@@ -41,7 +41,7 @@ tree:
       summary: "复制线程已停(IO 或 SQL 为 No)，不是延迟是中断。转 middleware/mysql/replication-broken 查 Last_Error。"
     - id: ok_exit
       type: done
-      summary: "延迟在可接受范围。若业务对一致性敏感，考虑读写分离时的延迟容忍或半同步。"
+      summary: "延迟 {{output.seconds_behind}}s 在可接受范围。若业务对一致性敏感，考虑读写分离时的延迟容忍或半同步。"
     - id: analyze_lag
       type: check
       title: 判断延迟来源（回放慢 / 大事务 / 单线程瓶颈）

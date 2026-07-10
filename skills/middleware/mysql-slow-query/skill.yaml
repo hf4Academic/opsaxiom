@@ -37,7 +37,7 @@ tree:
         - "别只看 Slow_queries 计数(累计值)；关注增长速率与当前 running 状态"
     - id: not_slow
       type: done
-      summary: "当前无明显长查询。若历史有慢日志，离线分析 slow log(pt-query-digest)找 TopN。"
+      summary: "当前无明显长查询（最长 {{output.max_query_time}}s）。若历史有慢日志，离线分析 slow log(pt-query-digest)找 TopN。"
     - id: find_slow
       type: check
       title: 判断慢的成因（锁等待 / 全表扫描 / 资源）

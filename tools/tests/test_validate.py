@@ -230,3 +230,13 @@ def test_verify_assert_must_parse():
         if n["id"] == "a1":
             n["verify"]["assert"] = "服务正常"       # 散文，非表达式
     assert "S5" in _rules(V.validate_skill(s))
+
+
+def test_field_template_output_scalar_checked():
+    # {{output.unknown}} 无解析器声明该标量 → FIELD WARN
+    s = _minimal()
+    s["tree"]["nodes"][0]["parser"] = "mysql/status-v1"
+    s["tree"]["nodes"][1]["summary"] = "值 {{output.max_query_time}} 和 {{output.bogus_scalar}}"
+    warns = {msg for lvl, rule, msg in V.validate_skill(s).items if rule == "FIELD"}
+    assert any("bogus_scalar" in m for m in warns)         # 未声明标量被揪
+    assert not any("max_query_time" in m for m in warns)   # 已声明标量放行

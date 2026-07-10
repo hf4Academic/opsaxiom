@@ -332,6 +332,25 @@ def semantic_checks(skill, rep):
                         continue
                     rep.add(WARN, "FIELD",
                             f"check '{nid}' branch[{i}] 字段 '{root}' 无来源（解析器 {n['parser']} 未声明，也非 fact/param）")
+        # ---- T-3：模板引用 {{output.x}}/{{rows[0].x}} 对全 Skill 解析器声明并集校验（WARN）----
+        all_scalars, all_rows = set(), set()
+        for n in nodes.values():
+            d = _parsers.get_fields(n.get("parser", "")) if n.get("parser") else None
+            if d:
+                all_scalars |= set(d.get("scalars", []))
+                all_rows |= set(d.get("rows", []))
+        tmpl = set()
+        _collect_template_exprs(skill.get("tree"), tmpl)
+        for e in tmpl:
+            ok, root, second = exprlang.parse_template_ref(e)
+            if not ok:
+                continue
+            if root == "output" and second and second not in all_scalars and second not in base_ok:
+                rep.add(WARN, "FIELD", f"模板 {{{{{e}}}}} 的 output.{second} 无解析器声明该标量")
+            elif root == "rows":
+                for rt, sub in exprlang.field_refs(e):
+                    if rt == "rows" and sub and all_rows and sub not in all_rows:
+                        rep.add(WARN, "FIELD", f"模板 {{{{{e}}}}} 的 rows.{sub} 不在任何解析器声明的行字段")
     except Exception:
         pass
 
