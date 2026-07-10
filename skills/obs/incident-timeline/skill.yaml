@@ -1,0 +1,45 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: obs.oncall.incident-timeline
+  name: 事件时间线整理
+  taxonomy: obs/oncall/incident-timeline
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{stack: prometheus}]
+  params:
+    - {name: prom_url, source: user, desc: Prometheus/事件源地址}
+    - {name: window, source: user, desc: 事件时间窗(如 -2h..now)}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [http]
+discovery:
+  - id: ev
+    run: {http: "opsaxiom-collect events --window {{window}} --source {{prom_url}}"}
+    parser: obs/events-v1
+tree:
+  entry: gather_events
+  nodes:
+    - id: gather_events
+      type: check
+      title: 汇总窗口内的告警与变更事件
+      run: {http: "opsaxiom-collect events --window {{window}} --source {{prom_url}}"}
+      parser: obs/events-v1
+      branch:
+        - {when: "has_deploy_near_start > 0", goto: deploy_correlated_exit}
+        - {when: "alert_events > 0", goto: alert_first_exit}
+      otherwise: escalate
+      cautions:
+        - "时间线要客观：只把有时间戳的事实(告警触发/恢复、变更、扩缩容、重启)按时间排列，别在时间线里写因果推断——因果留给复盘"
+        - "变更紧邻故障起点是最强线索但不是定论：相关≠因果，仍需验证该变更确实触及故障组件"
+    - {id: deploy_correlated_exit, type: done, summary: "时间线显示故障起点紧邻一次变更/部署。建议时间线骨架：[T0 变更X上线] → [T0+Δ 首个告警] → [恢复动作] → [恢复]。重点核实该变更是否触及故障组件；若是，回滚该变更常是最快止血(转 k8s/rollout/rollback 或对应变更回滚)。"}
+    - {id: alert_first_exit, type: done, summary: "窗口内无紧邻变更，以首个告警为时间线起点。骨架：[T0 首告警(哪个组件)] → [告警扩散/关联告警] → [人工介入/处置] → [恢复]。据此串联根因链，产出可直接贴进复盘的时间线。"}
+    - {id: escalate, type: escalate, summary: "打包升级：窗口内告警事件数、变更事件数、各自时间戳，供人工手工串联时间线。"}
+tests:
+  - {scenario: tests/deploy-correlated.yaml, expect_path: [gather_events, deploy_correlated_exit]}
+  - {scenario: tests/alert-first.yaml, expect_path: [gather_events, alert_first_exit]}
+feedback: {ask: 事件时间线整理清楚了吗？}

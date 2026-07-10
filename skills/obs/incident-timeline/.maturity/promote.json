@@ -1,0 +1,23 @@
+{
+  "skill": "obs.oncall.incident-timeline",
+  "action": "promote",
+  "from": "draft",
+  "to": "sim_verified",
+  "at": "2026-07-10T15:00:35",
+  "validator": "0 ERROR",
+  "evidence": "context_walk",
+  "scenarios": [
+    {
+      "scenario": "obs-incident-timeline-alert.yaml",
+      "mode": "context_walk",
+      "path_ok": true,
+      "rollback_ok": null
+    },
+    {
+      "scenario": "obs-incident-timeline-deploy.yaml",
+      "mode": "context_walk",
+      "path_ok": true,
+      "rollback_ok": null
+    }
+  ]
+}

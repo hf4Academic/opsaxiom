@@ -1,0 +1,10 @@
+skill: skills/obs/incident-timeline/skill.yaml
+scenario: 变更关联
+expect_path:
+- gather_events
+- deploy_correlated_exit
+node_ctx:
+  gather_events:
+    has_deploy_near_start: 1
+    alert_events: 4
+    deploy_events: 1

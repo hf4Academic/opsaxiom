@@ -1,0 +1,51 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: sec.vuln.scan-triage
+  name: 漏洞扫描结果分诊
+  taxonomy: sec/vuln/scan-triage
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{scope: security}]
+  params:
+    - {name: report, source: user, desc: 扫描报告文件(trivy/grype 等)}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [ssh]
+discovery:
+  - id: triage
+    run: {ssh: "opsaxiom-collect vuln-triage --report {{report}}"}
+    parser: sec/vuln-v1
+tree:
+  entry: triage_vulns
+  nodes:
+    - id: triage_vulns
+      type: check
+      title: 按可利用性与可修复性分诊漏洞
+      run: {ssh: "opsaxiom-collect vuln-triage --report {{report}}"}
+      parser: sec/vuln-v1
+      branch:
+        - {when: "kev_count > 0", goto: kev_exit}
+        - {when: "critical_count > 0 and has_fix_critical > 0", goto: fixable_crit_exit}
+        - {when: "critical_count > 0", goto: crit_nofix_exit}
+        - {when: "high_count > 0", goto: high_exit}
+        - {when: "high_count == 0", goto: clean_exit}
+      otherwise: escalate
+      cautions:
+        - "别按 CVSS 分数排队修：优先级看'是否在被实际利用'(CISA KEV/有公开 EXP) 和'是否有补丁'——一个 KEV 中危比一个无 EXP 的 critical 更该先修"
+        - "有补丁的 critical 先修(改动小见效快)；无补丁的 critical 走缓解(隔离/WAF/关闭受影响功能)而非干等"
+        - "扫描器常有误报与不可达路径漏洞：结合是否真实引入、是否在攻击面上，别被数字吓到全量停机打补丁"
+    - {id: kev_exit, type: escalate, summary: "存在已知被利用漏洞(KEV，{{output.kev_count}} 个)——最高优先级，攻击者正在野利用。立即：定位受影响资产与攻击面暴露情况、按应急打补丁或缓解、检查是否已被利用的迹象。已生成紧急处置清单。"}
+    - {id: fixable_crit_exit, type: done, summary: "有可修复的 critical 漏洞({{output.critical_count}} 个 critical，含可用补丁)。方向：优先对暴露在攻击面的资产打补丁(改动小见效快)，按变更流程灰度验证后推广。修复后重扫确认(转 sec/vuln/patch-verify)。"}
+    - {id: crit_nofix_exit, type: done, summary: "有 critical 漏洞但暂无补丁。方向：走缓解而非干等——网络隔离/收敛攻击面、WAF/虚拟补丁、关闭受影响功能、加强监控；跟踪上游补丁进度。"}
+    - {id: high_exit, type: done, summary: "无 critical/KEV，但有 high 漏洞({{output.high_count}} 个)。方向：评估是否在真实攻击路径上，纳入常规修复排期按补丁可得性推进，不必应急。"}
+    - {id: clean_exit, type: done, summary: "未见 critical/high 或 KEV 漏洞，风险可控。建议：确认扫描覆盖完整(镜像/主机/依赖)、纳入常态化扫描与基线对比。"}
+    - {id: escalate, type: escalate, summary: "打包升级：critical/high 数量、是否含 KEV、critical 是否有补丁、受影响资产与攻击面暴露，供安全团队定优先级。"}
+tests:
+  - {scenario: tests/kev.yaml, expect_path: [triage_vulns, kev_exit]}
+  - {scenario: tests/fixable-crit.yaml, expect_path: [triage_vulns, fixable_crit_exit]}
+feedback: {ask: 漏洞修复优先级理清了吗？}

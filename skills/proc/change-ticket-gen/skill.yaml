@@ -1,0 +1,43 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: proc.change.ticket-gen
+  name: 变更单生成
+  taxonomy: proc/change/ticket-gen
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{scope: process}]
+  params:
+    - {name: change_desc, source: user, desc: 变更内容}
+    - {name: blast_radius, source: user, desc: 影响面}
+    - {name: rollback_plan, source: user, desc: 回滚方案}
+    - {name: window, source: user, desc: 变更窗口}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [human]
+tree:
+  entry: pick_risk
+  nodes:
+    - id: pick_risk
+      type: ask
+      title: 评估变更风险等级
+      question: "这次变更的风险等级？（决定审批链、观察与操作要求）"
+      binds: risk
+      options:
+        - {label: 低风险（影响小、秒级可回滚）, goto: low_exit}
+        - {label: 中风险（有短暂影响、需灰度）, goto: mid_exit}
+        - {label: 高风险（核心系统/难回滚/跨团队）, goto: high_exit}
+      cautions:
+        - "风险分级的锚点是'回滚难度'而非'改动大小'——一行改核心配置可能比重构一个边缘服务风险更高(呼应 R1 可回滚是第一准则)"
+        - "没有回滚方案的变更不该出单：rollback_plan 为空时先补回滚，再谈审批"
+    - {id: low_exit, type: done, summary: "【变更单·低风险】\n- 内容：{{change_desc}}\n- 影响面：{{blast_radius}}\n- 回滚方案：{{rollback_plan}}\n- 窗口：{{window}}\n- 审批：直属负责人知会即可\n- 要求：执行前确认回滚可用；执行后自检关键指标。"}
+    - {id: mid_exit, type: done, summary: "【变更单·中风险】\n- 内容：{{change_desc}}\n- 影响面：{{blast_radius}}\n- 回滚方案：{{rollback_plan}}\n- 窗口：{{window}}\n- 审批：团队负责人 + 当班值班\n- 要求：灰度发布（先小流量/单实例）；变更简报列明观察指标与中止条件；回滚方案执行前演练一次。"}
+    - {id: high_exit, type: done, summary: "【变更单·高风险】\n- 内容：{{change_desc}}\n- 影响面：{{blast_radius}}\n- 回滚方案：{{rollback_plan}}\n- 窗口：{{window}}\n- 审批：CAB 变更评审会 + 相关团队会签\n- 要求：双人操作（操作+复核）；提前完成回滚演练并记录耗时；准备好观察大盘与一键回滚；错峰窗口执行；全程留操作记录。"}
+tests:
+  - {scenario: tests/high.yaml, expect_path: [pick_risk, high_exit]}
+  - {scenario: tests/low.yaml, expect_path: [pick_risk, low_exit]}
+feedback: {ask: 生成的变更单可直接用吗？}

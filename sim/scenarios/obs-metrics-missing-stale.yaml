@@ -1,0 +1,10 @@
+skill: skills/obs/metrics-missing/skill.yaml
+scenario: 采集停摆
+expect_path:
+- classify_missing
+- stale_exit
+node_ctx:
+  classify_missing:
+    target_up: 1
+    series_count: 3
+    last_scrape_age_s: 600

@@ -1,0 +1,7 @@
+skill: skills/proc/shift-summary/skill.yaml
+scenario: 常规交接
+expect_path:
+- pick_state
+- routine_exit
+answers:
+  pick_state: routine_exit

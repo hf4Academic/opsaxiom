@@ -1,0 +1,10 @@
+skill: skills/sec/bruteforce/skill.yaml
+scenario: 暴破得手
+expect_path:
+- assess_fails
+- breach_suspect_exit
+node_ctx:
+  assess_fails:
+    succeeded_after_fail: 1
+    failed_count: 200
+    top_src_fail_count: 150

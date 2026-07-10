@@ -1,0 +1,10 @@
+skill: skills/sec/bruteforce/skill.yaml
+scenario: 单源暴破
+expect_path:
+- assess_fails
+- single_src_exit
+node_ctx:
+  assess_fails:
+    succeeded_after_fail: 0
+    top_src_fail_count: 150
+    failed_count: 200

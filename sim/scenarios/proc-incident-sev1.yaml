@@ -1,0 +1,7 @@
+skill: skills/proc/incident-report-gen/skill.yaml
+scenario: SEV1 报告
+expect_path:
+- pick_severity
+- sev1_exit
+answers:
+  pick_severity: sev1_exit

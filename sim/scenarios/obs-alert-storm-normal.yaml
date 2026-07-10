@@ -1,0 +1,9 @@
+skill: skills/obs/alert-storm/skill.yaml
+scenario: 告警量正常
+expect_path:
+- assess_volume
+- normal_exit
+node_ctx:
+  assess_volume:
+    active_alerts: 10
+    top_group_share: 20

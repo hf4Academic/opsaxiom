@@ -1,0 +1,46 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: obs.alerting.alert-storm
+  name: 告警风暴排查与降噪
+  taxonomy: obs/alerting/alert-storm
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{stack: prometheus}]
+  params:
+    - {name: am_url, source: user, desc: Alertmanager 地址}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [http]
+discovery:
+  - id: alerts
+    run: {http: "amtool alert query -o json --alertmanager.url={{am_url}}"}
+    parser: obs/alerts-v1
+tree:
+  entry: assess_volume
+  nodes:
+    - id: assess_volume
+      type: check
+      title: 评估告警规模与集中度
+      run: {http: "amtool alert query -o json --alertmanager.url={{am_url}}"}
+      parser: obs/alerts-v1
+      branch:
+        - {when: "active_alerts > 200 and top_group_share > 60", goto: common_cause_exit}
+        - {when: "active_alerts > 200", goto: volume_exit}
+        - {when: "active_alerts > 0", goto: normal_exit}
+      otherwise: escalate
+      cautions:
+        - "告警风暴先按 alertname/label 分组看分布，别逐条读——风暴时逐条读只会淹没值班"
+        - "一个根因常引发下游雪崩(如核心交换机 down→上百服务探活失败)；top_group_share 高说明多为单一根因刷屏，先抑制再定位"
+    - {id: common_cause_exit, type: done, summary: "告警高度集中(单组占比 {{output.top_group_share}}%)，典型单一根因引发下游雪崩。方向：找最上游的那条告警(依赖链根节点)优先处置；配置 Alertmanager inhibit_rules 让根因告警抑制下游派生告警，立即止血刷屏。别被下游成百上千条派生告警带偏。"}
+    - {id: volume_exit, type: done, summary: "告警量大({{output.active_alerts}} 条)但不集中，属多点真实故障或阈值普遍偏敏感。方向：按 severity 分级先看 critical；用 group_by + group_wait 聚合通知减少刷屏；复盘是否一批阈值需要收敛(转 obs/alerting/false-positive)。"}
+    - {id: normal_exit, type: done, summary: "当前告警量在正常范围。若曾瞬时风暴已自愈，观察是否周期性复发并定位触发源。"}
+    - {id: escalate, type: escalate, summary: "打包升级：活跃告警总数、按 alertname 分组分布、top 组占比、依赖拓扑，供人工判定根因。"}
+tests:
+  - {scenario: tests/common-cause.yaml, expect_path: [assess_volume, common_cause_exit]}
+  - {scenario: tests/normal.yaml, expect_path: [assess_volume, normal_exit]}
+feedback: {ask: 告警风暴的根因定位/降噪做到了吗？}

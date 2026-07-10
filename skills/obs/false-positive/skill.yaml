@@ -1,0 +1,48 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: obs.alerting.false-positive
+  name: 告警误报排查（阈值/抖动）
+  taxonomy: obs/alerting/false-positive
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{stack: prometheus}]
+  params:
+    - {name: prom_url, source: user, desc: Prometheus 地址}
+    - {name: alertname, source: alert, desc: 告警名}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [http]
+discovery:
+  - id: eval
+    run: {http: "promtool query instant {{prom_url}} 'ALERTS{alertname=\"{{alertname}}\"}'"}
+    parser: obs/alert-eval-v1
+tree:
+  entry: check_real
+  nodes:
+    - id: check_real
+      type: check
+      title: 判断告警是否反映真实越界
+      run: {http: "promtool query instant {{prom_url}} 'ALERTS{alertname=\"{{alertname}}\"}'"}
+      parser: obs/alert-eval-v1
+      branch:
+        - {when: "firing > 0 and metric_value < threshold", goto: threshold_exit}
+        - {when: "flapping_count > 5", goto: flapping_exit}
+        - {when: "firing > 0", goto: real_exit}
+      otherwise: escalate
+      cautions:
+        - "别把'真问题'当误报关掉——先看当前指标值 vs 阈值：值确实没越界才叫误报，越界了就是真告警"
+        - "抖动(flapping)不是误报而是配置问题：指标在阈值附近反复穿越→加 for 持续时间或滞回(hysteresis)，而非删告警"
+        - "误报的典型来源：静态阈值不适应业务波动、聚合窗口太短、单点采样毛刺"
+    - {id: threshold_exit, type: done, summary: "当前指标值未越界却在 firing，属阈值/规则不当误报。方向：改用更贴合的阈值(如分时段/基线偏离)、拉长评估窗口、或换成比率类而非绝对值类判据。调整前确认历史上它是否漏过真事件。"}
+    - {id: flapping_exit, type: done, summary: "告警在阈值附近反复抖动({{output.flapping_count}} 次)，是抖动而非误报。方向：加 `for:` 持续时间(如 5m)要求持续越界才触发、引入滞回(触发阈≠恢复阈)、或对指标做适度平滑。不要简单删告警。"}
+    - {id: real_exit, type: done, summary: "指标确实越界，这不是误报而是真问题。方向：按该告警对应的处置 Skill 排查根因，别急着调阈值把真信号屏蔽掉。"}
+    - {id: escalate, type: escalate, summary: "打包升级：告警规则表达式、当前指标值、阈值、for 配置、近段触发/恢复历史，供人工判定误报性质。"}
+tests:
+  - {scenario: tests/threshold.yaml, expect_path: [check_real, threshold_exit]}
+  - {scenario: tests/real.yaml, expect_path: [check_real, real_exit]}
+feedback: {ask: 误报性质判清了吗？}

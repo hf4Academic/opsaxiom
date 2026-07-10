@@ -1,0 +1,11 @@
+skill: skills/sec/vuln-scan-triage/skill.yaml
+scenario: 可修复critical
+expect_path:
+- triage_vulns
+- fixable_crit_exit
+node_ctx:
+  triage_vulns:
+    kev_count: 0
+    critical_count: 2
+    has_fix_critical: 1
+    high_count: 5

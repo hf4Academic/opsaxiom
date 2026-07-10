@@ -1,0 +1,49 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: obs.metrics.missing
+  name: 监控指标缺失排查
+  taxonomy: obs/metrics/missing
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{stack: prometheus}]
+  params:
+    - {name: prom_url, source: user, desc: Prometheus 地址}
+    - {name: metric, source: user, desc: 缺失的指标名}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [http]
+discovery:
+  - id: presence
+    run: {http: "promtool query instant {{prom_url}} '{{metric}}'"}
+    parser: obs/metric-presence-v1
+tree:
+  entry: classify_missing
+  nodes:
+    - id: classify_missing
+      type: check
+      title: 分类指标缺失形态
+      run: {http: "promtool query instant {{prom_url}} '{{metric}}'"}
+      parser: obs/metric-presence-v1
+      branch:
+        - {when: "target_up == 0", goto: target_down_exit}
+        - {when: "series_count == 0", goto: never_exposed_exit}
+        - {when: "last_scrape_age_s > 300", goto: stale_exit}
+        - {when: "series_count > 0 and last_scrape_age_s <= 300", goto: present_exit}
+      otherwise: escalate
+      cautions:
+        - "分清三种'没数据'：target 挂了(抓取端点不通)、指标从没被暴露(名字错/exporter 没这个指标)、曾有数据但采集停了(scrape 失败/stale)——处置完全不同"
+        - "指标名大小写/label 写错会让人误判为'缺失'，先用 promtool 按前缀模糊查确认真实指标名"
+    - {id: target_down_exit, type: done, summary: "指标缺失是因为它所在的 target 处于 down。转 obs/metrics/target-down 排查 exporter 为何抓不到；target 恢复后指标自然回来。"}
+    - {id: never_exposed_exit, type: done, summary: "该指标名在库里没有任何 series，多为指标名/label 写错，或 exporter 根本没暴露这个指标(版本差异/未开启对应 collector)。方向：确认真实指标名(promtool 前缀查)、检查 exporter 是否需要开启对应模块。"}
+    - {id: stale_exit, type: done, summary: "指标曾有数据但已 {{output.last_scrape_age_s}}s 未更新(stale)，说明采集近期停了。方向：查该 target 的 scrape 是否开始失败(转 target-down)、relabel/drop 规则是否误删、remote_write 是否中断。"}
+    - {id: present_exit, type: done, summary: "指标实际有数据且新鲜，'缺失'可能是查询语句/看板 label 选择器问题，或看的时间范围内恰好无采样。核对 PromQL 与看板变量。"}
+    - {id: escalate, type: escalate, summary: "打包升级：指标名、series 数、最近 scrape 时间、对应 target 状态，供人工判定缺失环节。"}
+tests:
+  - {scenario: tests/target-down.yaml, expect_path: [classify_missing, target_down_exit]}
+  - {scenario: tests/stale.yaml, expect_path: [classify_missing, stale_exit]}
+feedback: {ask: 指标缺失的环节定位了吗？}

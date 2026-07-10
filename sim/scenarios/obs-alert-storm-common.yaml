@@ -1,0 +1,11 @@
+skill: skills/obs/alert-storm/skill.yaml
+scenario: 单一根因风暴
+expect_path:
+- assess_volume
+- common_cause_exit
+node_ctx:
+  assess_volume:
+    active_alerts: 300
+    top_group_share: 70
+    distinct_names: 5
+    top_group_count: 210

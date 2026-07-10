@@ -1,0 +1,49 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: sec.cert.expiry-inventory
+  name: 证书到期巡检（全网清点）
+  taxonomy: sec/cert/expiry-inventory
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{scope: pki}]
+  params:
+    - {name: inventory, source: user, desc: 证书清单/端点列表文件}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [ssh]
+discovery:
+  - id: scan
+    run: {ssh: "opsaxiom-collect cert-scan --inventory {{inventory}}"}
+    parser: sec/cert-inv-v1
+tree:
+  entry: scan_certs
+  nodes:
+    - id: scan_certs
+      type: check
+      title: 清点证书并按最紧迫到期分级
+      run: {ssh: "opsaxiom-collect cert-scan --inventory {{inventory}}"}
+      parser: sec/cert-inv-v1
+      branch:
+        - {when: "expired_count > 0", goto: expired_exit}
+        - {when: "expiring_7d_count > 0", goto: urgent_exit}
+        - {when: "expiring_30d_count > 0", goto: plan_exit}
+        - {when: "total_certs > 0", goto: healthy_exit}
+      otherwise: escalate
+      cautions:
+        - "巡检要覆盖全：不止 HTTPS 站点证书，还有中间 CA、客户端证书、内部 mTLS、K8s/etcd 证书、代码签名证书——最常被遗忘的是内部服务与中间 CA"
+        - "换证是变更不是巡检动作：本 Skill 只清点分级出清单，实际更换走变更流程(注意证书链完整、部署后热加载/重启、回滚保留旧证)"
+        - "临期天数按'最紧迫的那张'分级，别被平均值掩盖——一张已过期比一百张半年后到期紧急得多"
+    - {id: expired_exit, type: escalate, summary: "存在已过期证书({{output.expired_count}} 张)，可能正在造成握手失败/服务不可用。立即：定位过期证书对应服务、走应急变更更换、检查是否已影响线上。已生成紧急换证清单。换证注意证书链完整与部署后重载。"}
+    - {id: urgent_exit, type: done, summary: "有证书 7 天内到期(最紧迫剩 {{output.min_days_left}} 天)。方向：本周内排期更换，准备新证书与部署方案(链完整、热加载/重启、旧证回滚保留)。优先核心对外服务。"}
+    - {id: plan_exit, type: done, summary: "有证书 30 天内到期，尚不紧急但需排期。方向：纳入变更计划按到期顺序更换；核对是否可自动化续期(ACME/cert-manager)以根治重复巡检。"}
+    - {id: healthy_exit, type: done, summary: "清点的 {{output.total_certs}} 张证书近 30 天内无到期，健康。建议：确认巡检清单是否完整(别漏内部/中间 CA)、推动自动续期减少人工巡检。"}
+    - {id: escalate, type: escalate, summary: "打包升级：证书总数、已过期数、7天/30天内到期数、最紧迫剩余天数与对应端点清单。"}
+tests:
+  - {scenario: tests/expired.yaml, expect_path: [scan_certs, expired_exit]}
+  - {scenario: tests/plan.yaml, expect_path: [scan_certs, plan_exit]}
+feedback: {ask: 证书到期清单与换证优先级清楚了吗？}

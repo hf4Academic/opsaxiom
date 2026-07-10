@@ -1,0 +1,49 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: obs.metrics.target-down
+  name: 采集目标 down（exporter 抓不到）排查
+  taxonomy: obs/metrics/target-down
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{stack: prometheus}]
+  params:
+    - {name: prom_url, source: user, desc: Prometheus 地址}
+    - {name: target, source: alert, desc: down 的 target 实例}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [http]
+discovery:
+  - id: tgt
+    run: {http: "opsaxiom-collect prom-target --url {{prom_url}} --target {{target}}"}
+    parser: obs/target-v1
+tree:
+  entry: read_target
+  nodes:
+    - id: read_target
+      type: check
+      title: 读取 target 状态与最近抓取错误
+      run: {http: "opsaxiom-collect prom-target --url {{prom_url}} --target {{target}}"}
+      parser: obs/target-v1
+      branch:
+        - {when: "up > 0", goto: up_exit}
+        - {when: "last_error_conn_refused > 0", goto: refused_exit}
+        - {when: "last_error_timeout > 0", goto: timeout_exit}
+        - {when: "up == 0", goto: other_error_exit}
+      otherwise: escalate
+      cautions:
+        - "target down 先看 Prometheus 自己记录的 lastError——connection refused / timeout / 401 / no such host，错误类型直接指向根因，别盲猜"
+        - "别只在被抓端排查：也可能是 Prometheus 侧网络策略/防火墙不让它到 exporter，两端都要看"
+    - {id: up_exit, type: done, summary: "该 target 当前 up，可能是瞬时抓取失败已恢复。观察是否周期性 down(GC 停顿/exporter 偶发卡)，必要时调 scrape_timeout。"}
+    - {id: refused_exit, type: done, summary: "抓取被拒(connection refused)，多为 exporter 进程没在跑或端口/监听地址不对。方向：登目标机确认 exporter 进程与监听端口(ss -ltnp)、防火墙/安全组是否放行 Prometheus 源、容器是否暴露该端口。"}
+    - {id: timeout_exit, type: done, summary: "抓取超时(timeout)，exporter 在但响应慢或网络拥塞。方向：手动 curl exporter 端点看耗时、检查目标机负载(转 host/compute/load-high)、exporter 采集项过多导致单次抓取慢则拆分或调大 scrape_timeout。"}
+    - {id: other_error_exit, type: done, summary: "抓取失败但非拒绝/超时(如 401/403 鉴权、TLS 握手失败、no such host)。方向：核对 scrape_config 的鉴权/TLS/目标地址解析，按 lastError 原文定位。"}
+    - {id: escalate, type: escalate, summary: "打包升级：target 的 up 值、lastError 原文、scrape_config、目标机 exporter 进程与端口状态。"}
+tests:
+  - {scenario: tests/refused.yaml, expect_path: [read_target, refused_exit]}
+  - {scenario: tests/timeout.yaml, expect_path: [read_target, timeout_exit]}
+feedback: {ask: target down 的根因定位了吗？}

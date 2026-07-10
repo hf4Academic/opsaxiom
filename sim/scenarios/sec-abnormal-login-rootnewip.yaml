@@ -1,0 +1,10 @@
+skill: skills/sec/abnormal-login/skill.yaml
+scenario: root 新IP登录
+expect_path:
+- scan_logins
+- root_newip_exit
+node_ctx:
+  scan_logins:
+    root_login_count: 1
+    new_ip_count: 1
+    accepted_count: 5

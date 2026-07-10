@@ -1,0 +1,11 @@
+skill: skills/sec/abnormal-login/skill.yaml
+scenario: 登录正常
+expect_path:
+- scan_logins
+- normal_exit
+node_ctx:
+  scan_logins:
+    root_login_count: 0
+    new_ip_count: 0
+    offhours_login_count: 0
+    accepted_count: 5

@@ -1,0 +1,7 @@
+skill: skills/proc/change-ticket-gen/skill.yaml
+scenario: 高风险变更单
+expect_path:
+- pick_risk
+- high_exit
+answers:
+  pick_risk: high_exit

@@ -1,0 +1,10 @@
+skill: skills/obs/target-down/skill.yaml
+scenario: 连接被拒
+expect_path:
+- read_target
+- refused_exit
+node_ctx:
+  read_target:
+    up: 0
+    last_error_conn_refused: 1
+    last_error_timeout: 0

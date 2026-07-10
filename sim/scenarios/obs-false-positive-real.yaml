@@ -1,0 +1,11 @@
+skill: skills/obs/false-positive/skill.yaml
+scenario: 真问题非误报
+expect_path:
+- check_real
+- real_exit
+node_ctx:
+  check_real:
+    firing: 1
+    metric_value: 15
+    threshold: 10
+    flapping_count: 0

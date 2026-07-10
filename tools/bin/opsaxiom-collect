@@ -87,6 +87,60 @@ def cmd_gpu_trace(args):
     return 0
 
 
+def cmd_events(args):
+    def mock():
+        r = _seed(args.window, args.source, "deploy")
+        alert_events = 3 + int(_seed(args.window, "n") * 5)
+        deploy = 1 if r > 0.4 else 0
+        return {"alert_events": alert_events, "deploy_events": deploy,
+                "deploy_near_start": deploy}
+    print(json.dumps(_load(args, mock), ensure_ascii=False))
+    return 0
+
+
+def cmd_auth(args):
+    """SSH 登录取证：--accepted 取成功登录特征，--failed 取失败/暴破特征。"""
+    def mock():
+        if args.failed:
+            r = _seed(args.host, args.window, "bf")
+            return {"failed_count": 20 + int(r * 400), "distinct_src_ips": 1 + int(r * 40),
+                    "top_src_fail_count": 30 + int(r * 300), "succeeded_after_fail": 0}
+        r = _seed(args.host, args.window, "login")
+        return {"accepted_count": 5 + int(r * 20), "distinct_src_ips": 2 + int(r * 6),
+                "new_ip_count": 0, "root_login_count": 0, "offhours_login_count": 0}
+    print(json.dumps(_load(args, mock), ensure_ascii=False))
+    return 0
+
+
+def cmd_prom_target(args):
+    def mock():
+        r = _seed(args.url, args.target, "tgt")
+        if r < 0.5:
+            return {"up": 0, "last_error": "connection refused"}
+        return {"up": 0, "last_error": "context deadline exceeded (timeout)"}
+    print(json.dumps(_load(args, mock), ensure_ascii=False))
+    return 0
+
+
+def cmd_cert_scan(args):
+    def mock():
+        # 一份证书清单，据 inventory 派生若干临期
+        r = _seed(args.inventory, "cert")
+        certs = [{"days_left": 200}, {"days_left": 90}, {"days_left": int(r * 20)}]
+        return {"certs": certs}
+    print(json.dumps(_load(args, mock), ensure_ascii=False))
+    return 0
+
+
+def cmd_vuln_triage(args):
+    def mock():
+        r = _seed(args.report, "vuln")
+        return {"critical_count": int(r * 5), "high_count": 3 + int(r * 10),
+                "fixable_critical": 1 if r > 0.3 else 0, "kev_count": 1 if r > 0.7 else 0}
+    print(json.dumps(_load(args, mock), ensure_ascii=False))
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(prog="opsaxiom-collect")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -106,6 +160,36 @@ def main():
     gp.add_argument("--pid", required=True)
     gp.add_argument("--from-file")
     gp.set_defaults(fn=cmd_gpu_trace)
+
+    ep = sub.add_parser("events")
+    ep.add_argument("--window", required=True)
+    ep.add_argument("--source", required=True)
+    ep.add_argument("--from-file")
+    ep.set_defaults(fn=cmd_events)
+
+    aup = sub.add_parser("auth")
+    aup.add_argument("--host", required=True)
+    aup.add_argument("--window", required=True)
+    aup.add_argument("--accepted", action="store_true")
+    aup.add_argument("--failed", action="store_true")
+    aup.add_argument("--from-file")
+    aup.set_defaults(fn=cmd_auth)
+
+    ptp = sub.add_parser("prom-target")
+    ptp.add_argument("--url", required=True)
+    ptp.add_argument("--target", required=True)
+    ptp.add_argument("--from-file")
+    ptp.set_defaults(fn=cmd_prom_target)
+
+    csp = sub.add_parser("cert-scan")
+    csp.add_argument("--inventory", required=True)
+    csp.add_argument("--from-file")
+    csp.set_defaults(fn=cmd_cert_scan)
+
+    vtp = sub.add_parser("vuln-triage")
+    vtp.add_argument("--report", required=True)
+    vtp.add_argument("--from-file")
+    vtp.set_defaults(fn=cmd_vuln_triage)
 
     args = ap.parse_args()
     return args.fn(args)

@@ -218,3 +218,23 @@ R-6 关闭 / R-7 已裁决待实施(T-3) / F-1~F-9 全部关闭。
 证据分级流水线、attest 骨架、**导航档运行时 CLI + 症状匹配**。
 产品已具备最小可演示形态（diagnose → run → 简报 → attest 提示）。
 下一个产品级里程碑是 **IM 渠道接入**（留存的生命线，docs/01 §2）与 **Skills Hub 雏形**。
+
+## R-8 (U-3) proc 纯生成域挤进 Diagnostic 决策树 schema——可用但不理想，待 Fable 定夺
+
+- **发现于**：U-3 生成 proc 域（变更单/故障报告/交接摘要）。
+- **背景**：Fable 预判"proc 纯生成类可能挑战 schema，表达不了就记 REVIEW-QUEUE"。实测结论：
+  **能表达，但是借道**。关键约束两条：
+  1. `tree` 是 schema 顶层 required——纯生成 Skill 也必须有一棵树，无法只有"输入 + 模板"。
+  2. `ask` 节点是**多选分支**（options + goto），不是自由文本采集。自由文本靠 `metadata.params
+     (source:user)` 承接，done.summary 用 `{{param}}` 渲染。
+- **我的处理（未硬凑，反而找到合理形态）**：把 proc 建成"params 采集自由文本 + 一个**真实决策**
+  路由到不同模板"——change=风险级→审批链、incident=SEV 级→报告详尽度、handover=有无活跃故障→
+  交接要求。这个分支是有语义的（SEV1 报告≠SEV3），不是为凑树而凑。三个已 sim_verified。
+- **但仍有别扭处**，留给 Fable 判断是否值得演进 schema：
+  1. proc 借用 `kind: Diagnostic` 名不副实（它不诊断）。是否加 `kind: Playbook`/`Generator`？
+  2. 生成类没有 discovery/check，`connectors: [human]` 是我造的占位值（schema 只要求非空数组）——
+     是否应有正式的"无连接器/人工"枚举？
+  3. 多行模板塞在 done.summary 的单个字符串里，可读性差。是否给终态一个 `artifact:` 块
+     （带 `template` 字段）比塞进 summary 更合适？
+- **不阻断**：当前形态可用、已验证、已交付 3 个。以上是"要不要为 proc 演进 schema"的设计问题，
+  纯属 Fable 职权（我不改 schema）。若维持现状，我把这套 proc 写法补进 docs/07 作为规范即可。

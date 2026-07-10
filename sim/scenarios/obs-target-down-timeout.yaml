@@ -1,0 +1,10 @@
+skill: skills/obs/target-down/skill.yaml
+scenario: 抓取超时
+expect_path:
+- read_target
+- timeout_exit
+node_ctx:
+  read_target:
+    up: 0
+    last_error_conn_refused: 0
+    last_error_timeout: 1

@@ -1,0 +1,12 @@
+skill: skills/sec/cert-expiry-inventory/skill.yaml
+scenario: 30天内到期
+expect_path:
+- scan_certs
+- plan_exit
+node_ctx:
+  scan_certs:
+    expired_count: 0
+    expiring_7d_count: 0
+    expiring_30d_count: 1
+    total_certs: 3
+    min_days_left: 20

@@ -1,0 +1,10 @@
+skill: skills/obs/incident-timeline/skill.yaml
+scenario: 以首告警起点
+expect_path:
+- gather_events
+- alert_first_exit
+node_ctx:
+  gather_events:
+    has_deploy_near_start: 0
+    alert_events: 4
+    deploy_events: 0

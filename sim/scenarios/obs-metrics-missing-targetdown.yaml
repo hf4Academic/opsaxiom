@@ -1,0 +1,8 @@
+skill: skills/obs/metrics-missing/skill.yaml
+scenario: target down 致缺失
+expect_path:
+- classify_missing
+- target_down_exit
+node_ctx:
+  classify_missing:
+    target_up: 0

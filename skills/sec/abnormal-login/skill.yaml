@@ -1,0 +1,50 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: sec.access.abnormal-login
+  name: 异常登录排查
+  taxonomy: sec/access/abnormal-login
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{os: linux}]
+  params:
+    - {name: host, source: alert, desc: 节点}
+    - {name: window, source: user, desc: 排查时间窗}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [ssh]
+discovery:
+  - id: logins
+    run: {ssh: "opsaxiom-collect auth --host {{host}} --window {{window}} --accepted"}
+    parser: sec/login-v1
+tree:
+  entry: scan_logins
+  nodes:
+    - id: scan_logins
+      type: check
+      title: 扫描成功登录的可疑特征
+      run: {ssh: "opsaxiom-collect auth --host {{host}} --window {{window}} --accepted"}
+      parser: sec/login-v1
+      branch:
+        - {when: "root_login_count > 0 and new_ip_count > 0", goto: root_newip_exit}
+        - {when: "new_ip_count > 0", goto: newip_exit}
+        - {when: "offhours_login_count > 0", goto: offhours_exit}
+        - {when: "accepted_count > 0", goto: normal_exit}
+      otherwise: escalate
+      cautions:
+        - "异常登录看三个维度：来源 IP 是否首次出现、是否直接 root 登录、是否非工作时段——单看登录成功数无意义"
+        - "只诊断不封禁：确认可疑后走应急响应流程(改密/查横向移动/取证)，别在排查阶段直接改防火墙或杀会话踩到正常运维"
+        - "先区分是运维正常操作还是入侵：跟机主/值班核对是不是本人，避免把跳板机新 IP 当攻击"
+    - {id: root_newip_exit, type: escalate, summary: "高危：检测到 root 从新 IP 直接登录成功。疑似凭据泄露或入侵。立即：与责任人核实是否本人操作；若非，按应急响应处置(隔离会话、改密、查该 IP 的横向移动与落地文件、保留 /var/log 取证)。已生成疑似入侵处置清单。"}
+    - {id: newip_exit, type: done, summary: "检测到来自新 IP 的成功登录({{output.new_ip_count}} 个新源)。方向：与责任人核实来源是否可信(新办公网/新跳板机 vs 陌生地址)；确认非本人则按可疑登录升级。记录源 IP、账号、时间。"}
+    - {id: offhours_exit, type: done, summary: "存在非工作时段登录。多数是值班/自动化任务，但需与登录账号责任人核对确属预期。若无法解释，按可疑处理并结合来源 IP 进一步判断。"}
+    - {id: normal_exit, type: done, summary: "成功登录未见新 IP/root 直登/异常时段特征，暂无明显异常。仍可留存本次基线(常见来源 IP 集合)供后续对比。"}
+    - {id: escalate, type: escalate, summary: "打包升级：窗口内成功登录数、去重来源 IP、新 IP 列表、root 登录次数、非工作时段登录，供安全团队研判。"}
+tests:
+  - {scenario: tests/root-newip.yaml, expect_path: [scan_logins, root_newip_exit]}
+  - {scenario: tests/normal.yaml, expect_path: [scan_logins, normal_exit]}
+feedback: {ask: 异常登录研判清楚了吗？}

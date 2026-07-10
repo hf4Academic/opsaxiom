@@ -1,0 +1,52 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: sec.access.bruteforce
+  name: 暴力破解排查
+  taxonomy: sec/access/bruteforce
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{os: linux}]
+  params:
+    - {name: host, source: alert, desc: 节点}
+    - {name: window, source: user, desc: 排查时间窗}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [ssh]
+discovery:
+  - id: fails
+    run: {ssh: "opsaxiom-collect auth --host {{host}} --window {{window}} --failed"}
+    parser: sec/authfail-v1
+tree:
+  entry: assess_fails
+  nodes:
+    - id: assess_fails
+      type: check
+      title: 评估失败登录规模与是否已被攻破
+      run: {ssh: "opsaxiom-collect auth --host {{host}} --window {{window}} --failed"}
+      parser: sec/authfail-v1
+      branch:
+        - {when: "succeeded_after_fail > 0", goto: breach_suspect_exit}
+        - {when: "top_src_fail_count > 100", goto: single_src_exit}
+        - {when: "failed_count > 100", goto: distributed_exit}
+        - {when: "failed_count > 0", goto: low_exit}
+        - {when: "failed_count == 0", goto: none_exit}
+      otherwise: escalate
+      cautions:
+        - "暴破排查第一优先级不是'失败多少'，而是'失败之后有没有成功登录'——有成功=可能已被攻破，性质完全不同，先按入侵处置"
+        - "单 IP 高频 vs 多 IP 分布式，处置不同：单 IP 可 fail2ban/封源；分布式需限流+强认证(禁密码登录、强制密钥/MFA)"
+        - "只诊断与出方案，封 IP/改 sshd 属变更，需人工确认后执行，别在排查阶段动防火墙误伤正常访问"
+    - {id: breach_suspect_exit, type: escalate, summary: "高危：大量失败登录后出现成功登录，疑似暴破得手。立即按应急响应：核实该成功登录是否本人；若非，隔离会话、禁用/改密该账号、排查横向移动与持久化(crontab/authorized_keys/新用户)、保留日志取证。已生成疑似入侵处置清单。"}
+    - {id: single_src_exit, type: done, summary: "单一来源 IP 高频失败({{output.top_src_fail_count}} 次)，典型单点暴破且尚未得手。方向：对该源 IP 做封禁(fail2ban/防火墙，需确认非误伤)、核查该账号是否弱口令、开启失败锁定策略。封禁属变更，人工确认后执行。"}
+    - {id: distributed_exit, type: done, summary: "失败量大({{output.failed_count}})且来源分散，属分布式暴破/扫描。单纯封 IP 收效有限。方向：禁用密码登录改密钥、上 MFA、限制 SSH 暴露面(改端口/加跳板/安全组白名单)、启用登录限速。"}
+    - {id: low_exit, type: done, summary: "少量失败登录，多为用户输错密码或探测噪声，暂无暴破特征。留意是否持续增长，必要时纳入基线告警。"}
+    - {id: none_exit, type: done, summary: "窗口内无失败登录记录。若告警来自其它源，核对日志采集是否完整、时间窗是否正确。"}
+    - {id: escalate, type: escalate, summary: "打包升级：失败登录总数、去重来源 IP、top 源失败次数、是否有暴破后成功登录，供安全团队研判。"}
+tests:
+  - {scenario: tests/breach.yaml, expect_path: [assess_fails, breach_suspect_exit]}
+  - {scenario: tests/single-src.yaml, expect_path: [assess_fails, single_src_exit]}
+feedback: {ask: 暴破排查与处置方向清楚了吗？}

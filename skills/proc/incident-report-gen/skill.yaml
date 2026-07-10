@@ -1,0 +1,44 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: proc.incident.report-gen
+  name: 故障报告生成
+  taxonomy: proc/incident/report-gen
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{scope: process}]
+  params:
+    - {name: incident_summary, source: user, desc: 故障一句话概述}
+    - {name: impact, source: user, desc: 影响范围与时长}
+    - {name: root_cause, source: user, desc: 根因（已知则填）}
+    - {name: timeline_ref, source: user, desc: 时间线来源/链接}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [human]
+tree:
+  entry: pick_severity
+  nodes:
+    - id: pick_severity
+      type: ask
+      title: 确定故障级别
+      question: "这次故障的级别？（决定报告的详尽度与受众）"
+      binds: severity
+      options:
+        - {label: SEV1（核心业务中断/大面积影响）, goto: sev1_exit}
+        - {label: SEV2（部分功能受损/有降级）, goto: sev2_exit}
+        - {label: SEV3（局部/无用户可感影响）, goto: sev3_exit}
+      cautions:
+        - "报告面向复盘改进而非追责：时间线写事实、根因写系统性原因(为什么没早发现/为什么能发生)，别写成某个人背锅"
+        - "根因未定时不要硬写结论——标注'待定'并列出下一步调查项，比编一个似是而非的根因诚实且有用"
+        - "action item 要可跟踪：有 owner、有截止、可验证，否则复盘等于没开"
+    - {id: sev1_exit, type: done, summary: "【故障报告·SEV1】\n# 概述\n{{incident_summary}}\n# 影响\n{{impact}}\n# 根因\n{{root_cause}}\n# 时间线\n见 {{timeline_ref}}（转 obs/oncall/incident-timeline 生成）\n# 需包含（SEV1 全量）\n- 面向管理层的执行摘要（影响量化：受影响用户/收入/时长）\n- 检测与响应耗时（MTTD/MTTR）\n- 系统性根因（5 Whys）\n- 改进项（防复发 + 加快检测 + 加快恢复，各带 owner/截止/验证方式）\n- 复盘会议纪要链接。"}
+    - {id: sev2_exit, type: done, summary: "【故障报告·SEV2】\n# 概述\n{{incident_summary}}\n# 影响\n{{impact}}\n# 根因\n{{root_cause}}\n# 时间线\n见 {{timeline_ref}}\n# 需包含\n- 影响范围与降级表现\n- 根因与触发条件\n- 处置过程关键节点\n- 改进项（至少覆盖防复发，带 owner/截止）。"}
+    - {id: sev3_exit, type: done, summary: "【故障报告·SEV3】\n# 概述\n{{incident_summary}}\n# 影响\n{{impact}}\n# 根因\n{{root_cause}}\n# 时间线\n见 {{timeline_ref}}\n# 需包含（精简）\n- 现象与影响（说明为何用户无感/局部）\n- 根因与处置\n- 是否需改进项（可只登记不开会）。"}
+tests:
+  - {scenario: tests/sev1.yaml, expect_path: [pick_severity, sev1_exit]}
+  - {scenario: tests/sev3.yaml, expect_path: [pick_severity, sev3_exit]}
+feedback: {ask: 故障报告骨架可用吗？}

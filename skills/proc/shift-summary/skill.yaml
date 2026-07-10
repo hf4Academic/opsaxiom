@@ -1,0 +1,40 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: proc.handover.shift-summary
+  name: 值班交接摘要生成
+  taxonomy: proc/handover/shift-summary
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{scope: process}]
+  params:
+    - {name: open_incidents, source: user, desc: 未闭环故障/工单}
+    - {name: watch_items, source: user, desc: 需持续观察项}
+    - {name: pending_changes, source: user, desc: 待执行/进行中变更}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [human]
+tree:
+  entry: pick_state
+  nodes:
+    - id: pick_state
+      type: ask
+      title: 交接时的在线状态
+      question: "交接时是否有正在处置的活跃故障？"
+      binds: state
+      options:
+        - {label: 有活跃故障正在处置, goto: active_exit}
+        - {label: 无活跃故障（常规交接）, goto: routine_exit}
+      cautions:
+        - "交接最容易丢的是'隐性上下文'：临时规避措施(还没回滚的应急改动)、正在观察但没告警的苗头、答应了别人要跟的事——这些不写下来就断在你这一班"
+        - "有活跃故障必须口头 + 书面双交接，并明确'现在谁是 owner'，避免交接窗口无人负责"
+    - {id: active_exit, type: done, summary: "【交班摘要·含活跃故障】\n## ⚠ 活跃故障（需立即接手）\n{{open_incidents}}\n- 当前处置人/下一步、已采取的临时措施（是否待回滚）、升级联系人\n## 观察项\n{{watch_items}}\n## 进行中/待执行变更\n{{pending_changes}}\n## 交接确认\n- 口头同步完成 ✓　接班人已确认成为 owner ✓　应急联系人已知会。"}
+    - {id: routine_exit, type: done, summary: "【交班摘要·常规】\n## 未闭环事项\n{{open_incidents}}\n## 观察项（有苗头未告警的也要写）\n{{watch_items}}\n## 进行中/待执行变更\n{{pending_changes}}\n## 备注\n- 临时规避措施是否有未回滚的、答应他人要跟进的事项。\n## 交接确认\n- 接班人已阅并确认。"}
+tests:
+  - {scenario: tests/active.yaml, expect_path: [pick_state, active_exit]}
+  - {scenario: tests/routine.yaml, expect_path: [pick_state, routine_exit]}
+feedback: {ask: 交接摘要够接班人无缝接手吗？}
