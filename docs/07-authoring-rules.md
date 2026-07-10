@@ -79,6 +79,10 @@
 3. 每个 action：回滚真能执行吗（非空转）？verify.assert 真能判吗？
 4. 每条路径都能到终点吗？escalate 可达吗？
 5. 有 action 的，配套写 tests 场景（P-5 起要求可执行 sim）。
+6. **引用 `opsaxiom-*` 自研工具的命令，该工具必须已存在或在同轮任务中排期**
+   （F-6 agent-deploy→deploy、F-11 slow-node/gpu-util-low→collect，同型两次）。
+   生成引用未落地工具的 Skill = 埋一个"真实模式一跑就 command not found"的雷。
+   核对：`ls tools/bin/opsaxiom-<name>` 存在，或该工具是本轮 TODO 的条目。
 
 ---
 （本文件随每轮评审增补。新教训 → 新条目 → 下一轮生成 prompt。）

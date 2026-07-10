@@ -56,6 +56,8 @@ def registered_names():
 from . import table   # noqa: E402
 from . import health  # noqa: E402
 from . import mw      # noqa: E402
+from . import train   # noqa: E402
 table.install(register)
 health.install(register)
 mw.install(register)
+train.install(register)

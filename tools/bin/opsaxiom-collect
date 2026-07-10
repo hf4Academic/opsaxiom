@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""
+opsaxiom-collect —— 训练侧指标采集器（aicomp slow-node / gpu-util-low 依赖，U-2）。
+
+对齐 deploy/quarantine 的品质：确定性、可测、诚实标注数据来源。
+它把"需要跨节点聚合/需要 profiler 才能拿到"的训练指标，统一成结构化 JSON 输出，
+供 train/* 解析器转成决策树能判的标量。真实环境从 profiler/DCGM/Prometheus 取数；
+本骨架给两条可测路径：
+
+  --from-file <json>   从预置指标文件读取（真实集成点 / 测试注入）。
+  （默认）             按输入派生一份**确定性 mock**（无随机，同输入同输出），
+                       stderr 显式标注"mock 数据"，绝不冒充真实采集。
+
+子命令（与 Skill 里的 run 命令逐字对应）：
+  step-time    --job <job>                 各节点 step 耗时 → {max_step_ms, median_step_ms, rows[]}
+  node-metrics --job <job> --node <node>   慢节点细分 → {gpu_clock_throttled, ib_rate_degraded,
+                                                        data_wait_ms, median_step_ms}
+  gpu-trace    --pid <pid>                  GPU 时间构成 → {comm_time_pct, small_kernel_pct}
+
+输出恒为单行 JSON（train/*-v1 解析器直接 json.loads）。
+"""
+import argparse
+import hashlib
+import json
+import pathlib
+import sys
+
+
+def _seed(*parts):
+    """把输入映射到一个稳定的 [0,1) 伪随机数——确定性，供 mock 生成可复现样本。"""
+    h = hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest()
+    return int(h[:8], 16) / 0xFFFFFFFF
+
+
+def _load(args, builder):
+    if args.from_file:
+        data = json.loads(pathlib.Path(args.from_file).read_text(encoding="utf-8"))
+        return data
+    print("opsaxiom-collect: 使用确定性 mock 数据（非真实采集；生产接 profiler/DCGM/Prometheus）",
+          file=sys.stderr)
+    return builder()
+
+
+def cmd_step_time(args):
+    def mock():
+        # 8 节点，基线 100ms；据 job 决定是否注入一个慢节点
+        base = 100
+        r = _seed(args.job, "straggler")
+        rows = [{"node": f"node{i}", "step_ms": base + int(_seed(args.job, i) * 15)}
+                for i in range(8)]
+        if r > 0.5:                       # 一半 job 有慢节点
+            rows[3]["step_ms"] = int(base * (1.5 + r))   # 明确超 1.3×
+        steps = sorted(x["step_ms"] for x in rows)
+        median = steps[len(steps) // 2]
+        return {"rows": rows, "max_step_ms": max(steps), "median_step_ms": median}
+    print(json.dumps(_load(args, mock), ensure_ascii=False))
+    return 0
+
+
+def cmd_node_metrics(args):
+    def mock():
+        r = _seed(args.job, args.node, "cause")
+        thr, ib, dw = 0, 0, 10
+        if r < 0.34:
+            thr = 1
+        elif r < 0.67:
+            ib = 1
+        else:
+            dw = 45                       # data_wait 占 median 的 >30%
+        return {"gpu_clock_throttled": thr, "ib_rate_degraded": ib,
+                "data_wait_ms": dw, "median_step_ms": 100}
+    print(json.dumps(_load(args, mock), ensure_ascii=False))
+    return 0
+
+
+def cmd_gpu_trace(args):
+    def mock():
+        r = _seed(args.pid, "trace")
+        comm = int(_seed(args.pid, "comm") * 60)
+        small = int(_seed(args.pid, "small") * 60)
+        if r < 0.5:
+            comm = 45                     # 通信瓶颈
+        else:
+            small = 45                    # 小核瓶颈
+        return {"comm_time_pct": comm, "small_kernel_pct": small}
+    print(json.dumps(_load(args, mock), ensure_ascii=False))
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="opsaxiom-collect")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    sp = sub.add_parser("step-time")
+    sp.add_argument("--job", required=True)
+    sp.add_argument("--from-file")
+    sp.set_defaults(fn=cmd_step_time)
+
+    np_ = sub.add_parser("node-metrics")
+    np_.add_argument("--job", required=True)
+    np_.add_argument("--node", required=True)
+    np_.add_argument("--from-file")
+    np_.set_defaults(fn=cmd_node_metrics)
+
+    gp = sub.add_parser("gpu-trace")
+    gp.add_argument("--pid", required=True)
+    gp.add_argument("--from-file")
+    gp.set_defaults(fn=cmd_gpu_trace)
+
+    args = ap.parse_args()
+    return args.fn(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

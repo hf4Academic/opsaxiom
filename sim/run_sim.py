@@ -44,7 +44,9 @@ def _load_skill(path):
 # ---- 真实靶机执行器 v1（Q-3）：本地沙箱、只读命令白名单 ----
 _ALLOW_LEAD = {"cat", "df", "du", "free", "ps", "ss", "uptime", "nproc", "vmstat",
                "iostat", "mpstat", "lsof", "findmnt", "systemctl", "dmesg",
-               "journalctl", "ip", "ls", "find", "for", "echo", "grep", "true"}
+               "journalctl", "ip", "ls", "find", "for", "echo", "grep", "true",
+               # 自研只读采集器（U-2）：只读指标，无副作用
+               "opsaxiom-collect", "nvidia-smi"}
 _DENY = re.compile(r"\b(rm|mv|cp|dd|mkfs\w*|reboot|shutdown|kill|pkill|tee|truncate|chmod|chown)\b|>\s*/(?!dev/null)")
 
 
