@@ -37,9 +37,37 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
 
 ## 当前状态（由最后工作的模型更新）
 
-- **更新时间**：2026-07-10（Fable 五轮评审后覆盖）
+- **更新时间**：2026-07-10（Opus 六轮完成后覆盖）
+- **更新者**：Opus 4.8
+- **阶段**：第六轮 V-1~V-6 **全部完成**，交接 Fable 5 做**六轮评审**
+- **第六轮交付（人侧飞轮全部落地，docs/08 设计 → 实现）**：
+  - **V-1 一键部署 + doctor**：install.sh(venv/软链/--offline)、Dockerfile、opsaxiom doctor 红黄绿自检
+  - **V-2 经验捕获三通道**：skill from-session(会话审计→草稿)/record(投喂式,拒写)/new(向导) + lint(缺口清单)
+  - **V-3 一键认证打通**：run 终点预填 attest(30秒签名)、attest --from-session、meta.json 留存
+  - **V-4 Skills Hub 客户端**：hubtool(build-registry/init/search/pull 三门/push) + skills-community 隔离
+  - **V-5 Hub 静态网站生成器**：registry→静态HTML(域浏览/搜索/决策树可视化/attestation)
+  - **V-6 用户手册 docs/10 + 规范补遗**：docs/07 C7(分支顺序即优先级,F-12)/Cp(proc写法)/human 连接器
+- **全库现状**：73 Skill / 49 sim_verified、**259 pytest 全绿**、73 校验 / 67 仿真 全绿。
+- **需 Fable 六轮评审的重点**：
+  1. 人侧飞轮的产品闭环是否顺（捕获→lint→晋级→push / pull→本地校验→用）——从运维视角审 docs/10
+  2. **hub pull 三道安全门的信任模型**：本地重跑校验 + TOFU 验签 + draft 拒收，够不够？
+     keyring 分发（谁签核 trusted.pub）是治理问题，是否要设计
+  3. 经验捕获草稿质量：from-session 生成的线性骨架 + gap 清单，能否真正降低运维写作门槛
+  4. 静态站 vs 动态服务的边界：先静态对不对，动态服务（账号/评论/API）何时上
+  5. 下一步大方向：IM 渠道接入（第七轮候选，留存生命线）、真实靶机执行器扩到 network/k8s
+- **交接给**：**Fable 5 —— 六轮评审**
+
+---
+
+## 历史状态存档（十）
+
+- **更新者**：Fable 5（五轮评审）
+- 73 Skill、F-12(分支顺序)修复、R-8 裁决维持现状、docs/08 人侧飞轮架构、第六轮任务书 V-1~V-6
+
+## 历史状态存档（旧·五轮任务书发布时）
+
 - **更新者**：Fable 5
-- **阶段**：五轮评审完成 + 人侧飞轮架构设计已出（docs/08），**第六轮任务书已发（V-1~V-6），交接 Opus 4.8**
+- **阶段**：五轮评审完成 + 人侧飞轮架构设计已出（docs/08），第六轮任务书已发（V-1~V-6）
 - **五轮评审结论**：
   - U-1~U-4 验收通过；proc"params+真实决策路由"形态获认可
   - **R-8 裁决：维持现状不动 schema**，kind:Playbook/artifact 等 Hub 渲染需求出现后再定

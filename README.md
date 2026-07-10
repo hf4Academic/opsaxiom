@@ -45,7 +45,10 @@
 - **运行时 CLI 已落地（导航档 MVP）**：`opsaxiom diagnose "<症状>"` 匹配 Skill，
   `opsaxiom run <id>` 逐步指导排查/变更（Agent 只出方案与变更简报，写操作由你亲自执行），
   支持 `--resume` 断点续跑、变更节点 skip/升级/退出多选。
-- 经五轮"Opus 生成 / Fable 对抗评审"迭代，累计沉淀 10+ 条生成规范教训（docs/07）。
+- **人侧飞轮已打通**（docs/08、docs/10）：一键部署（`install.sh`/docker/离线包）+ `doctor` 自检；
+  经验捕获三通道（`skill from-session`/`record`/`skill new`）把日常排查变 Skill 草稿；
+  排查终点一键认证（30 秒签名沉淀）；**Skills Hub**（`hub pull` 三道安全门 / `hub push` / 静态站生成器）。
+- 经六轮"Opus 生成 / Fable 对抗评审"迭代，累计沉淀 11+ 条生成规范教训（docs/07）。
 
 ## 试一下运行时（导航档）
 
