@@ -5,3 +5,5 @@ __pycache__/
 vendor/wheels/
 # 经验捕获的本地草稿（作者补全后另存入 skills/，草稿本身不入库）
 skills-drafts/
+# Hub 拉取的社区 Skill（与本地 skills/ 隔离，不入本仓库）
+skills-community/

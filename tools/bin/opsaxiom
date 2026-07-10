@@ -97,6 +97,11 @@ def main():
         add_capture(sub)
     except Exception:
         pass
+    try:
+        from hub_cli import add_hub  # V-4
+        add_hub(sub)
+    except Exception:
+        pass
     args = ap.parse_args()
     return args.fn(args)
 
