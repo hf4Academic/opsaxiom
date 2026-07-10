@@ -224,6 +224,11 @@ def main():
     r = run(skill_path, args.scenario)
     print(f"场景: {sc.get('scenario')}")
     print(f"走过路径: {' -> '.join(r['path'])}")
+    if sc.get("mode") == "real":
+        print(f"证据: {r['evidence']}  终止: {'✔' if r['completed'] else '✘'}")
+        for nt in r["notes"]:
+            print(f"  · {nt}")
+        return 0 if r["completed"] else 1
     print(f"期望路径: {' -> '.join(r['expect'] or [])}")
     print(f"路径匹配: {'✔' if r['path_ok'] else '✘'}")
     if r["rollback_ok"] is not None:

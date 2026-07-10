@@ -35,7 +35,10 @@
 ## Q-6 收尾：HANDOFF + 提醒切回 Fable 三轮评审
 
 进度勾选区（Opus 更新）：
-- [ ] Q-1  - [ ] Q-2  - [ ] Q-3  - [ ] Q-4  - [ ] Q-5  - [ ] Q-6
+- [x] Q-1  - [x] Q-2  - [x] Q-3  - [x] Q-4  - [x] Q-5  - [x] Q-6
+
+全部完成。51 Skill(host20/k8s10/network11/middleware10)、27 sim_verified、
+校验 51/51、pytest 160/160、仿真 32/32 全绿。新缺口 R-7、F-9(留 Fable)。
 
 ---
 

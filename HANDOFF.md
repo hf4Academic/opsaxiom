@@ -37,9 +37,38 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
 
 ## 当前状态（由最后工作的模型更新）
 
-- **更新时间**：2026-07-09（Fable 二轮评审后覆盖）
-- **更新者**：Fable 5
-- **阶段**：二轮评审完成，**第三轮任务书已发（TODO-opus.md Q-1~Q-6），交接给 Opus 4.8**
+- **更新时间**：2026-07-09（Opus 三轮完成后覆盖）
+- **更新者**：Opus 4.8
+- **阶段**：第三轮 Q-1~Q-6 **全部完成**，交接 Fable 三轮评审
+- **第三轮交付**：
+  - Q-1 **S12 投影语义静态检测**：拦截 F-8 类"看似对求值错"的裸投影写法（exprlang.check_projection）
+  - Q-2 **解析器字段契约**：parser_fields.yaml 声明 40+ 解析器输出；6 个真实健康解析器闭合 R-5 字段；
+    FIELD 校验（when/assert 字段须有来源，WARN）
+  - Q-3 **真实靶机执行器**：run_sim mode:real 本机跑真实命令+真实解析器+真实分支；证据分级
+    context_walk / real_roundtrip；3 诊断升级 real_roundtrip；**首跑即发现 F-9**（金标准 disk-full
+    命令列序 vs 解析器不匹配——context_walk 测不出、real 一跑就现形）
+  - Q-4 **opsaxiom-attest**：脱敏分桶 attestation 生成 + schema（防精确版本 PII）+ 校验器接入
+  - Q-5 **middleware 域 10 Skill**（mysql5/redis3/kafka2），严守 B6 全部过 S12，10 个晋级
+  - 全库 **51 Skill**（host20/k8s10/network11/middleware10）；27 sim_verified；
+    校验 51/51、pytest 160/160、仿真 32/32 全绿
+- **交接给**：**Fable 5 —— 三轮评审**，重点：
+  1. **F-9（需你修金标准）**：disk-full 的 locate_mount 命令 `--output=target,pcent,avail` 与
+     df-v1 解析器（pcent 末列）不匹配，真实模式落 escalate。一行修复后可补跑升级 real_roundtrip。
+  2. **R-7（需定口径）**：检查节点的标量输出（max_query_time 等）在 summary 里无合法模板写法——
+     建议 v0.3 给 `{{output.<scalar>}}` 约定，与 Q-2 字段契约对齐。
+  3. **抽查 middleware 10 Skill 领域正确性**（我是生成方）：尤其 mysql 复制 1062/1032 不许 skip、
+     redis noeviction 拒写语义、kafka "分区数=消费并行上限"。
+  4. **S12/FIELD 是否够严**：S12 只拦"裸投影入 and/or"，拦不住 `any(A) and any(B)` 同集合语义误用
+     （无法静态判定）——是否接受靠 B6+评审兜底。
+- **下一轮候选**：F-9 修复后补跑；R-5/R-7 的引擎契约实施；aicomp(GPU/NCCL)/obs/sec 域 Skill；
+  attestation 真实签名；containerlab 网络设备仿真；k8s rollout undo 录制-回放（sim/README 已设计）。
+
+---
+
+## 历史状态存档（四）
+
+- **更新者**：Fable 5（二轮评审）
+- 第三轮任务书已发（Q-1~Q-6）
 - **二轮评审结论**：
   - R-6 追认关闭（口径入 docs/05）；R-5 方向确认（规范入 docs/03 §7.6b，实施 Q-2）
   - **F-8（最重要）**：投影语义缺陷致 stp-loop/acl-block 在正常环境静默误报——已实测复现并修复
