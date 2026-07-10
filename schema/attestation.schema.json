@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opsaxiom.dev/schema/attestation-v0.1.json",
+  "title": "OpsAxiom Attestation v0.1",
+  "description": "实地验证记录（docs/05 §2）。env_fingerprint 只允许分桶字段，防止标识性数据泄漏。",
+  "type": "object",
+  "required": ["skill", "skill_version", "outcome", "mode", "env_fingerprint", "rollback_exercised", "attestor", "signature"],
+  "additionalProperties": false,
+  "properties": {
+    "skill": {"type": "string", "pattern": "^[a-z0-9]+(\\.[a-z0-9-]+)+$"},
+    "skill_version": {"type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$"},
+    "outcome": {"enum": ["resolved", "partial", "failed", "made_worse"]},
+    "mode": {"enum": ["navigator", "copilot", "autopilot"]},
+    "env_fingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "os": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "family": {"type": "string"},
+            "version_bucket": {"type": "string", "pattern": "^(\\d+\\.x|unknown)$"}
+          }
+        },
+        "scale_bucket": {"type": "string"}
+      }
+    },
+    "deviations": {"type": "array", "items": {"type": "string"}},
+    "rollback_exercised": {"type": "boolean"},
+    "attestor": {"type": "string"},
+    "signature": {"type": "string"}
+  }
+}

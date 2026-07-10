@@ -27,6 +27,7 @@ from jsonschema import Draft202012Validator
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
 SCHEMA_PATH = ROOT / "schema" / "skill.schema.json"
+ATT_SCHEMA_PATH = ROOT / "schema" / "attestation.schema.json"
 
 sys.path.insert(0, str(HERE))
 import exprlang            # noqa: E402
@@ -394,6 +395,37 @@ def validate_skill(skill, label="<dict>", schema_validator=None):
     return rep
 
 
+_ATT_VALIDATOR = None
+
+
+def _att_validator():
+    global _ATT_VALIDATOR
+    if _ATT_VALIDATOR is None:
+        try:
+            _ATT_VALIDATOR = Draft202012Validator(json.loads(ATT_SCHEMA_PATH.read_text(encoding="utf-8")))
+        except Exception:
+            _ATT_VALIDATOR = False
+    return _ATT_VALIDATOR
+
+
+def _validate_attestations(skill_dir, rep):
+    adir = skill_dir / "attestations"
+    if not adir.is_dir():
+        return
+    av = _att_validator()
+    if not av:
+        return
+    for af in sorted(adir.glob("*.yaml")):
+        try:
+            att = yaml.safe_load(af.read_text(encoding="utf-8"))
+        except Exception as e:
+            rep.add(ERROR, "ATTEST", f"{af.name} 解析失败：{e}")
+            continue
+        for err in av.iter_errors(att):
+            loc = "/".join(str(p) for p in err.path) or "<root>"
+            rep.add(ERROR, "ATTEST", f"{af.name} {loc}: {err.message}")
+
+
 def validate_file(path, schema_validator):
     path = path.resolve()
     try:
@@ -406,7 +438,9 @@ def validate_file(path, schema_validator):
         rep = Report(label)
         rep.add(ERROR, "YAML", f"解析失败：{e}")
         return rep
-    return validate_skill(skill, label, schema_validator)
+    rep = validate_skill(skill, label, schema_validator)
+    _validate_attestations(path.parent, rep)
+    return rep
 
 
 def main():
