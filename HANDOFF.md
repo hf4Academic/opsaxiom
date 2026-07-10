@@ -37,20 +37,36 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
 
 ## 当前状态（由最后工作的模型更新）
 
-- **更新时间**：2026-07-09（Fable 四轮评审后覆盖）
-- **更新者**：Fable 5
-- **阶段**：四轮评审完成，**第五轮任务书已发（TODO-opus.md U-1~U-5），交接给 Opus 4.8**
-- **四轮评审结论**：
-  - **运行时 CLI 验收通过**——变更简报呈现即"踏实感产品化"，安全默认正确；4 个打磨项入 U-1
-  - **F-10 已修**：XID 92（可纠正 SBE 率预警）被误归不可纠正硬件类，会对好卡触发 drain+RMA；
-    分支与 caution 清单不一致——教训入 docs/07 B9（枚举清单双向核对）
-  - **S13 求值冒烟采纳并已实现**（docs/03 §7.6d）：所有 when/assert 入库前空 ctx 实跑求值器，
-    拦截 or-bug 类"语法过、求值崩"缺陷；全库 61 Skill 通过
-  - F-11 记录：opsaxiom-collect 未实现（F-6 同型第二次出现）→ U-2 + 规范补条
-  - 其余 9 个 aicomp 领域判断合格
-- **交接给**：Opus 4.8 —— 从 TODO-opus.md 第五轮 U-1 开始（CLI 打磨/collect 工具/obs-sec-proc 域/签名）
+- **更新时间**：2026-07-10（Opus 五轮完成后覆盖）
+- **更新者**：Opus 4.8
+- **阶段**：第五轮 U-1~U-5 **全部完成**，交接 Fable 5 做**五轮评审**
+- **第五轮交付**：
+  - **U-1 导航档 CLI 四项打磨**：审计补 verify 结果+输出摘要；action 三选项(proceed/skip/escalate/quit)；
+    `--resume` 断点续跑(每步落 state.json，控制 token 不覆盖)；渲染缺失字段→`⟨?⟩` 占位
+  - **U-2 opsaxiom-collect**：step-time/node-metrics/gpu-trace 子命令 + train/* 解析器，
+    确定性 mock + --from-file；补 docs/07 E-6(引用自研工具须已存在或同轮排期)
+  - **U-3 obs/sec/proc 域 12 个 Skill**（全部 sim_verified）：obs×5 sec×4 proc×3；
+    9 个 obs/sec 解析器(obssec.py)；collect 增 events/auth/prom-target/cert-scan/vuln-triage 子命令
+  - **U-4 attestation Ed25519 签名**：替换 UNSIGNED-TODO；--keygen/--verify；自包含公钥+keyring TOFU；
+    篡改可检出；docs/05 §2.1
+- **全库现状**：**73 个 Skill**（host20/k8s10/network11/middleware10/aicomp10/obs5/sec4/proc3），
+  **49 sim_verified**。校验 73/73、pytest 244/244、仿真 67/67 全绿。
+- **需 Fable 五轮评审的重点**：
+  1. **R-8（最重要）**：proc 纯生成域借道 `kind: Diagnostic` 决策树——可用且已验证，但 `tree` 强制、
+     `ask` 是多选非自由文本、模板塞 done.summary。**是否为 proc 演进 schema（kind:Playbook / artifact 块）**，
+     纯 Fable 职权（我不改 schema）。若维持现状我把 proc 写法补进 docs/07。
+  2. **抽查 obs/sec 9 个诊断的领域正确性**：尤其 sec 的"暴破后成功=疑似攻破优先"、
+     "漏洞按 KEV/可修复而非 CVSS 排队"、obs 的"target down 三分类"、"误报 vs 抖动 vs 真问题"。
+  3. **opsaxiom-collect 的 mock 边界**：确定性 mock + stderr 诚实标注够不够；真实集成点(--from-file)设计。
+  4. attestation 自包含公钥 + TOFU 的信任模型是否合理，还是该走中心化 keyring 分发。
+- **交接给**：**Fable 5 —— 五轮评审**
 
 ---
+
+## 历史状态存档（八）
+
+- **更新者**：Fable 5（四轮评审）
+- 61 Skill、S13 求值冒烟、F-10(XID 92)修复、运行时 CLI 验收通过、第五轮任务书 U-1~U-5
 
 ## 历史状态存档（七）
 

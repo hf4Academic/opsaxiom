@@ -37,12 +37,15 @@
 
 ## 项目状态
 
-- **61 个 Skill**（host 20 / k8s 10 / network 11 / middleware 10 / aicomp 10），37 个 `sim_verified`。
-- 完整工具链：校验器（结构 + 语义 S1–S12 + 投影语义 + 字段契约 + 命令语法树）、
-  解析器库、仿真执行器（context_walk + 真实靶机）、maturity 流水线、attestation CLI。
+- **73 个 Skill**（host 20 / k8s 10 / network 11 / middleware 10 / aicomp 10 / obs 5 / sec 4 / proc 3），
+  49 个 `sim_verified`。
+- 完整工具链：校验器（结构 + 语义 S1–S13 + 投影语义 + 字段契约 + 命令语法树）、
+  解析器库、仿真执行器（context_walk + 真实靶机）、maturity 流水线、
+  **Ed25519 签名的 attestation**。
 - **运行时 CLI 已落地（导航档 MVP）**：`opsaxiom diagnose "<症状>"` 匹配 Skill，
-  `opsaxiom run <id>` 逐步指导排查/变更（Agent 只出方案与变更简报，写操作由你亲自执行）。
-- 经四轮"Opus 生成 / Fable 对抗评审"迭代，累计沉淀 9 条生成规范教训（docs/07）。
+  `opsaxiom run <id>` 逐步指导排查/变更（Agent 只出方案与变更简报，写操作由你亲自执行），
+  支持 `--resume` 断点续跑、变更节点 skip/升级/退出多选。
+- 经五轮"Opus 生成 / Fable 对抗评审"迭代，累计沉淀 10+ 条生成规范教训（docs/07）。
 
 ## 试一下运行时（导航档）
 
@@ -58,7 +61,7 @@ python3 tools/bin/opsaxiom run host.storage.capacity.disk-full \
 
 ```bash
 pip install -r tools/requirements.txt
-python3 tools/validate.py skills/            # 校验全部 Skill（结构 + 语义 S1–S12 + 命令语法树）
+python3 tools/validate.py skills/            # 校验全部 Skill（结构 + 语义 S1–S13 + 命令语法树）
 python3 -m pytest tools -q                   # 运行全部测试
 python3 sim/run_sim.py sim/scenarios/disk-full-inode-exhaustion.yaml   # 跑一条仿真场景
 ```
