@@ -1,4 +1,7 @@
+# 运行时/本地产物
+.venv/
 __pycache__/
 *.pyc
-.pytest_cache/
-/var/lib/opsaxiom/
+vendor/wheels/
+# 经验捕获的本地草稿（作者补全后另存入 skills/，草稿本身不入库）
+skills-drafts/

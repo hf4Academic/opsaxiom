@@ -92,6 +92,11 @@ def main():
         add_doctor(sub)
     except Exception:
         pass
+    try:
+        from capture_cli import add_capture  # V-2
+        add_capture(sub)
+    except Exception:
+        pass
     args = ap.parse_args()
     return args.fn(args)
 
