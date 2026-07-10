@@ -25,3 +25,5 @@ def test_scenarios_lookup():
     assert len(promote._scenarios_for(ROOT / "skills/host/disk-full/skill.yaml")) == 3
     assert promote._scenarios_for(ROOT / "skills/host/raid-degraded/skill.yaml") == []
     assert len(promote._scenarios_for(ROOT / "skills/host/agent-deploy/skill.yaml")) == 1
+    # load-high 现有 context + real 两个场景
+    assert len(promote._scenarios_for(ROOT / "skills/host/load-high/skill.yaml")) == 2

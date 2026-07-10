@@ -1,4 +1,0 @@
-skill: skills/host/disk-full/skill.yaml
-scenario: 真实模式：本机 df/du 真跑
-mode: real
-bindings: {mount: /, sid: simreal, threshold: 90}

@@ -14,14 +14,26 @@ import run_sim  # noqa: E402
 SCENARIOS = sorted((ROOT / "sim" / "scenarios").glob("*.yaml"))
 
 
-@pytest.mark.parametrize("scenario", SCENARIOS, ids=lambda p: p.stem)
+import yaml as _yaml  # noqa: E402
+_CTX_SCENARIOS = [s for s in SCENARIOS if _yaml.safe_load(s.read_text()).get("mode") != "real"]
+_REAL_SCENARIOS = [s for s in SCENARIOS if _yaml.safe_load(s.read_text()).get("mode") == "real"]
+
+
+@pytest.mark.parametrize("scenario", _CTX_SCENARIOS, ids=lambda p: p.stem)
 def test_scenario_path(scenario):
-    import yaml
-    sc = yaml.safe_load(scenario.read_text())
+    sc = _yaml.safe_load(scenario.read_text())
     r = run_sim.run(ROOT / sc["skill"], scenario)
     assert r["path_ok"], f"路径不匹配\n实际: {r['path']}\n期望: {r['expect']}"
     if r["rollback_ok"] is not None:
         assert r["rollback_ok"], f"回滚往返失败: {r['notes']}"
+
+
+@pytest.mark.parametrize("scenario", _REAL_SCENARIOS, ids=lambda p: p.stem)
+def test_scenario_real(scenario):
+    sc = _yaml.safe_load(scenario.read_text())
+    r = run_sim.run(ROOT / sc["skill"], scenario)
+    assert r["completed"], f"真实模式未终止: {r['path']}"
+    assert r["evidence"] == "real_roundtrip"
 
 
 QBIN = ROOT / "tools" / "bin" / "opsaxiom-quarantine"
