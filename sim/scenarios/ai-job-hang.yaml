@@ -1,0 +1,6 @@
+skill: skills/aicomp/job-hang/skill.yaml
+scenario: IO hang
+expect_path: [classify_hang, check_dstate, io_hang_exit]
+node_ctx:
+  classify_hang: {gpu_util: 2}
+  check_dstate: {in_dstate: 1}

@@ -1,0 +1,5 @@
+skill: skills/aicomp/gpu-util-low/skill.yaml
+scenario: 数据瓶颈
+expect_path: [assess, data_bound_exit]
+node_ctx:
+  assess: {avg_util: 20, util_saw_tooth: 1}

@@ -1,0 +1,5 @@
+skill: skills/aicomp/ecc-error/skill.yaml
+scenario: DBE
+expect_path: [classify, dbe_exit]
+node_ctx:
+  classify: {dbe_count: 2, sbe_count: 0, pending_retirement: 0}

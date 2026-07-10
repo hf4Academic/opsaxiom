@@ -1,0 +1,5 @@
+skill: skills/aicomp/thermal-throttle/skill.yaml
+scenario: 过温降频
+expect_path: [read_state, thermal_exit]
+node_ctx:
+  read_state: {temp: 90, power_draw: 300, power_limit: 400}

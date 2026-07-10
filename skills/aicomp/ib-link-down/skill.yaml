@@ -1,0 +1,60 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.fabric.ib-link-down
+  name: InfiniBand 链路 down 排查
+  taxonomy: aicomp/fabric/ib-link-down
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{fabric: infiniband}]
+  params:
+    - {name: host, source: alert, desc: 节点}
+    - {name: hca_port, source: alert, desc: HCA 端口}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [ssh]
+discovery:
+  - id: ibstat
+    run: {ssh: "ibstat"}
+    parser: fabric/ibstat-v1
+tree:
+  entry: read_link
+  nodes:
+    - id: read_link
+      type: check
+      title: 读取 IB 端口状态与速率
+      run: {ssh: "ibstat"}
+      parser: fabric/ibstat-v1
+      branch:
+        - {when: "link_up == 0", goto: down_exit}
+        - {when: "rate_gbps < expected_rate", goto: degraded_exit}
+        - {when: "symbol_errors > 0 and delta(symbol_errors, 60s) > 0", goto: error_exit}
+        - {when: "link_up == 1 and rate_gbps >= expected_rate", goto: healthy_exit}
+      otherwise: escalate
+      cautions:
+        - "IB 链路问题直接拖垮多机训练(NCCL 走 IB)。先分清是 down(完全断)、降速(协商到低速率)还是有误码(symbol errors 增长)——处置不同"
+        - "State: Active 才是好的；Initializing/Down 都不通。Rate 要对上物理规格(如 HDR 200Gb/s)，降速常是线缆/光模块问题"
+    - id: healthy_exit
+      type: done
+      summary: "IB 端口 Active 且速率达标、无误码增长。若 NCCL 仍慢，转 aicomp/collective/nccl-allreduce-slow(可能是 RoCE/拓扑/GDR 配置)而非物理链路。"
+    - id: down_exit
+      type: done
+      summary: "IB 端口 Down/未 Active。方向：检查线缆/光模块是否插好、对端交换机端口状态、HCA 固件与驱动(OFED)、subnet manager(opensm)是否运行。链路恢复后 NCCL 自愈。"
+    - id: degraded_exit
+      type: done
+      summary: "IB 链路 Active 但速率低于规格(降速)。方向：多为线缆/光模块质量或协商问题——换线缆/光模块、检查两端端口配置、确认物理规格一致(HDR/NDR)。降速会让集合通信带宽腰斩。"
+    - id: error_exit
+      type: done
+      summary: "IB 链路有 symbol errors 且在增长(误码)。物理层信号质量差：清洁/更换光模块与线缆、检查弯折与距离。误码会导致重传拖慢 NCCL 甚至间歇中断。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：ibstat 全量、端口状态/速率/误码、opensm 状态、对端交换机端口、OFED 版本。"
+tests:
+  - {scenario: tests/down.yaml, expect_path: [read_link, down_exit]}
+  - {scenario: tests/healthy.yaml, expect_path: [read_link, healthy_exit]}
+feedback:
+  ask: "IB 链路问题定位了吗？"

@@ -1,0 +1,61 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.training.job-hang
+  name: 训练任务 hang（无进展）排查
+  taxonomy: aicomp/training/job-hang
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - {stack: pytorch}
+  params:
+  - {name: host, source: alert, desc: 节点}
+  - {name: pid, source: alert, desc: 训练进程 pid}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors: [ssh]
+discovery:
+- id: util
+  run: {ssh: 'nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader'}
+  parser: gpu/util-v1
+tree:
+  entry: classify_hang
+  nodes:
+  - id: classify_hang
+    type: check
+    title: 按 GPU 利用率分类 hang 形态
+    run: {ssh: 'nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader'}
+    parser: gpu/util-v1
+    branch:
+    - {when: gpu_util > 90, goto: comm_hang_exit}
+    - {when: gpu_util < 10, goto: check_dstate}
+    otherwise: check_dstate
+    cautions: [训练 hang 先看 GPU util：持续 100% 无进展→多为集合通信卡死(转 nccl-hang)；持续 0→卡在非 GPU 环节(数据加载/checkpoint/死锁),
+      '''无进展''要有客观依据：loss 不更新、step 不涨、日志时间戳停住——别把正常的慢当 hang']
+  - {id: comm_hang_exit, type: done, summary: GPU 持续满载却无进展，典型集合通信 hang。转 aicomp/collective/nccl-hang 定位掉队/死锁的
+      rank。}
+  - id: check_dstate
+    type: check
+    title: GPU 空闲——查进程是否卡在 IO/D 状态
+    run: {ssh: 'cat /proc/{{pid}}/status 2>/dev/null | grep State; ls -l /proc/{{pid}}/fd 2>/dev/null
+        | grep -c '' '''}
+    parser: train/procstate-v1
+    branch:
+    - {when: in_dstate > 0, goto: io_hang_exit}
+    otherwise: python_hang_exit
+    cautions: [进程在 D 状态(不可中断睡眠)→卡在 IO(常见 NFS/存储读数据慢或挂载卡死，转 host/process/dstate-hang)；R/S 态但无进展→Python
+        层死锁或等锁]
+  - {id: io_hang_exit, type: done, summary: 训练进程卡在 D 状态(IO 等待)。多为数据加载读存储卡住(NFS/对象存储慢或挂死)、或 checkpoint
+      写卡住。检查存储挂载与后端(转 host/process/dstate-hang)、DataLoader worker 是否卡死。}
+  - {id: python_hang_exit, type: done, summary: GPU 空闲、进程非 D 态却无进展，疑似 Python 层死锁/等锁或 DataLoader 死锁(多进程
+      fork + CUDA 初始化冲突常见)。抓 py-spy dump 看主线程与 worker 栈定位卡点。}
+tests:
+- scenario: tests/comm.yaml
+  expect_path: [classify_hang, comm_hang_exit]
+- scenario: tests/io.yaml
+  expect_path: [classify_hang, check_dstate, io_hang_exit]
+feedback: {ask: 训练 hang 原因定位了吗？}

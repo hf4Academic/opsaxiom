@@ -1,0 +1,6 @@
+skill: skills/aicomp/nccl-allreduce-slow/skill.yaml
+scenario: TCP 回退
+expect_path: [measure_bw, check_transport, tcp_fallback_exit]
+node_ctx:
+  measure_bw: {busbw_gbps: 100, expected_busbw: 150}
+  check_transport: {using_tcp: 1, using_ib: 0}

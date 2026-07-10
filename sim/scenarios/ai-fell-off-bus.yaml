@@ -1,0 +1,6 @@
+skill: skills/aicomp/fell-off-bus/skill.yaml
+scenario: 掉卡
+expect_path: [count_gpus, check_pcie, fell_off_exit]
+node_ctx:
+  count_gpus: {smi_error: 0, gpu_count: 7, expected_gpus: 8}
+  check_pcie: {fell_off_evidence: 1, pcie_gpu_count: 8, expected_gpus: 8}

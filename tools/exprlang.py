@@ -229,7 +229,9 @@ class _Eval:
     def e_or(self):
         v = self.e_and()
         while self.cur.kind == "KW" and self.cur.val == "or":
-            self.eat(); v = _truthy(v) or _truthy(self.e_and())
+            self.eat()
+            r = self.e_and()          # 必须先解析右操作数(推进 token)，不能靠 or 短路跳过
+            v = _truthy(v) or _truthy(r)
         return v
 
     def e_and(self):

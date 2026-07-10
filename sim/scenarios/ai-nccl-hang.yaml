@@ -1,0 +1,6 @@
+skill: skills/aicomp/nccl-hang/skill.yaml
+scenario: rank 掉队
+expect_path: [confirm_hang, check_watchdog, rank_stuck_exit]
+node_ctx:
+  confirm_hang: {gpu_util: 99}
+  check_watchdog: {nccl_timeout: 1}

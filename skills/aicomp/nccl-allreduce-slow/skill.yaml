@@ -1,0 +1,66 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.collective.nccl-allreduce-slow
+  name: NCCL allreduce 慢（带宽打不满）排查
+  taxonomy: aicomp/collective/nccl-allreduce-slow
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - {stack: nccl}
+  params:
+  - {name: host, source: user, desc: 节点}
+  - {name: expected_busbw, source: user, desc: 期望 busbw(GB/s)}
+  - {name: ngpus, source: user, desc: 参与的 GPU 数}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors: [ssh]
+discovery:
+- id: bench
+  run: {ssh: 'all_reduce_perf -b 512M -e 512M -g {{ngpus}} 2>&1 | tail -5'}
+  parser: collective/nccl-perf-v1
+tree:
+  entry: measure_bw
+  nodes:
+  - id: measure_bw
+    type: check
+    title: 用 nccl-tests 量测 busbw 与期望差距
+    run: {ssh: 'all_reduce_perf -b 512M -e 512M -g {{ngpus}} 2>&1 | tail -5'}
+    parser: collective/nccl-perf-v1
+    branch:
+    - {when: busbw_gbps < expected_busbw * 0.5, goto: severe_exit}
+    - {when: busbw_gbps < expected_busbw * 0.8, goto: check_transport}
+    - {when: busbw_gbps >= expected_busbw * 0.8, goto: ok_exit}
+    otherwise: escalate
+    cautions: [先用 nccl-tests 客观量测 busbw，别凭训练慢就猜 NCCL——训练慢也可能是数据加载/CPU 瓶颈。busbw 对比理论峰值才能定位是不是通信问题, NCCL_DEBUG=INFO
+        能看它实际选的传输(NVLink/IB/PCIe/SHM)和拓扑——用错传输(比如该走 IB 却走了 TCP)是慢的常见根因]
+  - {id: ok_exit, type: done, summary: busbw 达期望 80% 以上，通信带宽正常。训练若仍慢，瓶颈可能在数据加载/计算/CPU，转 aicomp/training/gpu-util-low
+      或查数据管道。}
+  - id: check_transport
+    type: check
+    title: 中度偏慢——检查 NCCL 选用的传输与拓扑
+    run: {ssh: 'NCCL_DEBUG=INFO all_reduce_perf -b 128M -e 128M -g {{ngpus}} 2>&1 | grep -iE ''NET/|Ring|Channel|Transport''
+        | head -10'}
+    parser: collective/nccl-transport-v1
+    branch:
+    - {when: using_tcp > 0, goto: tcp_fallback_exit}
+    - {when: using_ib > 0, goto: ib_tune_exit}
+    otherwise: escalate
+    cautions: [看到 NET/Socket(TCP) 而非 NET/IB 说明 NCCL 没走 IB(RDMA)，退化到 TCP——带宽暴跌。多为 NCCL_IB_HCA/网络配置问题]
+  - {id: tcp_fallback_exit, type: done, summary: NCCL 退化到 TCP(未走 IB/RDMA)，带宽大幅下降。方向：检查 NCCL_IB_HCA/NCCL_SOCKET_IFNAME
+      配置、IB 设备是否可见(ibstat)、GPUDirect RDMA 是否启用、容器是否透传了 IB 设备。让它走 IB 是关键。}
+  - {id: ib_tune_exit, type: done, summary: 已走 IB 但带宽仍不足。方向：检查 IB 链路是否降速(转 aicomp/fabric/ib-link-down)、NCCL
+      拓扑/通道数、是否开启 GPUDirect(NCCL_NET_GDR_LEVEL)、跨 NUMA/PCIe 交换机的拓扑不优。}
+  - {id: severe_exit, type: done, summary: busbw 不足期望一半，严重异常。优先查：是否根本没走 NVLink/IB(退化 PCIe/TCP)、是否有卡降频或
+      IB 链路故障、是否有慢节点拖累集合通信(木桶效应，转 aicomp/training/slow-node)。}
+  - {id: escalate, type: escalate, summary: 打包升级：nccl-tests busbw、NCCL_DEBUG=INFO 传输选择、IB/NVLink 状态、拓扑、期望峰值。}
+tests:
+- scenario: tests/tcp-fallback.yaml
+  expect_path: [measure_bw, check_transport, tcp_fallback_exit]
+- scenario: tests/ok.yaml
+  expect_path: [measure_bw, ok_exit]
+feedback: {ask: NCCL 带宽问题定位了吗？}

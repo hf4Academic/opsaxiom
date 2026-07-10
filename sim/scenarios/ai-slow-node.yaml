@@ -1,0 +1,6 @@
+skill: skills/aicomp/slow-node/skill.yaml
+scenario: IB 慢节点
+expect_path: [compare_nodes, locate_straggler, fabric_exit]
+node_ctx:
+  compare_nodes: {max_step_ms: 200, median_step_ms: 100}
+  locate_straggler: {gpu_clock_throttled: 0, ib_rate_degraded: 1, data_wait_ms: 10, median_step_ms: 100}

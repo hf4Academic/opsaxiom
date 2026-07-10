@@ -87,3 +87,13 @@ def test_s12_projection_check():
               "rows[].a > 1 or rows[].b > 2"]:
         ok, _ = cp(e)
         assert not ok, f"F-8 类应拦截却通过: {e}"
+
+
+def test_or_chain_no_shortcircuit_parse():
+    # 回归 T-5 发现的求值器 bug：or 短路曾导致右操作数未被解析→"多余 token"
+    assert ev("x == 48 or x == 92 or x == 95", {"x": 48}) is True   # 命中第一个
+    assert ev("x == 48 or x == 92 or x == 95", {"x": 95}) is True   # 命中最后一个(须解析到)
+    assert ev("x == 1 or x == 2", {"x": 9}) is False
+    # and 链同理
+    assert ev("a == 1 and b == 2 and c == 3", {"a": 1, "b": 2, "c": 3}) is True
+    assert ev("a == 1 and b == 2 and c == 3", {"a": 1, "b": 2, "c": 9}) is False

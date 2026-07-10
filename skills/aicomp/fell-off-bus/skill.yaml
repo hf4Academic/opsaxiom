@@ -1,0 +1,70 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.gpu.fell-off-bus
+  name: GPU 掉卡（fell off the bus）排查
+  taxonomy: aicomp/gpu/fell-off-bus
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{accelerator: nvidia}]
+  params:
+    - {name: host, source: alert, desc: 节点}
+    - {name: expected_gpus, source: user, desc: 期望 GPU 数}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [ssh]
+discovery:
+  - id: smi
+    run: {ssh: "nvidia-smi --query-gpu=count --format=csv,noheader 2>&1; dmesg -T | grep -iE 'fallen off the bus|Xid.*79' | tail -5"}
+    parser: gpu/smi-count-v1
+tree:
+  entry: count_gpus
+  nodes:
+    - id: count_gpus
+      type: check
+      title: 确认可见 GPU 数是否少于期望
+      run: {ssh: "nvidia-smi --query-gpu=count --format=csv,noheader 2>&1"}
+      parser: gpu/smi-count-v1
+      branch:
+        - {when: "smi_error > 0", goto: smi_fail_exit}
+        - {when: "gpu_count < expected_gpus", goto: check_pcie}
+        - {when: "gpu_count >= expected_gpus", goto: all_present_exit}
+      otherwise: escalate
+      cautions:
+        - "掉卡的表现：nvidia-smi 看不到某张卡，或整个 nvidia-smi 报错(Unable to determine device)。dmesg 里 'fallen off the bus'/Xid 79 是铁证"
+        - "掉卡几乎都是硬件层：供电不足、散热导致过温保护、PCIe 接触/插槽问题、卡本身故障。软件重启常无法恢复，需要重启节点甚至断电重插"
+    - id: all_present_exit
+      type: done
+      summary: "GPU 数量正常，未掉卡。若曾告警，可能已随节点重启恢复。核对 dmesg 是否有历史 Xid 79 记录，若有则该卡有隐患需观察。"
+    - id: smi_fail_exit
+      type: escalate
+      summary: "nvidia-smi 本身报错(无法枚举设备)，多为驱动/内核模块异常或多卡同时掉线。检查 nvidia 驱动是否加载(lsmod|grep nvidia)、dmesg 驱动报错、必要时重载驱动或重启节点。这是节点级严重故障。"
+    - id: check_pcie
+      type: check
+      title: 掉卡——检查 PCIe 与掉线证据
+      run: {ssh: "lspci | grep -ic nvidia; dmesg -T | grep -icE 'fallen off the bus|Xid.*79'"}
+      parser: gpu/pcie-v1
+      branch:
+        - {when: "fell_off_evidence > 0", goto: fell_off_exit}
+        - {when: "pcie_gpu_count < expected_gpus", goto: pcie_missing_exit}
+      otherwise: escalate
+      cautions:
+        - "lspci 都看不到卡 → PCIe 层面就掉了(硬件/插槽/供电)；lspci 看得到但 nvidia-smi 看不到 → 驱动/卡固件层面掉的"
+    - id: fell_off_exit
+      type: escalate
+      summary: "确认 GPU 掉卡(Xid 79 / fallen off the bus)。整卡不可用。处置(硬件为主)：①drain 该节点停止调度；②检查供电与散热(过温保护会触发掉卡)、PCIe 插槽/线缆；③重启节点，未恢复则断电重插或换卡；④反复掉卡的卡直接下线报修。禁止简单重试任务。已生成硬件处置清单。"
+    - id: pcie_missing_exit
+      type: escalate
+      summary: "lspci 已看不到该 GPU(PCIe 层掉线)，比固件层掉卡更底层。大概率是物理连接/供电/插槽问题或卡彻底故障。需现场检查硬件，重启未必恢复。已生成现场排查清单。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：nvidia-smi count、lspci nvidia 计数、dmesg Xid 79、期望 GPU 数、节点供电/温度。"
+tests:
+  - {scenario: tests/fell-off.yaml, expect_path: [count_gpus, check_pcie, fell_off_exit]}
+  - {scenario: tests/all-present.yaml, expect_path: [count_gpus, all_present_exit]}
+feedback:
+  ask: "掉卡问题定位了吗？"

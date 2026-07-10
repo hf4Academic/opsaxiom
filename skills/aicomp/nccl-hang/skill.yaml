@@ -1,0 +1,60 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.collective.nccl-hang
+  name: NCCL 通信 hang 排查
+  taxonomy: aicomp/collective/nccl-hang
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - {stack: nccl}
+  params:
+  - {name: host, source: alert, desc: 节点}
+  - {name: job, source: alert, desc: 训练任务标识}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors: [ssh]
+discovery:
+- id: state
+  run: {ssh: 'nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader; dmesg -T | grep -iE ''nccl|watchdog|timeout''
+      | tail -5'}
+  parser: gpu/util-v1
+tree:
+  entry: confirm_hang
+  nodes:
+  - id: confirm_hang
+    type: check
+    title: 确认是否 hang（GPU 忙但无进展）
+    run: {ssh: 'nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader'}
+    parser: gpu/util-v1
+    branch:
+    - {when: gpu_util > 90, goto: check_watchdog}
+    - {when: gpu_util < 10, goto: idle_hang_exit}
+    otherwise: check_watchdog
+    cautions: [NCCL hang 的典型态：某几张卡 util 100% 卡死不动(在等集合通信)，另一些 util 0(已到同步点在等别人)。整个 job 无进展但进程不退, 别急着 kill：先抓现场——py-spy
+        dump 看卡在哪个 all_reduce、NCCL_DEBUG 日志看哪个 rank 没到、是否有 rank 因 OOM/崩溃退出导致其余 rank 死等]
+  - id: check_watchdog
+    type: check
+    title: 检查是否有 NCCL 超时/某 rank 掉队
+    run: {ssh: dmesg -T | grep -icE 'Watchdog.*timeout|NCCL.*timeout|collective.*timeout'}
+    parser: collective/nccl-timeout-v1
+    branch:
+    - {when: nccl_timeout > 0, goto: rank_stuck_exit}
+    otherwise: deadlock_exit
+    cautions: [PyTorch 的 ProcessGroupNCCL watchdog timeout 说明某 rank 在超时时间内没到集合点——去找那个掉队/崩溃的 rank]
+  - {id: rank_stuck_exit, type: done, summary: 有 NCCL/watchdog 超时，某 rank 掉队。方向：定位未到同步点的 rank(常因它先 OOM/异常退出/所在卡故障)、检查该
+      rank 的 GPU(转 xid-error)、确认是否单卡故障拖垮整个 job。找到掉队 rank 是关键。}
+  - {id: idle_hang_exit, type: done, summary: GPU 利用率低却无进展，疑似所有 rank 都卡在等待(集合通信死锁)或卡在非 GPU 环节(数据加载/checkpoint)。抓
+      py-spy dump 看主线程栈，区分是卡在 NCCL 还是卡在 IO/数据。}
+  - {id: deadlock_exit, type: done, summary: GPU 忙但无超时记录，疑似集合通信死锁(如不同 rank 调用顺序不一致、通信组不匹配)。抓各 rank 的 py-spy
+      dump 对比卡点、检查代码里 all_reduce/broadcast 的调用是否所有 rank 一致。}
+tests:
+- scenario: tests/rank-stuck.yaml
+  expect_path: [confirm_hang, check_watchdog, rank_stuck_exit]
+- scenario: tests/idle.yaml
+  expect_path: [confirm_hang, idle_hang_exit]
+feedback: {ask: NCCL hang 原因定位了吗？}

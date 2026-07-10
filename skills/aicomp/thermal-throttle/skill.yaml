@@ -1,0 +1,56 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.gpu.thermal-throttle
+  name: GPU 降频（温度/功耗墙）排查
+  taxonomy: aicomp/gpu/thermal-throttle
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{accelerator: nvidia}]
+  params:
+    - {name: host, source: alert, desc: 节点}
+    - {name: gpu_id, source: alert, desc: GPU 序号}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [ssh]
+discovery:
+  - id: smi
+    run: {ssh: "nvidia-smi -i {{gpu_id}} --query-gpu=temperature.gpu,power.draw,power.limit,clocks_throttle_reasons.active --format=csv,noheader"}
+    parser: gpu/smi-v1
+tree:
+  entry: read_state
+  nodes:
+    - id: read_state
+      type: check
+      title: 读取温度/功耗/降频原因
+      run: {ssh: "nvidia-smi -i {{gpu_id}} --query-gpu=temperature.gpu,power.draw,power.limit --format=csv,noheader"}
+      parser: gpu/smi-v1
+      branch:
+        - {when: "temp > 85", goto: thermal_exit}
+        - {when: "power_draw > power_limit * 0.98", goto: power_exit}
+        - {when: "temp <= 85 and power_draw <= power_limit * 0.98", goto: not_throttle_exit}
+      otherwise: escalate
+      cautions:
+        - "GPU 降频两大原因：温度墙(>83~85℃触发)和功耗墙(达 power limit)。表现是算力上不去、训练变慢，但 GPU 没坏"
+        - "别只看当前温度：降频是过温'历史'触发的，要看 clocks_throttle_reasons.active 里是否有 SW/HW thermal slowdown 标志"
+    - id: not_throttle_exit
+      type: done
+      summary: "温度与功耗均在正常范围，未触发降频。若算力仍不足，转 aicomp/training/gpu-util-low(利用率问题)或 collective(通信瓶颈)。"
+    - id: thermal_exit
+      type: done
+      summary: "温度过高触发热降频。方向(散热为主)：检查机房/机箱进风温度、风扇转速与积灰、GPU 散热片/风道、机架密度是否过高。清灰/降低环境温度/降低功耗上限(nvidia-smi -pl)可缓解。非 GPU 故障。"
+    - id: power_exit
+      type: done
+      summary: "功耗达上限触发功耗墙降频。方向：确认 power limit 设置是否被人为调低(nvidia-smi -pl)、供电是否充足、是否多卡共享供电超限。若是有意限功耗则属预期；否则恢复默认功耗上限。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：温度/功耗/时钟、throttle reasons、环境温度、power limit 设置、散热状况。"
+tests:
+  - {scenario: tests/thermal.yaml, expect_path: [read_state, thermal_exit]}
+  - {scenario: tests/normal.yaml, expect_path: [read_state, not_throttle_exit]}
+feedback:
+  ask: "GPU 降频原因定位了吗？"

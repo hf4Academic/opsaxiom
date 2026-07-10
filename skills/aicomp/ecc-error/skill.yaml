@@ -1,0 +1,60 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.gpu.ecc-error
+  name: GPU ECC 错误排查
+  taxonomy: aicomp/gpu/ecc-error
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{accelerator: nvidia}]
+  params:
+    - {name: host, source: alert, desc: 节点}
+    - {name: gpu_id, source: alert, desc: GPU 序号}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [ssh]
+discovery:
+  - id: ecc
+    run: {ssh: "nvidia-smi -i {{gpu_id}} -q -d ECC"}
+    parser: gpu/ecc-v1
+tree:
+  entry: classify
+  nodes:
+    - id: classify
+      type: check
+      title: 区分可纠正(SBE) vs 不可纠正(DBE) 错误
+      run: {ssh: "nvidia-smi -i {{gpu_id}} -q -d ECC"}
+      parser: gpu/ecc-v1
+      branch:
+        - {when: "dbe_count > 0", goto: dbe_exit}
+        - {when: "pending_retirement > 0", goto: retire_exit}
+        - {when: "sbe_count > 100", goto: sbe_high_exit}
+        - {when: "sbe_count <= 100 and dbe_count == 0", goto: healthy_exit}
+      otherwise: escalate
+      cautions:
+        - "SBE(单比特)可纠正、偶发无害；DBE(双比特)不可纠正、会导致计算错误或任务崩溃——两者严重性天差地别，别混为一谈"
+        - "关键看趋势与是否有待退休页(pending retirement)：SBE 持续暴涨或出现 DBE，都是显存开始坏的信号"
+    - id: healthy_exit
+      type: done
+      summary: "仅少量 SBE 且无 DBE，属正常范围(宇宙射线等偶发可纠正错误)。无需处置，纳入常规监控观察趋势即可。"
+    - id: sbe_high_exit
+      type: done
+      summary: "SBE 计数偏高但均可纠正。显存可能进入退化早期。方向：监控 SBE 增长速率、检查是否伴随温度过高(转 thermal-throttle)、记录基线，持续恶化则安排换卡。"
+    - id: retire_exit
+      type: done
+      summary: "存在待退休显存页(pending page retirement)。GPU 正在隔离坏的显存页。方向：重启该卡上任务使退休生效、观察退休页总数(接近上限需换卡)、Ampere+ 用 row remapping 机制看 remap 情况。"
+    - id: dbe_exit
+      type: escalate
+      summary: "检测到不可纠正的双比特 ECC 错误(DBE)。硬件级显存故障，会污染计算结果。立即：drain 该卡任务、nvidia-smi -r 复位或重启节点、DBE 复现即报修换卡(RMA)。DBE 不是软件问题，重试无用。已生成硬件处置清单。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：nvidia-smi -q -d ECC 全量、SBE/DBE 计数与趋势、退休页、GPU 温度。"
+tests:
+  - {scenario: tests/dbe.yaml, expect_path: [classify, dbe_exit]}
+  - {scenario: tests/healthy.yaml, expect_path: [classify, healthy_exit]}
+feedback:
+  ask: "ECC 错误定性了吗？"

@@ -70,3 +70,22 @@ parsers:
   kafka/group-members-v1: {scalars: [unassigned_partitions, member_count]}
   kafka/urp-v1: {scalars: [urp_count]}
   kafka/broker-count-v1: {scalars: [brokers_down]}
+  # ---- aicomp: gpu ----
+  gpu/xid-v1: {scalars: [xid_code, gpu_id], lines: true}
+  gpu/ecc-v1: {scalars: [dbe_count, sbe_count, pending_retirement]}
+  gpu/smi-count-v1: {scalars: [gpu_count, smi_error]}
+  gpu/pcie-v1: {scalars: [pcie_gpu_count, fell_off_evidence]}
+  gpu/smi-v1: {scalars: [temp, power_draw, power_limit, util, mem_used, mem_total]}
+  gpu/util-v1: {scalars: [gpu_util, mem_used, mem_total]}
+  gpu/dmon-v1: {scalars: [avg_util, util_saw_tooth]}
+  # ---- aicomp: fabric ----
+  fabric/ibstat-v1: {scalars: [link_up, rate_gbps, expected_rate, symbol_errors]}
+  # ---- aicomp: collective ----
+  collective/nccl-perf-v1: {scalars: [busbw_gbps, expected_busbw]}
+  collective/nccl-transport-v1: {scalars: [using_tcp, using_ib]}
+  collective/nccl-timeout-v1: {scalars: [nccl_timeout]}
+  # ---- aicomp: training ----
+  train/procstate-v1: {scalars: [in_dstate]}
+  train/step-time-v1: {scalars: [max_step_ms, median_step_ms]}
+  train/node-metrics-v1: {scalars: [gpu_clock_throttled, ib_rate_degraded, data_wait_ms, median_step_ms]}
+  train/gpu-trace-v1: {scalars: [comm_time_pct, small_kernel_pct]}

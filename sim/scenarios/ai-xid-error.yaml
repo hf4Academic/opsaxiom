@@ -1,0 +1,5 @@
+skill: skills/aicomp/xid-error/skill.yaml
+scenario: DBE 硬件类
+expect_path: [read_xid, ecc_hw_exit]
+node_ctx:
+  read_xid: {xid_code: 48}

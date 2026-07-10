@@ -1,0 +1,59 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.gpu.xid-error
+  name: GPU XID 错误诊断
+  taxonomy: aicomp/gpu/xid-error
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - {accelerator: nvidia}
+  params:
+  - {name: host, source: alert, desc: 出错节点}
+  - {name: gpu_id, source: alert, desc: GPU 序号}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors: [ssh]
+discovery:
+- id: xid
+  run: {ssh: 'dmesg -T | grep -iE ''NVRM: Xid'' | tail -10'}
+  parser: gpu/xid-v1
+tree:
+  entry: read_xid
+  nodes:
+  - id: read_xid
+    type: check
+    title: 读取并分类 XID 错误码
+    run: {ssh: 'dmesg -T | grep -iE ''NVRM: Xid'' | tail -10'}
+    parser: gpu/xid-v1
+    branch:
+    - {when: xid_code == 79, goto: fell_off_exit}
+    - {when: xid_code == 48 or xid_code == 92 or xid_code == 94 or xid_code == 95, goto: ecc_hw_exit}
+    - {when: xid_code == 63 or xid_code == 64, goto: ecc_retire_exit}
+    - {when: xid_code == 74, goto: nvlink_exit}
+    - {when: xid_code == 13 or xid_code == 31 or xid_code == 43 or xid_code == 45, goto: app_exit}
+    otherwise: unknown_xid_exit
+    cautions: [XID 是判读 GPU 故障的钥匙，但码值意义必须查准别猜：软件类(13/31/43/45=应用非法访存/被清理)危害在单任务；硬件类(48/79/94/95=ECC/掉卡)危害在整卡，可能需要复位或换卡,
+      同一时刻可能有多条 XID，取最能定性的那条；XID 后常跟 GPU 物理位置(PCI)，据此定位是哪张卡]
+  - {id: app_exit, type: done, summary: XID 属应用/软件类(13 图形引擎异常/31 显存页错误/43 GPU 停止处理/45 抢占式清理)，多为应用非法内存访问或被
+      OS 终止。方向：查该 GPU 上的训练/推理进程日志、CUDA 代码越界、显存踩踏。通常单任务受影响，重启任务多可恢复，非硬件故障。}
+  - {id: ecc_hw_exit, type: done, summary: XID 属不可纠正 ECC/硬件类(48=双比特 ECC DBE / 94=contained / 95=uncontained
+      ECC 错误)。 这是硬件级显存错误，uncontained(95)会污染其他上下文。方向：立即 drain 该卡上的任务、 对该 GPU 做 nvidia-smi -r 复位或重启节点、持续出现则报修/换卡(RMA)。别当软件问题重试。}
+  - {id: ecc_retire_exit, type: done, summary: XID 63/64 属 ECC 页退休/行重映射(63=记录重映射事件，通常自愈；64=行重映射失败)。显存在退化。方向：63
+      观察退休页数增长趋势，64 说明重映射资源耗尽需换卡。查 nvidia-smi -q -d ECC 的 retired pages。}
+  - {id: nvlink_exit, type: done, summary: XID 74 属 NVLink 错误。多卡通信链路异常，会拖慢/中断 NCCL。方向：nvidia-smi nvlink
+      -s 看链路状态与错误计数、检查 NVLink/NVSwitch 拓扑、必要时复位。转 aicomp/fabric/nvlink 深入。}
+  - {id: fell_off_exit, type: escalate, summary: XID 79：GPU has fallen off the bus——GPU 从 PCIe 总线掉线，最严重的硬件故障之一。整卡不可用。立即：drain
+      节点、检查供电/散热/PCIe 插槽、重启节点看是否恢复，反复出现即换卡。已生成硬件处置清单。转 aicomp/gpu/fell-off-bus。}
+  - {id: unknown_xid_exit, type: escalate, summary: XID 码不在已知分类表内。保存完整 dmesg 与 XID 码，对照 NVIDIA XID 官方文档判定软/硬件性质，谨慎起见按硬件疑似处理(先
+      drain 观察)。}
+tests:
+- scenario: tests/dbe.yaml
+  expect_path: [read_xid, ecc_hw_exit]
+- scenario: tests/fell-off.yaml
+  expect_path: [read_xid, fell_off_exit]
+feedback: {ask: XID 错误定性了吗？}

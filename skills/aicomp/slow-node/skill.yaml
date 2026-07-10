@@ -1,0 +1,72 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.training.slow-node
+  name: 慢节点定位（木桶效应）
+  taxonomy: aicomp/training/slow-node
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{stack: pytorch}]
+  params:
+    - {name: job, source: alert, desc: 训练任务}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [ssh]
+discovery:
+  - id: step_times
+    run: {ssh: "opsaxiom-collect step-time --job {{job}}"}
+    parser: train/step-time-v1
+tree:
+  entry: compare_nodes
+  nodes:
+    - id: compare_nodes
+      type: check
+      title: 对比各节点 step 耗时找离群者
+      run: {ssh: "opsaxiom-collect step-time --job {{job}}"}
+      parser: train/step-time-v1
+      branch:
+        - {when: "max_step_ms > median_step_ms * 1.3", goto: locate_straggler}
+        - {when: "max_step_ms <= median_step_ms * 1.3", goto: uniform_exit}
+      otherwise: escalate
+      cautions:
+        - "同步训练里所有节点每 step 都要等最慢的那个(木桶效应)——一个慢节点拖垮整个集群吞吐。找到那个离群节点是关键"
+        - "慢节点不等于坏节点：可能是那张卡降频、那台机 IB 降速、那个 rank 数据加载慢、或 CPU/NUMA 绑核不对。定位到节点后再逐项查"
+    - id: uniform_exit
+      type: done
+      summary: "各节点 step 耗时均匀，无明显慢节点。整体慢的话是全局问题(batch/模型/通信设计)，转 aicomp/collective 或算力评估，而非单节点。"
+    - id: locate_straggler
+      type: check
+      title: 定位慢节点的瓶颈维度
+      run: {ssh: "opsaxiom-collect node-metrics --job {{job}} --node straggler"}
+      parser: train/node-metrics-v1
+      branch:
+        - {when: "gpu_clock_throttled > 0", goto: throttle_exit}
+        - {when: "ib_rate_degraded > 0", goto: fabric_exit}
+        - {when: "data_wait_ms > median_step_ms * 0.3", goto: data_exit}
+      otherwise: generic_slow_exit
+      cautions:
+        - "定位到慢节点后按维度查：GPU 降频(转 thermal-throttle)、IB 降速(转 ib-link-down)、数据等待(存储/DataLoader)、CPU 绑核(NUMA)"
+    - id: throttle_exit
+      type: done
+      summary: "慢节点的 GPU 在降频。转 aicomp/gpu/thermal-throttle 查温度/功耗墙。"
+    - id: fabric_exit
+      type: done
+      summary: "慢节点的 IB 链路降速。转 aicomp/fabric/ib-link-down 查链路/光模块。"
+    - id: data_exit
+      type: done
+      summary: "慢节点在等数据(data_wait 占比高)。检查该节点到存储的带宽/延迟、本地缓存是否命中、DataLoader worker 数与 prefetch。存储热点或本地盘慢是常见原因。"
+    - id: generic_slow_exit
+      type: done
+      summary: "慢节点瓶颈维度不典型。逐项排查该节点的 GPU/IB/CPU 绑核(NUMA)/内存/本地盘，与快节点对比配置差异(常是硬件批次或配置不一致)。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：各节点 step 耗时分布、慢节点的 GPU/IB/数据等待指标、与快节点的配置对比。"
+tests:
+  - {scenario: tests/straggler-fabric.yaml, expect_path: [compare_nodes, locate_straggler, fabric_exit]}
+  - {scenario: tests/uniform.yaml, expect_path: [compare_nodes, uniform_exit]}
+feedback:
+  ask: "慢节点定位了吗？"

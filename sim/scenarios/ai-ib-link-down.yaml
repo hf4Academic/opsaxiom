@@ -1,0 +1,5 @@
+skill: skills/aicomp/ib-link-down/skill.yaml
+scenario: IB down
+expect_path: [read_link, down_exit]
+node_ctx:
+  read_link: {link_up: 0, rate_gbps: 0, expected_rate: 200, symbol_errors: 0}

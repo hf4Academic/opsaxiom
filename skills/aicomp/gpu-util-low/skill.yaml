@@ -1,0 +1,75 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.training.gpu-util-low
+  name: GPU 利用率低（算力浪费）排查
+  taxonomy: aicomp/training/gpu-util-low
+  version: 0.1.0
+  maturity: sim_verified
+  platforms: [{stack: pytorch}]
+  params:
+    - {name: host, source: alert, desc: 节点}
+    - {name: pid, source: user, desc: 训练进程}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8}
+  expires_review: "2027-07-01"
+requirements:
+  capability_level: read
+  connectors: [ssh]
+discovery:
+  - id: util
+    run: {ssh: "nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader"}
+    parser: gpu/util-v1
+tree:
+  entry: assess
+  nodes:
+    - id: assess
+      type: check
+      title: 确认利用率低并看波形
+      run: {ssh: "nvidia-smi dmon -c 5 2>/dev/null | tail -6"}
+      parser: gpu/dmon-v1
+      branch:
+        - {when: "avg_util < 30 and util_saw_tooth > 0", goto: data_bound_exit}
+        - {when: "avg_util < 30", goto: check_bottleneck}
+        - {when: "avg_util >= 30", goto: acceptable_exit}
+      otherwise: escalate
+      cautions:
+        - "GPU 利用率低=算力(和钱)在浪费。锯齿波形(util 忽高忽低)几乎必是数据供给跟不上——GPU 算完一批在等下一批"
+        - "别只看 utilization.gpu 的百分比：它只反映'有 kernel 在跑'，不反映算得满不满。真要看效率得看 SM 占用/MFU，但锯齿波形已足够定性数据瓶颈"
+    - id: acceptable_exit
+      type: done
+      summary: "利用率在可接受范围。若仍想提效，看 batch size 是否可增大、是否用了混合精度/编译优化，属调优而非故障。"
+    - id: data_bound_exit
+      type: done
+      summary: >-
+        利用率低且呈锯齿波形，典型数据瓶颈(GPU 等数据)。方向：增大 DataLoader num_workers 与 prefetch、
+        用更快的存储/本地缓存、数据预处理下放/提前、pin_memory + 异步拷贝。让数据供给跟上算力是关键。
+    - id: check_bottleneck
+      type: check
+      title: 非锯齿——查是通信还是小算子瓶颈
+      run: {ssh: "opsaxiom-collect gpu-trace --pid {{pid}}"}
+      parser: train/gpu-trace-v1
+      branch:
+        - {when: "comm_time_pct > 40", goto: comm_bound_exit}
+        - {when: "small_kernel_pct > 40", goto: kernel_bound_exit}
+      otherwise: cpu_bound_exit
+      cautions:
+        - "利用率低且不锯齿：可能通信占比过高(转 nccl-allreduce-slow)、大量小算子导致 kernel launch 开销、或 CPU 前处理/同步点太多"
+    - id: comm_bound_exit
+      type: done
+      summary: "通信占比过高，GPU 大量时间在等集合通信。转 aicomp/collective/nccl-allreduce-slow 优化通信；或从算法侧减少通信(梯度累积、通信计算重叠)。"
+    - id: kernel_bound_exit
+      type: done
+      summary: "大量小 kernel，launch 开销吃掉算力。方向：算子融合(torch.compile/融合优化)、增大 batch 摊薄开销、用 CUDA Graph 减少 launch。"
+    - id: cpu_bound_exit
+      type: done
+      summary: "疑似 CPU 前处理/同步瓶颈。查 CPU 是否打满、是否有频繁的 .item()/.cpu() 同步点、数据增强是否在 CPU 上过重。把可并行的前处理移到 GPU 或异步化。"
+    - id: escalate
+      type: escalate
+      summary: "打包升级：dmon 利用率波形、通信/kernel/CPU 占比、DataLoader 配置、batch size。"
+tests:
+  - {scenario: tests/data-bound.yaml, expect_path: [assess, data_bound_exit]}
+  - {scenario: tests/comm-bound.yaml, expect_path: [assess, check_bottleneck, comm_bound_exit]}
+feedback:
+  ask: "GPU 利用率低的原因定位了吗？"
