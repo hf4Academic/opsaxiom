@@ -30,8 +30,10 @@ tree:
       run: {http: "promtool query instant {{prom_url}} 'ALERTS{alertname=\"{{alertname}}\"}'"}
       parser: obs/alert-eval-v1
       branch:
-        - {when: "firing > 0 and metric_value < threshold", goto: threshold_exit}
+        # 抖动判据必须先于阈值判据（F-12）：抖动告警采样瞬间值常落回阈值下，
+        # 先比阈值会把抖动误判成"阈值不当"，给出错误的改阈值建议
         - {when: "flapping_count > 5", goto: flapping_exit}
+        - {when: "firing > 0 and metric_value < threshold", goto: threshold_exit}
         - {when: "firing > 0", goto: real_exit}
       otherwise: escalate
       cautions:

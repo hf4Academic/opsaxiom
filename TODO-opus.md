@@ -1,6 +1,58 @@
 # Opus 4.8 任务书
 
-# 第五轮（Fable 布置，2026-07-09 四轮评审后）——打磨与扩面
+# 第六轮（Fable 布置，2026-07-10 五轮评审后）——人侧飞轮：捕获·认证·Hub·部署
+
+> 设计依据：**docs/08-capture-hub-deploy.md（必读，本轮宪法级输入）**。
+> 五轮裁决：R-8 维持现状不动 schema；F-12 已修（分支顺序=优先级）。
+
+## V-1 一键部署 + doctor
+- `install.sh`：venv 装依赖、软链 tools/bin/* 进 PATH、初始化 ~/.opsaxiom、末尾自动跑 doctor；
+  `--offline` 模式（用预置 wheels/ 目录，不出网）。
+- `opsaxiom doctor`：检查 python 版本、依赖齐全、密钥目录权限、tools/bin 可执行、
+  （可选连接器探测 ssh/kubectl/mysql 是否在 PATH），红黄绿输出。
+- Dockerfile（python-slim 基座，入口即 opsaxiom）。
+
+## V-2 经验捕获三通道（docs/08 §1）
+- `opsaxiom skill from-session <sid>`：审计 jsonl → skill.yaml 草稿（check 带真实命令；
+  输出摘要 → 同步生成 sim 场景 node_ctx 草稿；done.summary 用人的终态描述占位）→ skills-drafts/。
+- `opsaxiom record start/exec/stop`：投喂式记录会话（exec 仅限 _is_readonly 白名单），
+  产物走同一条"审计→草稿"管线。
+- `opsaxiom skill new`：向导式问答生成（按 docs/07 规则边问边校验）。
+- `opsaxiom skill lint <draft>`：validate + 缺口清单（缺 otherwise/caution/rollback/tests 逐条列出）。
+
+## V-3 一键认证打通（docs/08 §2）
+- run 终点在 feedback 之后追问 attest（[y/N]，默认 N）；y → 从会话预填
+  outcome/mode/rollback_exercised/skill/version，仅问 os-family 与规模两个分桶 → 签名落盘。
+- `opsaxiom attest --from-session <sid>`（等价异步入口）。
+- 脚本模式（--answers）兼容：answers 里 `<terminal_id>:attest: {os_family: rhel, scale: 47}`。
+
+## V-4 hub 客户端（docs/08 §3，git-based）
+- `opsaxiom hub init <registry-git-url>`（本地缓存 ~/.opsaxiom/hub/）、
+  `hub search`（本地 index.json）、`hub pull <id>`（→ skills-community/，三道安全门：
+  本地重跑 validate / 验签对 keyring / draft 默认拒收）、`hub push <id>`（打包出分支或 bundle）、
+  `hub sync`（index + keyring 更新提示）。
+- 用本仓库自身生成一个演示 registry（tools/hubtool build-registry skills/ → /tmp 或 registry/ 子目录）
+  供端到端测试——不依赖外网。
+- index.json 生成器归入 `tools/hubtool`。
+
+## V-5 Hub 静态网站生成器（docs/08 §3.4）
+- `tools/hubsite/build.py`：registry → 静态 HTML（首页域浏览+关键词搜索、
+  Skill 详情页：树的文本可视化、cautions、徽章、attestation 列表与验签状态）。
+- 无 JS 框架依赖，纯模板（可用 string.Template/f-string），离线可开。
+- 对演示 registry 构建出完整站点，产物截图路径写进 PR/commit 说明。
+
+## V-6 用户手册 + 规范补遗 + 收尾
+- `docs/10-user-guide.md`：装/用/沉淀/交换四章 + 一页起步卡（docs/08 §4.3 规格）。
+- docs/07 补：**C7 分支顺序即优先级（F-12）**、proc 域写法规范（R-8 裁决）、
+  connectors:[human] 说明。
+- README 更新（部署三形态 + hub），HANDOFF 交接 Fable 六轮评审。
+
+进度勾选区（Opus 更新）：
+- [ ] V-1  - [ ] V-2  - [ ] V-3  - [ ] V-4  - [ ] V-5  - [ ] V-6
+
+---
+
+# 第五轮（Fable 布置，2026-07-09 四轮评审后）——打磨与扩面【已完成，存档】
 
 > 规范依据新增：docs/03 §7.6d（S13 求值冒烟，已由 Fable 实现）、docs/07 B9（枚举清单双向核对）。
 > F-10（XID 92 误归）已由 Fable 修复并重晋级。

@@ -37,31 +37,28 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
 
 ## 当前状态（由最后工作的模型更新）
 
-- **更新时间**：2026-07-10（Opus 五轮完成后覆盖）
-- **更新者**：Opus 4.8
-- **阶段**：第五轮 U-1~U-5 **全部完成**，交接 Fable 5 做**五轮评审**
-- **第五轮交付**：
-  - **U-1 导航档 CLI 四项打磨**：审计补 verify 结果+输出摘要；action 三选项(proceed/skip/escalate/quit)；
-    `--resume` 断点续跑(每步落 state.json，控制 token 不覆盖)；渲染缺失字段→`⟨?⟩` 占位
-  - **U-2 opsaxiom-collect**：step-time/node-metrics/gpu-trace 子命令 + train/* 解析器，
-    确定性 mock + --from-file；补 docs/07 E-6(引用自研工具须已存在或同轮排期)
-  - **U-3 obs/sec/proc 域 12 个 Skill**（全部 sim_verified）：obs×5 sec×4 proc×3；
-    9 个 obs/sec 解析器(obssec.py)；collect 增 events/auth/prom-target/cert-scan/vuln-triage 子命令
-  - **U-4 attestation Ed25519 签名**：替换 UNSIGNED-TODO；--keygen/--verify；自包含公钥+keyring TOFU；
-    篡改可检出；docs/05 §2.1
-- **全库现状**：**73 个 Skill**（host20/k8s10/network11/middleware10/aicomp10/obs5/sec4/proc3），
-  **49 sim_verified**。校验 73/73、pytest 244/244、仿真 67/67 全绿。
-- **需 Fable 五轮评审的重点**：
-  1. **R-8（最重要）**：proc 纯生成域借道 `kind: Diagnostic` 决策树——可用且已验证，但 `tree` 强制、
-     `ask` 是多选非自由文本、模板塞 done.summary。**是否为 proc 演进 schema（kind:Playbook / artifact 块）**，
-     纯 Fable 职权（我不改 schema）。若维持现状我把 proc 写法补进 docs/07。
-  2. **抽查 obs/sec 9 个诊断的领域正确性**：尤其 sec 的"暴破后成功=疑似攻破优先"、
-     "漏洞按 KEV/可修复而非 CVSS 排队"、obs 的"target down 三分类"、"误报 vs 抖动 vs 真问题"。
-  3. **opsaxiom-collect 的 mock 边界**：确定性 mock + stderr 诚实标注够不够；真实集成点(--from-file)设计。
-  4. attestation 自包含公钥 + TOFU 的信任模型是否合理，还是该走中心化 keyring 分发。
-- **交接给**：**Fable 5 —— 五轮评审**
+- **更新时间**：2026-07-10（Fable 五轮评审后覆盖）
+- **更新者**：Fable 5
+- **阶段**：五轮评审完成 + 人侧飞轮架构设计已出（docs/08），**第六轮任务书已发（V-1~V-6），交接 Opus 4.8**
+- **五轮评审结论**：
+  - U-1~U-4 验收通过；proc"params+真实决策路由"形态获认可
+  - **R-8 裁决：维持现状不动 schema**，kind:Playbook/artifact 等 Hub 渲染需求出现后再定
+  - **F-12 已修**：obs/false-positive 分支顺序错误（阈值判据先于抖动判据）→ 教训 C7
+    "分支顺序即优先级，特异判据在前"（V-6 落 docs/07）
+  - collect mock 三要素（确定性/诚实标注/--from-file）通过；mock 永不参与 field 级证据
+  - U-4 TOFU 过渡正确，终态信任锚在 registry keyring（docs/08 §3.3）
+- **本轮新设计（发起人需求）**：docs/08-capture-hub-deploy.md ——
+  经验捕获三通道（from-session/record/向导）、一键认证打通（run 终点预填 attest）、
+  git-based Skills Hub（registry 仓库+客户端三道安全门+静态网站生成器）、
+  一键部署三形态（install.sh/docker/离线包）+ doctor + 交互模型（入口 A 交互态/入口 B 告警→IM）
+- **交接给**：Opus 4.8 —— 从 TODO-opus.md 第六轮 V-1 开始，**docs/08 是本轮必读**
 
 ---
+
+## 历史状态存档（九）
+
+- **更新者**：Opus 4.8（五轮完成）
+- 73 Skill/8 域/49 sim_verified、CLI 打磨(resume/三选项/⟨?⟩)、collect、obs-sec-proc 12 Skill、Ed25519 签名
 
 ## 历史状态存档（八）
 

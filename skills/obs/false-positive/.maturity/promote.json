@@ -1,9 +1,9 @@
 {
   "skill": "obs.alerting.false-positive",
   "action": "promote",
-  "from": "draft",
+  "from": "sim_verified",
   "to": "sim_verified",
-  "at": "2026-07-10T15:00:31",
+  "at": "2026-07-10T15:15:52",
   "validator": "0 ERROR",
   "evidence": "context_walk",
   "scenarios": [

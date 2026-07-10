@@ -238,3 +238,38 @@ R-6 关闭 / R-7 已裁决待实施(T-3) / F-1~F-9 全部关闭。
      （带 `template` 字段）比塞进 summary 更合适？
 - **不阻断**：当前形态可用、已验证、已交付 3 个。以上是"要不要为 proc 演进 schema"的设计问题，
   纯属 Fable 职权（我不改 schema）。若维持现状，我把这套 proc 写法补进 docs/07 作为规范即可。
+
+---
+# 第五轮裁决（Fable 5，2026-07-10）
+
+## 裁决
+
+- **U-1~U-4 验收通过**。resume 的"控制 token 不覆盖 state"处理正确；E-6 当场拦住自己
+  （collect events）是规范生效的最好证据；proc 域"params 采集 + 真实决策路由"的形态
+  比硬凑决策树高明。
+- **R-8 裁决：维持现状，暂不动 schema**。理由：① proc 三个 Skill 的分支确有语义
+  （审批链/详尽度/交接要求），Diagnostic 借道成立；② `kind: Playbook` 与 `artifact:` 块
+  的真实需求方是 Hub 网站的渲染与分类——Hub（第六轮 V 系列）落地后按实际渲染需求再定，
+  避免为未出现的消费者改 schema。proc 写法作为规范补 docs/07（V-6，含 connectors:[human]
+  官方化说明）。
+- **F-12（五轮抽查发现，已修）**：obs/false-positive 分支顺序错误——阈值判据排在抖动判据前，
+  抖动告警采样瞬间值常落回阈值下，会被误判为"阈值不当"并给出错误的改阈值建议。
+  已调序（flapping 先判）。**教训入 docs/07 C7：分支顺序即优先级，
+  "更特异的判据必须排在更宽泛的判据前"**（与 xid 的 79 先于 ECC 组同理）——V-6 落笔。
+- **collect mock 边界：通过**。确定性 + stderr 诚实标注 + --from-file 真实集成点，三要素齐。
+  约束一条：**mock 数据永不参与 promote 到 field_verified**（field 级证据必须 real 来源），
+  promote.py 已天然满足（field 靠 attestation 而非 sim）。
+- **U-4 信任模型：TOFU 作为过渡正确**，终态信任锚在 Hub registry 的 keyring
+  （维护者签核、hub sync 分发）。设计已入 docs/08 §3.3。
+
+## 抽查结论（obs/sec 9 个诊断）
+
+合格：暴破"失败后成功=疑似攻破最高优先"、漏洞"KEV/可修复优先于 CVSS"、
+target-down 按 lastError 三分、cert 分桶重叠被 expired→7d→30d 短路顺序化解、
+abnormal-login 守住"只诊断不封禁"的 D1 边界。不合格项仅 F-12（已修）。
+
+## 产品缺口盘点（应发起人要求）
+
+经验捕获/一键认证打通/hub 拉推/社区网站/一键部署/用户手册——**全部缺失或半缺失**，
+架构设计已出（docs/08），实施为第六轮 V-1~V-6。这是"人侧飞轮"，与前四轮的
+"模型侧飞轮"合起来才是完整社区。
