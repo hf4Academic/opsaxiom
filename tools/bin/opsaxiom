@@ -51,13 +51,23 @@ def cmd_run(args):
     if args.real:
         mode = "real"
     meta = s["metadata"]
-    print(f"OpsAxiom · {meta['name']}  [{_badge(meta['maturity'])}]  模式={mode}")
-    print(f"（导航档：Agent 只出方案与变更简报，写操作由你亲自执行）")
     io = runtime.IO(answers=answers, echo=True)
     sid = args.sid or f"{args.skill.replace('.', '_')}-run"
     sess = runtime.Session(p, params=params, mode=mode, io=io, sid=sid)
-    res = sess.run()
+    start = None
+    if args.resume:
+        start = sess.load_state()
+        if not start:
+            print(f"无可续跑的会话状态：{sid}", file=sys.stderr)
+            return 2
+        print(f"OpsAxiom · {meta['name']}  [{_badge(meta['maturity'])}]  ⏪ 续跑，从节点 {start} 恢复")
+    else:
+        print(f"OpsAxiom · {meta['name']}  [{_badge(meta['maturity'])}]  模式={sess.mode}")
+        print(f"（导航档：Agent 只出方案与变更简报，写操作由你亲自执行）")
+    res = sess.run(start=start)
     print(f"\n审计已记录：{res['audit_file']}")
+    if res["outcome"] == "quit":
+        print(f"会话中断，进度已存。续跑： opsaxiom run {args.skill} --sid {sid} --resume")
     return 0
 
 
@@ -70,6 +80,7 @@ def main():
     rp.add_argument("--real", action="store_true", help="只读命令自动执行")
     rp.add_argument("--answers", help="脚本驱动的答案文件")
     rp.add_argument("--sid", help="会话 id")
+    rp.add_argument("--resume", action="store_true", help="从上次中断处续跑（需配 --sid）")
     rp.set_defaults(fn=cmd_run)
     try:
         from opsaxiom_diagnose import add_diagnose  # T-2
