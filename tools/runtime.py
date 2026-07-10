@@ -1,0 +1,277 @@
+"""
+运行时引擎——导航档（Navigator）会话（T-1，落实 docs/01 §2 第一档 + R3/R5/R6）。
+
+导航档语义：Agent 只出方案、变更简报、判读，**人执行一切命令**（写操作 Agent 绝不代执行）。
+每一步"执行→采集输出→机器判读→符合预期才放行下一步"（R5）。风险操作前渲染变更简报（R6）。
+
+输入抽象 IO：交互式读 stdin，或脚本驱动（答案文件，供测试/演示非交互运行）。
+审计：每步落 ~/.opsaxiom/sessions/<sid>.jsonl（R11 脱敏；这里只记节点/决策/输入摘要）。
+
+模板渲染（§7.4/§7.6c，落实 R-7）：`{{expr}}` 用受限表达式求值器对当前上下文求值，
+支持 {{mount}}(param) / {{rows[0].comm}} / {{output.pcent}}(节点标量) / {{sid}}。
+"""
+import json
+import os
+import pathlib
+import re
+import sys
+
+HERE = pathlib.Path(__file__).resolve().parent
+ROOT = HERE.parent
+sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(ROOT / "sim"))
+import yaml            # noqa: E402
+import exprlang        # noqa: E402
+import parsers         # noqa: E402
+import run_sim         # noqa: E402  复用 _is_readonly / _default_parse
+
+_TEMPLATE = re.compile(r"\{\{\s*(.+?)\s*\}\}")
+
+
+def render(text, ctx):
+    """把 {{expr}} 用受限求值器渲染。求值失败保留原样(不崩)。"""
+    if not isinstance(text, str):
+        return text
+
+    def repl(m):
+        try:
+            v = exprlang.evaluate(m.group(1), ctx)
+            return "" if v is None else str(v)
+        except Exception:
+            return m.group(0)
+    return _TEMPLATE.sub(repl, text)
+
+
+class IO:
+    """交互 or 脚本。脚本模式：answers[node_id] 提供该节点的人类输入。"""
+    def __init__(self, answers=None, echo=True):
+        self.answers = answers          # dict|None
+        self.echo = echo
+        self.transcript = []
+
+    def _p(self, s=""):
+        if self.echo:
+            print(s)
+
+    def paste(self, node, prompt):
+        """check：粘贴命令输出（脚本模式取 answers[node]，交互模式读到 END）。"""
+        self._p(prompt)
+        if self.answers is not None:
+            return self.answers.get(node, "")
+        lines = []
+        for line in sys.stdin:
+            if line.strip() == "END":
+                break
+            lines.append(line.rstrip("\n"))
+        return "\n".join(lines)
+
+    def choose(self, node, prompt, options):
+        self._p(prompt)
+        for i, o in enumerate(options, 1):
+            self._p(f"  {i}) {o['label']}")
+        if self.answers is not None:
+            a = str(self.answers.get(node, "1")).strip()
+            idx = int(a) if a.isdigit() else next((i for i, o in enumerate(options, 1) if o["label"] == a), 1)
+        else:
+            idx = int(input("选择 [1-%d]: " % len(options)) or "1")
+        idx = max(1, min(idx, len(options)))
+        return idx - 1
+
+    def confirm(self, node, prompt):
+        self._p(prompt)
+        if self.answers is not None:
+            return str(self.answers.get(node, "n")).strip().lower() in ("y", "yes", "是")
+        return input("[y/N]: ").strip().lower() in ("y", "yes")
+
+
+class Session:
+    def __init__(self, skill_path, params=None, mode="guided", io=None, sid="sess"):
+        self.skill = yaml.safe_load(pathlib.Path(skill_path).read_text(encoding="utf-8"))
+        self.nodes = {n["id"]: n for n in self.skill["tree"]["nodes"]}
+        self.entry = self.skill["tree"]["entry"]
+        self.mode = mode              # guided | real
+        self.io = io or IO()
+        self.sid = sid
+        self.ctx = dict(params or {})
+        self.ctx["sid"] = sid
+        self.path = []
+        self.audit = []
+        self.outcome = None
+
+    # ---- 审计 ----
+    def _log(self, node, ntype, **kw):
+        self.audit.append({"node": node, "type": ntype, **kw})
+
+    def _write_audit(self):
+        d = pathlib.Path(os.environ.get("OPSAXIOM_HOME", pathlib.Path.home() / ".opsaxiom")) / "sessions"
+        d.mkdir(parents=True, exist_ok=True)
+        f = d / f"{self.sid}.jsonl"
+        with f.open("w", encoding="utf-8") as fh:
+            for rec in self.audit:
+                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        return f
+
+    # ---- 渲染 ----
+    def r(self, text):
+        return render(text, self.ctx)
+
+    def _cmd_for(self, run):
+        """取 linux/kubectl/... 任一平台命令，渲染模板。"""
+        if not isinstance(run, dict):
+            return ""
+        for _, c in run.items():
+            return self.r(c)
+        return ""
+
+    def _cautions(self, n):
+        for c in n.get("cautions", []) or []:
+            self.io._p(f"  ⚠ {self.r(c)}")
+
+    def _parse_into_ctx(self, node, stdout):
+        pfn = parsers.get_parser(node["parser"]) if node.get("parser") else None
+        out = pfn(stdout) if pfn else run_sim._default_parse(stdout)
+        if not isinstance(out, dict):
+            out = {"rows": out}
+        # 节点标量并入 output.*（§7.6c）与裸命名空间
+        scalar_ns = {k: v for k, v in out.items() if k not in ("rows", "lines")}
+        self.ctx.update(out)
+        self.ctx["output"] = {**self.ctx.get("output", {}), **scalar_ns,
+                              **(out.get("output") if isinstance(out.get("output"), dict) else {})}
+        self.ctx.setdefault("lines", stdout.splitlines())
+
+    def _eval_branch(self, n):
+        for br in n.get("branch", []):
+            try:
+                if exprlang._truthy(exprlang.evaluate(br["when"], self.ctx)):
+                    return br["goto"]
+            except exprlang.EvalError:
+                pass
+        return n.get("otherwise", "escalate")
+
+    # ---- 节点处理 ----
+    def _do_check(self, n):
+        self.io._p(f"\n━━ [排查] {self.r(n.get('title',''))} ━━")
+        self._cautions(n)
+        cmd = self._cmd_for(n.get("run"))
+        if self.mode == "real" and run_sim._is_readonly(cmd):
+            import subprocess
+            self.io._p(f"▶ 自动执行(只读)：{cmd}")
+            try:
+                stdout = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True, timeout=15).stdout
+            except Exception as e:
+                stdout = ""
+                self.io._p(f"  命令异常：{e}")
+        else:
+            stdout = self.io.paste(n["id"], f"▶ 请执行并粘贴输出（END 结束）：\n  $ {cmd}")
+        self._parse_into_ctx(n, stdout)
+        nxt = self._eval_branch(n)
+        self.io._p(f"→ 判读结果：转 {nxt}")
+        self._log(n["id"], "check", cmd=cmd, next=nxt)
+        return nxt
+
+    def _do_ask(self, n):
+        self.io._p(f"\n━━ [选择] {self.r(n.get('title',''))} ━━")
+        self.io._p(self.r(n["question"]))
+        idx = self.io.choose(n["id"], "", n["options"])
+        opt = n["options"][idx]
+        if n.get("binds"):
+            self.ctx[n["binds"]] = opt["label"]
+        self._log(n["id"], "ask", chose=opt["label"], next=opt["goto"])
+        return opt["goto"]
+
+    def _do_action(self, n):
+        risk = n.get("risk", "?")
+        self.io._p(f"\n━━ [变更] {self.r(n.get('title',''))} ━━  风险: {risk}")
+        pf = n.get("preflight")
+        if pf:
+            self.io._p("📋 变更简报（Pre-flight Brief）")
+            self.io._p(f"  影响面: {self.r(pf.get('blast_radius',''))}")
+            if pf.get("est_downtime"):
+                self.io._p(f"  预估停机: {self.r(pf['est_downtime'])}")
+            self.io._p("  执行中盯这些指标:")
+            for w in pf.get("watch", []):
+                self.io._p(f"    · {self._cmd_for(w.get('run'))}  → 期望: {self.r(w.get('expect',''))}")
+            self.io._p("  什么情况立即中止:")
+            for a in pf.get("abort_if", []):
+                self.io._p(f"    · {self.r(a)}")
+        rb = n.get("rollback", {})
+        self.io._p("  ── 将要执行的命令（导航档：请你亲自执行，Agent 不代执行）──")
+        self.io._p(f"    $ {self._cmd_for(n.get('run'))}")
+        if rb.get("advisory"):
+            self.io._p(f"  ── 回滚（人工指引，{rb.get('type')}）──  非可执行命令，见 cautions")
+        else:
+            self.io._p(f"  ── 回滚方案（{rb.get('type')}）──")
+            if rb.get("type") == "snapshot" and rb.get("snapshot"):
+                self.io._p(f"    先快照: $ {self._cmd_for(rb['snapshot'].get('run'))}")
+            self.io._p(f"    $ {self._cmd_for(rb.get('run'))}")
+        self._cautions(n)
+        if n.get("human_only"):
+            self.io._p("  ⛔ human_only：此步骤 Agent 任何档位都不执行，仅出指导。")
+        ok = self.io.confirm(n["id"], "需要审批。确认已理解简报、将亲自执行？")
+        self._log(n["id"], "action", risk=risk, approved=ok)
+        if not ok:
+            self.io._p("→ 未确认，升级人工。")
+            return "escalate"
+        # verify 指导
+        v = n.get("verify", {})
+        vcmd = self._cmd_for(v.get("run"))
+        stdout = self.io.paste(n["id"] + ":verify", f"执行完成后，粘贴 verify 输出判定结果（END 结束）：\n  $ {vcmd}")
+        if v.get("parser"):
+            self._parse_into_ctx({"parser": v["parser"]}, stdout)
+        passed = False
+        try:
+            passed = exprlang._truthy(exprlang.evaluate(v.get("assert", "false"), self.ctx))
+        except exprlang.EvalError:
+            passed = False
+        if passed:
+            self.io._p("→ verify 通过。")
+            return n.get("goto", "escalate")
+        self.io._p(f"→ verify 未过，on_fail={v.get('on_fail')}。")
+        return "rollback_guide" if v.get("on_fail") == "rollback" else "escalate"
+
+    def _do_terminal(self, n):
+        kind = n["type"]
+        icon = "✅" if kind == "done" else "⏫"
+        self.io._p(f"\n━━ {icon} {'结论' if kind=='done' else '升级人工'} ━━")
+        self.io._p(self.r(n.get("summary", "")))
+        self.outcome = kind
+        # 单比特反馈 + attest 提示
+        fb = self.skill.get("feedback", {}).get("ask")
+        if fb:
+            self.io._p(f"\n{fb} 👍/👎")
+            ans = self.io.paste(n["id"] + ":fb", "").strip() if self.io.answers is not None else ""
+            self._log(n["id"], "feedback", answer=ans)
+        self.io._p("（可运行 opsaxiom-attest 把这次验证沉淀为公共资产）")
+
+    def run(self):
+        node, guard = self.entry, 0
+        self.path = [node]
+        while guard < 80:
+            guard += 1
+            n = self.nodes.get(node)
+            if n is None:
+                if node == "rollback_guide":
+                    self.io._p("请按上方回滚方案执行回滚，然后重新评估。")
+                    self.outcome = "rolled_back"
+                    break
+                if node in ("escalate", "done"):
+                    self.io._p(f"\n━━ {node} ━━")
+                    self.outcome = node
+                    break
+                self.io._p(f"[异常] 未知节点 {node}")
+                break
+            t = n["type"]
+            if t == "check":
+                node = self._do_check(n)
+            elif t == "ask":
+                node = self._do_ask(n)
+            elif t == "action":
+                node = self._do_action(n)
+            elif t in ("done", "escalate"):
+                self._do_terminal(n)
+                break
+            else:
+                break
+            self.path.append(node)
+        f = self._write_audit()
+        return {"path": self.path, "outcome": self.outcome, "audit_file": str(f)}

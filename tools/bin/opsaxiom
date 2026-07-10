@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""
+opsaxiom —— OpsAxiom 运行时 CLI（导航档 MVP，T-1）。
+
+  opsaxiom run <skill-id> [--param k=v]... [--real] [--answers <file>]
+      交互式（或脚本驱动）走一个 Skill 的排查/变更决策树，导航档语义：
+      只出方案与变更简报，人执行一切命令，逐步判读放行。
+  opsaxiom diagnose "<症状>"        （T-2 实现）
+
+--answers <file>：YAML，非交互驱动（测试/演示）：
+  mode: guided|real
+  params: {mount: "/"}
+  answers: {<node_id>: <粘贴的命令输出 / 选项序号 / y|n>}
+"""
+import argparse
+import pathlib
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools"))
+import yaml            # noqa: E402
+import runtime         # noqa: E402
+
+
+def _find_skill(skill_id):
+    for p in (ROOT / "skills").rglob("skill.yaml"):
+        s = yaml.safe_load(p.read_text(encoding="utf-8"))
+        if s.get("metadata", {}).get("id") == skill_id:
+            return p, s
+    return None, None
+
+
+def _badge(maturity):
+    return {"draft": "⚪draft", "sim_verified": "🔵sim", "field_verified": "🟢field",
+            "certified": "🟡cert"}.get(maturity, maturity)
+
+
+def cmd_run(args):
+    p, s = _find_skill(args.skill)
+    if not p:
+        print(f"找不到 Skill: {args.skill}", file=sys.stderr)
+        return 2
+    params = dict(kv.split("=", 1) for kv in (args.param or []))
+    mode = "guided"
+    answers = None
+    if args.answers:
+        a = yaml.safe_load(pathlib.Path(args.answers).read_text(encoding="utf-8"))
+        mode = a.get("mode", "guided")
+        params = {**(a.get("params") or {}), **params}
+        answers = a.get("answers") or {}
+    if args.real:
+        mode = "real"
+    meta = s["metadata"]
+    print(f"OpsAxiom · {meta['name']}  [{_badge(meta['maturity'])}]  模式={mode}")
+    print(f"（导航档：Agent 只出方案与变更简报，写操作由你亲自执行）")
+    io = runtime.IO(answers=answers, echo=True)
+    sid = args.sid or f"{args.skill.replace('.', '_')}-run"
+    sess = runtime.Session(p, params=params, mode=mode, io=io, sid=sid)
+    res = sess.run()
+    print(f"\n审计已记录：{res['audit_file']}")
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="opsaxiom")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    rp = sub.add_parser("run", help="走一个 Skill 的决策树")
+    rp.add_argument("skill")
+    rp.add_argument("--param", action="append")
+    rp.add_argument("--real", action="store_true", help="只读命令自动执行")
+    rp.add_argument("--answers", help="脚本驱动的答案文件")
+    rp.add_argument("--sid", help="会话 id")
+    rp.set_defaults(fn=cmd_run)
+    try:
+        from opsaxiom_diagnose import add_diagnose  # T-2
+        add_diagnose(sub)
+    except Exception:
+        pass
+    args = ap.parse_args()
+    return args.fn(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

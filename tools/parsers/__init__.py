@@ -55,5 +55,7 @@ def registered_names():
 # 填充注册表（各子模块提供 install(register)）
 from . import table   # noqa: E402
 from . import health  # noqa: E402
+from . import mw      # noqa: E402
 table.install(register)
 health.install(register)
+mw.install(register)

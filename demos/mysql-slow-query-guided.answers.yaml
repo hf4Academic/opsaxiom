@@ -1,0 +1,11 @@
+mode: guided
+params:
+  dsn: db1:3306
+answers:
+  assess: 'threads_connected 20
+
+    max_query_time 25'
+  find_slow: 'Waiting for lock 2
+
+    Sending data 0'
+  lock_exit:fb: 👍
