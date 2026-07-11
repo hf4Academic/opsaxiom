@@ -73,7 +73,7 @@ def cmd_run(args):
 
 def main():
     ap = argparse.ArgumentParser(prog="opsaxiom")
-    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub = ap.add_subparsers(dest="cmd")          # W-1：无子命令→进 REPL
     rp = sub.add_parser("run", help="走一个 Skill 的决策树")
     rp.add_argument("skill")
     rp.add_argument("--param", action="append")
@@ -103,6 +103,9 @@ def main():
     except Exception:
         pass
     args = ap.parse_args()
+    if not getattr(args, "cmd", None):           # 裸敲 opsaxiom → Terminal REPL
+        import repl
+        return repl.start()
     return args.fn(args)
 
 

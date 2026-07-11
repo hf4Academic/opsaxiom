@@ -1,0 +1,243 @@
+"""
+Terminal REPL —— OpsAxiom 默认交互入口（W-1，docs/08 §4.2a）。
+
+心智模型：像跟老师傅说话，不像查手册。裸敲 `opsaxiom` 就进来，敲字（说人话）就有反应。
+- 非命令输入 = 症状 → diagnose top-3（自然语言是一等公民）
+- 纯数字 = 选上次候选 → 原地进导航档（复用 runtime.Session，同进程）
+- 少量内置词（可选，不学也能用）：help/list/info/run/doctor/hub/record/resume/quit
+- Ctrl-C 中断当前 Skill 回提示符；空闲再 Ctrl-C/quit 退出。无 TTY 不进 REPL。
+
+REPL 不复制任何业务逻辑：diagnose/run/attest 全走既有模块。
+"""
+import os
+import pathlib
+import sys
+
+HERE = pathlib.Path(__file__).resolve().parent
+ROOT = HERE.parent
+sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(ROOT / "sim"))
+import yaml            # noqa: E402
+import diagnose        # noqa: E402
+import runtime         # noqa: E402
+
+_BADGE = {"draft": "⚪草稿", "sim_verified": "🔵已验证",
+          "field_verified": "🟢实地", "certified": "🟡认证"}
+_BUILTINS = {"help", "?", "list", "info", "run", "doctor", "hub", "record",
+             "skill", "resume", "quit", "exit", "q"}
+
+
+def _find_skill(skill_id):
+    for p in (ROOT / "skills").rglob("skill.yaml"):
+        s = yaml.safe_load(p.read_text(encoding="utf-8"))
+        if s.get("metadata", {}).get("id") == skill_id:
+            return p, s
+    return None, None
+
+
+def _home():
+    return pathlib.Path(os.environ.get("OPSAXIOM_HOME", pathlib.Path.home() / ".opsaxiom"))
+
+
+class Repl:
+    def __init__(self):
+        self.idx = diagnose.load_index()
+        self.last_hits = []          # 上次 diagnose 的候选（供数字选择）
+        self.running = True
+
+    # ---------- 展示 ----------
+    def _welcome(self):
+        verified = sum(1 for s in self.idx if s["maturity"] != "draft")
+        print(f"OpsAxiom v0.1 · {len(self.idx)} 个 Skill（{verified} 已验证）"
+              f" · 输入你遇到的问题，或 help 看用法")
+
+    def _show_hits(self, hits):
+        if not hits:
+            print("  没匹配到。换个说法试试，或 `list` 看全部域，或 `run <id>` 直接指定。")
+            return
+        print(f"  找到 {len(hits)} 个匹配：")
+        for i, (_, sk) in enumerate(hits, 1):
+            print(f"  {i}) [{_BADGE.get(sk['maturity'], sk['maturity'])}] {sk['name']}"
+                  f"       {sk['id']}")
+            if sk.get("symptom"):
+                print(f"       {sk['symptom']}")
+        print("  → 输入序号进入排查，或继续描述别的问题。")
+
+    # ---------- 内置词 ----------
+    def _help(self):
+        print("""用法（大多数时候你只需要直接描述问题）：
+  直接说问题        如：磁盘满了但df有空间 / gpu掉卡 xid 79 / kafka积压
+  <数字>            选择上一次列出的候选，进入逐步排查
+  list [域]         列出全部或某域的 Skill（域：host k8s network middleware aicomp obs sec proc）
+  info <id>         看某个 Skill 的概况
+  run <id>          直接进入某个 Skill 的排查
+  resume            续跑上次中断的排查
+  doctor            环境自检
+  hub / record / skill …   Skills Hub 与经验捕获（见手册 docs/10）
+  quit / Ctrl-C     退出""")
+
+    def _list(self, dom=None):
+        rows = [s for s in self.idx if not dom or s["l1"] == dom]
+        rows.sort(key=lambda s: s["id"])
+        cur = None
+        for s in rows:
+            if s["l1"] != cur:
+                cur = s["l1"]
+                print(f"\n  {cur}")
+            print(f"    [{_BADGE.get(s['maturity'], s['maturity'])}] {s['id']}  —— {s['name']}")
+        print()
+
+    def _info(self, sid):
+        p, s = _find_skill(sid)
+        if not p:
+            print(f"  没有这个 Skill：{sid}")
+            return
+        m = s["metadata"]
+        nodes = s.get("tree", {}).get("nodes", [])
+        adir = p.parent / "attestations"
+        n_att = len(list(adir.glob("*.yaml"))) if adir.is_dir() else 0
+        print(f"  {m['name']}  [{_BADGE.get(m['maturity'], m['maturity'])}]")
+        print(f"    id: {m['id']} · 分类: {m['taxonomy']} · v{m['version']}")
+        print(f"    决策树: {len(nodes)} 个节点 · 实地验证记录: {n_att}")
+        cauts = [c for n in nodes for c in (n.get("cautions") or [])][:3]
+        for c in cauts:
+            print(f"    ⚠ {c[:88]}")
+        print(f"  → run {m['id']} 开始排查")
+
+    def _run(self, sid, resume=False):
+        p, s = _find_skill(sid)
+        if not p:
+            print(f"  没有这个 Skill：{sid}")
+            return
+        io = runtime.IO(answers=None, echo=True)
+        session_id = sid.replace(".", "_") + "-repl"
+        sess = runtime.Session(p, params={}, mode="guided", io=io, sid=session_id)
+        start = None
+        if resume:
+            start = sess.load_state()
+            if not start:
+                print("  没有可续跑的进度。")
+                return
+        print(f"\n进入：{s['metadata']['name']}（导航档：你敲命令，Agent 只出方案与判读）")
+        try:
+            res = sess.run(start=start)
+        except KeyboardInterrupt:
+            print("\n  ⏸ 已中断本次排查（进度已存）。输入 resume 可续跑，或继续描述别的问题。")
+            return
+        if res["outcome"] == "quit":
+            print("  已退出本次排查（进度已存，输入 resume 续跑）。")
+
+    def _resume_pick(self):
+        sd = _home() / "sessions"
+        states = sorted(sd.glob("*.state.json")) if sd.is_dir() else []
+        if not states:
+            print("  没有可续跑的排查。")
+            return
+        import json
+        print("  可续跑的排查：")
+        metas = []
+        for i, st in enumerate(states, 1):
+            d = json.loads(st.read_text(encoding="utf-8"))
+            metas.append(d)
+            print(f"  {i}) {d.get('skill_id')}  停在节点 {d.get('node')}")
+        sel = input("  选择序号续跑（回车取消）: ").strip()
+        if sel.isdigit() and 1 <= int(sel) <= len(metas):
+            self._run(metas[int(sel) - 1]["skill_id"], resume=True)
+
+    def _delegate(self, parts):
+        """hub/record/skill/doctor 交给既有 CLI 模块处理（复用，不复制）。"""
+        import argparse
+        ap = argparse.ArgumentParser(prog="opsaxiom", add_help=False)
+        sub = ap.add_subparsers(dest="cmd")
+        for mod, fn in (("doctor", "add_doctor"), ("capture_cli", "add_capture"),
+                        ("hub_cli", "add_hub")):
+            try:
+                m = __import__(mod)
+                getattr(m, fn)(sub)
+            except Exception:
+                pass
+        try:
+            args = ap.parse_args(parts)
+        except SystemExit:
+            return
+        if hasattr(args, "fn"):
+            try:
+                args.fn(args)
+            except Exception as e:
+                print(f"  出错：{e}")
+
+    # ---------- 主循环 ----------
+    def _handle(self, line):
+        line = line.strip()
+        if not line:
+            return
+        parts = line.split()
+        head = parts[0].lower()
+        if head in ("quit", "exit", "q"):
+            self.running = False
+            return
+        if head in ("help", "?"):
+            self._help(); return
+        if head == "list":
+            self._list(parts[1] if len(parts) > 1 else None); return
+        if head == "info" and len(parts) > 1:
+            self._info(parts[1]); return
+        if head == "run" and len(parts) > 1:
+            self._run(parts[1]); return
+        if head == "resume":
+            self._resume_pick(); return
+        if head in ("doctor", "hub", "record", "skill"):
+            self._delegate(parts); return
+        if line.isdigit():
+            i = int(line)
+            if 1 <= i <= len(self.last_hits):
+                self._run(self.last_hits[i - 1][1]["id"])
+            else:
+                print("  没有这个序号。先描述问题看到候选，再输序号。")
+            return
+        # 默认：当症状
+        self.last_hits = diagnose.match(line, idx=self.idx, top=3)
+        self._show_hits(self.last_hits)
+
+    def loop(self):
+        try:
+            import readline  # noqa: F401  上下键历史
+            hist = _home() / "history"
+            _home().mkdir(parents=True, exist_ok=True)
+            try:
+                readline.read_history_file(str(hist))
+            except Exception:
+                pass
+        except Exception:
+            hist = None
+        self._welcome()
+        idle_interrupt = False
+        while self.running:
+            try:
+                line = input("axiom> ")
+                idle_interrupt = False
+                self._handle(line)
+            except KeyboardInterrupt:
+                if idle_interrupt:
+                    print("\n再见。")
+                    break
+                print("\n（再按一次 Ctrl-C 退出，或 quit）")
+                idle_interrupt = True
+            except EOFError:
+                print("\n再见。")
+                break
+        if hist:
+            try:
+                import readline
+                readline.write_history_file(str(hist))
+            except Exception:
+                pass
+
+
+def start():
+    if not sys.stdin.isatty():
+        print("OpsAxiom 交互态需要终端。脚本/自动化请用子命令："
+              "opsaxiom diagnose \"<症状>\" 或 opsaxiom run <id>。", file=sys.stderr)
+        return 2
+    Repl().loop()
+    return 0
