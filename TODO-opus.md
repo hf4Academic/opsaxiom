@@ -1,6 +1,46 @@
 # Opus 4.8 任务书
 
-# 第七轮（Fable 布置，2026-07-10 六轮评审后）——Terminal REPL：默认交互入口
+# 第八轮（Fable 布置，2026-07-11 七轮评审后）——告警入口 + 信任治理收尾
+
+> 七轮裁决：F-14 已修（sid 单一事实来源）；F-15 诚实性教训（"已具备"必须实测）。
+> Terminal 是底座（已成），本轮补"告警找人"的入口 B 最小闭环，并收尾信任治理。
+
+## X-1 diagnose --json + 告警 webhook MVP（入口 B，docs/08 §4.2）
+- `opsaxiom diagnose "<症状>" --json`：输出结构化候选（id/name/maturity/score/symptom），
+  兑现 F-15。
+- `tools/bin/opsaxiom-webhook`：stdlib http.server 收 Alertmanager 风格 webhook →
+  取 alertname/description 拼症状 → diagnose → 组装通知卡片（候选 top-3 + 第一步
+  指导 + `opsaxiom run <id>` 提示）→ 出站到钉钉/飞书机器人 webhook URL（urllib，
+  两种卡片格式）。`--dry-run` 打印卡片不出站（测试用）；R11：卡片只含 Skill 信息与
+  告警摘要，不含凭据。配 tests（本地起 server + 假告警 POST + dry-run 断言）。
+
+## X-2 真实执行器扩面：k8s 只读
+- sim `_ALLOW_LEAD`/`_is_readonly` 支持 `kubectl get/describe/logs/top`（只读白名单，
+  显式拒 apply/delete/edit/scale/patch）；k8s 域挑 3 个诊断补 `mode: real` 场景
+  （无集群环境跳过不失败——探测 kubectl 与 KUBECONFIG）。
+
+## X-3 hub keyring 治理工具（关闭 R-9）
+- `opsaxiom hub keyring list / add <pub> --name <who> / remove <who>`：管理本地
+  keys/trusted/；`hub keyring export` 供 registry 侧合入。
+- registry 侧签核流程写入 docs/08 §3.3 补段（维护者=签核人，PR 双人复核入 trusted.pub）。
+  R-9 关闭记录进 REVIEW-QUEUE。
+
+## X-4 field_verified 晋级判定
+- promote.py 增 field 判定：≥3 份**独立** attestation（不同 attestor 且 env_fingerprint
+  分桶不同，docs/05 §3）且验签有效 → 晋 field_verified；
+  测试用 3 份合成签名 attestation 演练完整晋级（演练后清理，不留 fixture 污染）。
+
+## X-5 收尾
+- docs/07 新建 T 系列（工具类通则）：T-1 标识符单一事实来源（F-14）。
+- HANDOFF 交接规则补"所有'已具备/已实现'表述写入前必须实测"（F-15）。
+- README/HANDOFF 更新，交接 Fable 八轮评审。
+
+进度勾选区（Opus 更新）：
+- [ ] X-1  - [ ] X-2  - [ ] X-3  - [ ] X-4  - [ ] X-5
+
+---
+
+# 第七轮（Fable 布置，2026-07-10 六轮评审后）——Terminal REPL【已完成，存档】
 
 > 设计依据：**docs/08 §4.2a（Terminal REPL 规格，必读）**。发起人拍板：Terminal 是
 > 产品默认交互入口（最普遍，不依赖 IM）。六轮裁决：F-13 已修（B10 密钥不进制品）。

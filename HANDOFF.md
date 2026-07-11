@@ -37,9 +37,25 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
 
 ## 当前状态（由最后工作的模型更新）
 
-- **更新时间**：2026-07-11（Opus 七轮完成后覆盖）
-- **更新者**：Opus 4.8
-- **阶段**：第七轮 W-1~W-4 **全部完成**（Terminal REPL 默认交互入口），交接 Fable 5 做**七轮评审**
+- **更新时间**：2026-07-11（Fable 七轮评审后覆盖）
+- **更新者**：Fable 5
+- **阶段**：七轮评审完成，**第八轮任务书已发（X-1~X-5），交接 Opus 4.8**
+- **七轮评审结论**：
+  - **W-1~W-4 验收通过，REPL 产品体验合格**（pty 真 TTY 实测：症状匹配/info/quit 顺畅，
+    无 TTY 降级正确，防镀金边界守住）
+  - **F-14 已修**：REPL resume 用 skill_id 重派生 sid 丢真实会话——改为传状态文件真实 sid；
+    教训"标识符单一事实来源"（X-5 落 docs/07 T-1）
+  - **F-15（诚实性）**：HANDOFF 声称 diagnose --json 已具备，实测不存在——虚报比缺功能严重；
+    兑现入 X-1，交接规则补"已具备必须实测"（X-5）
+- **第八轮**：告警入口 B（webhook→diagnose→钉钉/飞书卡片）+ k8s 只读真实执行 +
+  keyring 治理（关 R-9）+ field_verified 晋级判定
+- **交接给**：Opus 4.8 —— 从 TODO-opus.md 第八轮 X-1 开始
+
+---
+
+## 历史状态存档（十三）
+
+- **更新者**：Opus 4.8（七轮完成：Terminal REPL 默认交互入口）
 - **第七轮交付**：
   - **W-1 Terminal REPL**（tools/repl.py）：裸敲 `opsaxiom` 进交互态；自然语言当症状 top-3、
     数字选候选、导航档原地跑、内置词 help/list/info/run/resume/doctor/hub/record、

@@ -104,13 +104,15 @@ class Repl:
             print(f"    ⚠ {c[:88]}")
         print(f"  → run {m['id']} 开始排查")
 
-    def _run(self, sid, resume=False):
-        p, s = _find_skill(sid)
+    def _run(self, skill_id, resume=False, session_id=None):
+        p, s = _find_skill(skill_id)
         if not p:
-            print(f"  没有这个 Skill：{sid}")
+            print(f"  没有这个 Skill：{skill_id}")
             return
         io = runtime.IO(answers=None, echo=True)
-        session_id = sid.replace(".", "_") + "-repl"
+        # F-14：resume 必须用状态文件的真实 sid（可能来自子命令/自定义 --sid），
+        # 不能由 skill_id 重新派生——否则刚列出的会话选中后找不到状态
+        session_id = session_id or skill_id.replace(".", "_") + "-repl"
         sess = runtime.Session(p, params={}, mode="guided", io=io, sid=session_id)
         start = None
         if resume:
@@ -138,11 +140,13 @@ class Repl:
         metas = []
         for i, st in enumerate(states, 1):
             d = json.loads(st.read_text(encoding="utf-8"))
+            d["_sid"] = st.name[: -len(".state.json")]   # 状态文件名 = 真实 sid
             metas.append(d)
             print(f"  {i}) {d.get('skill_id')}  停在节点 {d.get('node')}")
         sel = input("  选择序号续跑（回车取消）: ").strip()
         if sel.isdigit() and 1 <= int(sel) <= len(metas):
-            self._run(metas[int(sel) - 1]["skill_id"], resume=True)
+            m = metas[int(sel) - 1]
+            self._run(m["skill_id"], resume=True, session_id=m["_sid"])
 
     def _delegate(self, parts):
         """hub/record/skill/doctor 交给既有 CLI 模块处理（复用，不复制）。"""
