@@ -10,14 +10,15 @@
 
 ```
 装      ./install.sh            # 完事自动体检；docker run opsaxiom 也行
-体检    opsaxiom doctor         # 红=必修 黄=可用但受限
-找      opsaxiom diagnose "磁盘满了但df有空间"
-查      opsaxiom run <skill-id> # 逐步指导，你敲命令，它判读放行
-        run 中变更步骤：确认/跳过/升级人工/退出(可 --resume 续)
+用      opsaxiom                # ← 就这一个词！进入交互态，敲字说问题即可
+          axiom> 磁盘满了但df有空间     # 直接说问题，列出候选
+          axiom> 1                      # 输序号，进入逐步排查
+          axiom> help / list / info <id> / resume / doctor / quit
 沉淀    排查完顺手答一句认证；没走skill就 record；老经验用 skill new
-拿      opsaxiom hub search 磁盘 ; opsaxiom hub pull <id>
-发      opsaxiom hub push <id>
+拿/发   axiom> hub search 磁盘   → hub pull <id>   ；发布 hub push <id>
+体检    opsaxiom doctor         # 红=必修 黄=可用但受限
 ```
+（子命令 `opsaxiom diagnose/run/...` 仍在，供脚本与自动化用；日常人用一个 `opsaxiom` 就够。）
 
 ---
 
@@ -44,23 +45,36 @@
 
 ## 第二章 · 用（一次完整排查长什么样）
 
-### 主线：说问题 → 找 Skill → 跟着查 → 顺手认证
-
-**1) 描述问题，让它找对应的排查流程（Skill）：**
+### 唯一需要记的一件事：敲 `opsaxiom`，然后说人话
 
 ```
-$ opsaxiom diagnose "磁盘满了但 df 显示还有空间"
-  1) [🔵sim] host.storage.capacity.disk-full —— 磁盘空间耗尽排查与处置
+$ opsaxiom
+OpsAxiom v0.1 · 73 个 Skill（49 已验证）· 输入你遇到的问题，或 help 看用法
+axiom>
+```
+
+这个 `axiom>` 提示符就是你和它打交道的地方。**你不用记任何命令**——直接把问题
+说出来就行。
+
+**1) 说问题，它列出对应的排查流程（Skill）：**
+
+```
+axiom> 磁盘满了但 df 显示还有空间
+  找到 3 个匹配：
+  1) [🔵已验证] 磁盘空间耗尽排查与处置       host.storage.capacity.disk-full
+       磁盘满了/No space left on device
   2) ...
+  → 输入序号进入排查，或继续描述别的问题。
 ```
 
-徽章表示这个 Skill 被验证到什么程度：⚪草稿 · 🔵仿真验证 · 🟢实地验证 · 🟡官方认证。
-优先选徽章高的。
+徽章表示验证到什么程度：⚪草稿 · 🔵已验证(仿真) · 🟢实地验证 · 🟡官方认证。优先选徽章高的。
+（想先了解某个：`info host.storage.capacity.disk-full` 看它的树和注意事项。）
 
-**2) 跟着它一步步查：**
+**2) 输个序号，就地进入逐步排查：**
 
 ```
-$ opsaxiom run host.storage.capacity.disk-full
+axiom> 1
+进入：磁盘空间耗尽排查与处置（导航档：你敲命令，Agent 只出方案与判读）
 ━━ [排查] 定位是哪个挂载点满了 ━━
   ⚠ df 有空间却报 No space：多半是 inode 耗尽，别只看容量
 ▶ 请执行并粘贴输出（END 结束）：
@@ -70,6 +84,8 @@ $ opsaxiom run host.storage.capacity.disk-full
 ```
 
 它**只出方案和判读，命令你自己敲**——这是"导航档"，最安全的默认档位。
+排查完自动回到 `axiom>`，可以接着问下一个问题。**中途按 Ctrl-C** 会暂停这次排查
+（进度已存），回到提示符；想接着来就输 `resume`。
 
 **3) 遇到要改动的步骤（变更），它先给你一份"变更简报"再等你拍板：**
 
@@ -87,8 +103,8 @@ $ opsaxiom run host.storage.capacity.disk-full
   1) 确认，我亲自执行  2) 跳过此步  3) 升级人工  4) 退出会话
 ```
 
-写操作**永远由你亲手执行**，它不代按。选 4 退出后，`opsaxiom run <id> --sid <会话> --resume`
-可从中断处接着来。
+写操作**永远由你亲手执行**，它不代按。选 4 退出后，在 `axiom>` 提示符输 `resume`
+就能从中断处接着来。
 
 **4) 查完，顺手把这次经历沉淀下来（见第三章）。**
 
@@ -106,7 +122,7 @@ $ opsaxiom run host.storage.capacity.disk-full
 
 三条路，按省力程度排：
 
-**A. 排查完顺手认证（最省力）** —— 你刚用 `opsaxiom run` 查完一个真问题，结尾它会问：
+**A. 排查完顺手认证（最省力）** —— 你刚在 `axiom>` 里查完一个真问题，结尾它会问：
 > 要把这次验证沉淀为社区凭据吗？[y/N]
 
 答 y，再补两个不敏感的信息（什么系统、大概多少台机器），30 秒生成一份**带签名**的验证记录。
