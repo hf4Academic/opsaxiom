@@ -28,8 +28,24 @@ _BADGE = {"draft": "⚪草稿", "sim_verified": "🔵已验证",
           "field_verified": "🟢实地", "certified": "🟡认证"}
 
 
-def symptom_from_alert(payload):
-    """从 Alertmanager 风格 payload 提取症状文本（取首条告警的 name+description）。"""
+import re as _re
+
+# R11（F-17）：外发卡片会进 IM（外部服务），自由文本可能夹带凭据。脱敏这些形态。
+_SECRET_PATS = [
+    _re.compile(r"(?i)\b(password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key|bearer)\b\s*[:=]?\s*\S+"),
+    _re.compile(r"://[^/\s:@]+:[^/\s@]+@"),          # user:pass@host
+    _re.compile(r"\b(gh[pousr]_[A-Za-z0-9]{6,}|xox[baprs]-[A-Za-z0-9-]{6,}|AKIA[0-9A-Z]{8,})\b"),  # 常见 token
+]
+
+
+def _redact(text):
+    for p in _SECRET_PATS:
+        text = p.sub("〔已脱敏〕", text or "")
+    return text
+
+
+def match_text_from_alert(payload):
+    """匹配用文本（本地 diagnose，可含全文）——取首条告警的 name+description+instance。"""
     alerts = payload.get("alerts") or [payload]
     a = alerts[0] if alerts else {}
     labels = a.get("labels", {})
@@ -37,6 +53,19 @@ def symptom_from_alert(payload):
     parts = [labels.get("alertname", ""), ann.get("description", "") or ann.get("summary", ""),
              labels.get("instance", "")]
     return " ".join(p for p in parts if p).strip() or "未知告警"
+
+
+def display_label_from_alert(payload):
+    """展示用标签（进外发卡片）——只取结构化 alertname+instance，且脱敏。R11。"""
+    alerts = payload.get("alerts") or [payload]
+    a = alerts[0] if alerts else {}
+    labels = a.get("labels", {})
+    parts = [labels.get("alertname", ""), labels.get("instance", "")]
+    return _redact(" ".join(p for p in parts if p).strip()) or "未知告警"
+
+
+def symptom_from_alert(payload):        # 兼容旧名（匹配语义）
+    return match_text_from_alert(payload)
 
 
 def build_card(symptom, hits):
@@ -62,9 +91,10 @@ def _wrap_for(notify, text):
 
 
 def dispatch(payload, notify, url, top=3, dry_run=False):
-    symptom = symptom_from_alert(payload)
-    hits = diagnose_json(symptom, top=top)
-    text = build_card(symptom, hits)
+    match_text = match_text_from_alert(payload)      # 全文，仅本地匹配
+    display = display_label_from_alert(payload)       # 脱敏结构化标签，进外发卡片
+    hits = diagnose_json(match_text, top=top)
+    text = build_card(display, hits)
     if dry_run or not url:
         print(text)
         return text

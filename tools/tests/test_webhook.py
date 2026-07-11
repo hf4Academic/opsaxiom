@@ -40,3 +40,14 @@ def test_wrap_feishu_vs_dingtalk():
     f = wh._wrap_for("feishu", "**x** `y`")
     assert d["msgtype"] == "markdown"
     assert f["msg_type"] == "text" and "**" not in f["content"]["text"]
+
+
+def test_f17_card_never_leaks_credentials():
+    """F-17（八轮评审）：告警自由文本夹带凭据，外发卡片必须脱敏；匹配仍用全文。"""
+    payload = {"alerts": [{"labels": {"alertname": "mysql 连接满", "instance": "db-01"},
+                           "annotations": {"description":
+                               "密码 hunter2 mysql://root:pw@host token=ghp_abcdef123456"}}]}
+    card = wh.dispatch(payload, "dingtalk", url=None, dry_run=True)
+    for secret in ("hunter2", "ghp_", "root:pw"):
+        assert secret not in card
+    assert "connection-exhausted" in card       # 全文匹配不受脱敏影响

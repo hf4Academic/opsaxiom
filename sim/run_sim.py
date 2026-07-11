@@ -58,9 +58,15 @@ _KUBECTL_WRITE = {"apply", "delete", "edit", "scale", "patch", "exec", "create",
                   "taint", "uncordon", "undo", "attach", "cp", "port-forward"}
 
 
+# shell 元字符：命令链接/替换/重定向。只读 kubectl 绝不需要它们，出现即拒（F-16 防注入）。
+_SHELL_META = re.compile(r"[;&|`$<>(){}]")
+
+
 def _is_readonly(cmd):
     lead = cmd.strip().split()[0] if cmd.strip() else ""
     if lead == "kubectl":
+        if _SHELL_META.search(cmd):        # 含 shell 元字符 → 拒（防 `; rm -rf /` / $(...) / `...`）
+            return False
         toks = set(cmd.split())
         if toks & _KUBECTL_WRITE:          # 含任何写动词 → 拒
             return False

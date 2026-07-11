@@ -1,6 +1,45 @@
 # Opus 4.8 任务书
 
-# 第八轮（Fable 布置，2026-07-11 七轮评审后）——告警入口 + 信任治理收尾
+# 第九轮（Fable 布置，2026-07-11 八轮评审后）——开源发布准备
+
+> 八轮裁决：F-16（kubectl shell 注入）/F-17（webhook 卡片凭据回显）已由 Fable 修复。
+> **新纪律：凡涉白名单/脱敏/验签的交付，必须附"对抗用例"小节（注入/夹带/绕过各≥2 例）。**
+> 项目已具备完整闭环（Skill 库+运行时+捕获+认证+Hub+部署），本轮做公开发布的工程准备。
+
+## Y-1 发布工程
+- LICENSE 文件（Apache-2.0 全文，与 Skill metadata 声明一致）。
+- CONTRIBUTING.md：贡献流程 = 捕获（三通道）→ lint → PR（含 tests+sim 场景）→ 评审 →
+  promote；引用 docs/07 全部规则；attestation 贡献与 keyring 加入流程（docs/08 §3.3a）。
+- CI 工作流（.gitea/workflows/ 或 .github/workflows/ 二选一，按 gitservice 支持）：
+  validate 全库 + pytest + sim 全场景，三绿才可合。
+- docs/07 落笔 T-3（先拒 shell 元字符再看动词）与 T-4（出站文本只能结构化+脱敏）。
+
+## Y-2 registry 试点
+- 用 hubtool build-registry 产出 registry/ 到独立目录结构说明 + 发布指引
+  （README-registry.md：如何把它推成一个 git 仓库、如何配 CI 重建 index/站点）。
+- keyring 签核流程演练一遍（add 维护者公钥 → pull 显示"可信"），截输出入文档。
+
+## Y-3 certified 阶梯设计落实（Fable 裁决的机制，Opus 实施工具位）
+- 机制（已定，见下）：certified = field_verified + **领域评审人签署 review 记录** +
+  累计 ≥10 份 attestation。评审人 = registry keyring 中标记 `role: reviewer` 的身份
+  （keyring 条目扩展名段 `<name>.reviewer.pub`）。
+- 实施：`promote certify <skill>` 检查三条件；review 记录 = attestations/ 旁的
+  reviews/<date>-<reviewer>.yaml（signed，格式同 attestation 但 outcome→verdict:
+  approve/reject + comments）。schema 新文件 review.schema.json（Opus 可建新 schema
+  文件，不改既有 schema/）。
+- 对抗用例：非 reviewer 签的 review 不算；review 验签失败不算；<10 attestation 不过。
+
+## Y-4 收尾
+- README「项目状态」更新为发布口径（去内部轮次叙事，加 badges 区）；
+- HANDOFF 交接 Fable 九轮评审（评审重点：CONTRIBUTING 对外部贡献者是否自洽、
+  certified 对抗用例、CI 是否真跑）。
+
+进度勾选区（Opus 更新）：
+- [ ] Y-1  - [ ] Y-2  - [ ] Y-3  - [ ] Y-4
+
+---
+
+# 第八轮（Fable 布置，2026-07-11 七轮评审后）——告警入口 + 信任治理【已完成，存档】
 
 > 七轮裁决：F-14 已修（sid 单一事实来源）；F-15 诚实性教训（"已具备"必须实测）。
 > Terminal 是底座（已成），本轮补"告警找人"的入口 B 最小闭环，并收尾信任治理。

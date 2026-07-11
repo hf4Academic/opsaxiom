@@ -127,3 +127,11 @@ def test_kubectl_readonly_gating():
         assert run_sim._is_readonly(c), c
     for c in wr:
         assert not run_sim._is_readonly(c), c
+
+
+def test_f16_kubectl_shell_injection_rejected():
+    """F-16（八轮评审）：shell 元字符注入一律拒——只读 kubectl 不需要 ;|&$()<>` 。"""
+    inj = ["kubectl get pods; rm -rf /", "kubectl -n ns get pod `rm -rf /`",
+           "kubectl get pod $(reboot)", "kubectl get pod | sh", "kubectl get pod > /etc/x"]
+    for c in inj:
+        assert not run_sim._is_readonly(c), c
