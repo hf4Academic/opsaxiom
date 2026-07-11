@@ -332,16 +332,29 @@ class Session:
         self.io._p(self.r(n.get("summary", "")))
         self.outcome = kind
         # 单比特反馈 + attest 提示
+        ans = ""
         fb = self.skill.get("feedback", {}).get("ask")
         if fb:
             self.io._p(f"\n{fb} 👍/👎")
-            ans = self.io.paste(n["id"] + ":fb", "").strip() if self.io.answers is not None else ""
+            if self.io.answers is not None:
+                ans = self.io.paste(n["id"] + ":fb", "").strip()
+            else:
+                try:
+                    ans = input("> ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    ans = ""
             self._log(n["id"], "feedback", answer=ans)
-        # V-3：一键认证——仅 done（真的解决了）才追问，从会话预填字段
+        # V-3/W-3：一键认证——仅 done 才追问，outcome 结合反馈
         if kind == "done":
-            self._offer_attest(n)
+            self._offer_attest(n, feedback=ans)
 
-    def _offer_attest(self, n):
+    @staticmethod
+    def _outcome_from_feedback(fb):
+        """👎/否定反馈 → partial（负面 attestation 同样是宝贵信号，docs/05 允许）。"""
+        neg = ("👎", "no", "n", "否", "没", "未解决", "不行", "没解决")
+        return "partial" if fb and any(t in fb.lower() for t in neg) else "resolved"
+
+    def _offer_attest(self, n, feedback=""):
         """run 终点接单：确认→从会话预填→只补 2 个分桶→签名落盘（docs/08 §2）。"""
         info = self.io.attest_intake(n["id"], "要把这次验证沉淀为社区凭据吗？")
         if not info:
@@ -349,11 +362,15 @@ class Session:
             return
         rollback = "rollback_guide" in self.path
         mode = {"guided": "navigator", "real": "copilot"}.get(self.mode, "navigator")
+        # W-3：outcome 结合反馈；intake 显式给了 outcome 则以它为准
+        outcome = info.get("outcome") or self._outcome_from_feedback(feedback)
+        if outcome == "partial":
+            self.io._p("  （按你的反馈记为 partial——负面记录同样帮助社区改进这个 Skill）")
         attest_bin = str(HERE / "bin" / "opsaxiom-attest")
         cmd = [sys.executable, attest_bin,
                "--skill", self.skill["metadata"]["id"],
                "--skill-version", str(self.skill["metadata"].get("version", "0.1.0")),
-               "--outcome", "resolved", "--mode", mode,
+               "--outcome", outcome, "--mode", mode,
                "--os-family", str(info.get("os_family", "linux")),
                "--scale", str(info.get("scale", "1")),
                "--attestor", str(info.get("attestor", "anonymous"))]
