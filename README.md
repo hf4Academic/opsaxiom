@@ -40,8 +40,11 @@
 - **73 个 Skill**（host 20 / k8s 10 / network 11 / middleware 10 / aicomp 10 / obs 5 / sec 4 / proc 3），
   49 个 `sim_verified`。
 - 完整工具链：校验器（结构 + 语义 S1–S13 + 投影语义 + 字段契约 + 命令语法树）、
-  解析器库、仿真执行器（context_walk + 真实靶机）、maturity 流水线、
-  **Ed25519 签名的 attestation**。
+  解析器库、仿真执行器（context_walk + 真实靶机，含 kubectl 只读白名单）、
+  **maturity 流水线（sim_verified → field_verified，≥3 份独立签名 attestation）**、
+  **Ed25519 签名的 attestation + keyring 治理**。
+- **告警入口（增强渠道）**：`opsaxiom diagnose --json` + `opsaxiom-webhook` 收 Alertmanager
+  告警 → 匹配 Skill → 推钉钉/飞书卡片（只荐不代执行）。
 - **运行时 CLI 已落地（导航档 MVP）**：`opsaxiom diagnose "<症状>"` 匹配 Skill，
   `opsaxiom run <id>` 逐步指导排查/变更（Agent 只出方案与变更简报，写操作由你亲自执行），
   支持 `--resume` 断点续跑、变更节点 skip/升级/退出多选。

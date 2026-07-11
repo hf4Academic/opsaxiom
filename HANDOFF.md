@@ -32,14 +32,43 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
 - Opus 完成全部条目或遇到阻塞时：更新本文件"当前状态"，然后**在回复末尾明确提醒用户：
   "请切换回 Fable 5 进行评审"**。
 - 评审不通过的产出不删除，移入 `attic/` 并在 REVIEW-QUEUE 记录原因（留痕供改进）。
+- **本文件里所有"已具备/已实现"表述，写入前必须实测过**（F-15/docs07 T-2）：
+  虚报比缺功能严重，下一个接手者会基于假前提做设计。
 
 ---
 
 ## 当前状态（由最后工作的模型更新）
 
-- **更新时间**：2026-07-11（Fable 七轮评审后覆盖）
-- **更新者**：Fable 5
-- **阶段**：七轮评审完成，**第八轮任务书已发（X-1~X-5），交接 Opus 4.8**
+- **更新时间**：2026-07-11（Opus 八轮完成后覆盖）
+- **更新者**：Opus 4.8
+- **阶段**：第八轮 X-1~X-5 **全部完成**，交接 Fable 5 做**八轮评审**
+- **第八轮交付**：
+  - **X-1 告警入口 B**：`diagnose --json`（兑现 F-15）+ `opsaxiom-webhook`（收 Alertmanager
+    告警→diagnose→钉钉/飞书卡片，只荐不代执行，--dry-run 可测）
+  - **X-2 k8s 只读真实执行**：kubectl 子命令级白名单（get/describe/logs/top 放行，
+    apply/delete/exec/scale 等拒）；run_real 命令提取从只认 linux 键→任一连接器键（诚实性）；
+    3 个 k8s real 场景 requires:[kubectl] 无集群跳过
+  - **X-3 keyring 治理**（关 R-9）：`hub keyring list/add/remove/export`；签核流程入 docs/08 §3.3a；
+    add 后 pull 验签 TOFU→可信（端到端验证）
+  - **X-4 field_verified 晋级**：`promote field`——≥3 份独立且验签有效 attestation→🟢；
+    认证阶梯 🔵→🟢 首次可踩上
+  - **X-5**：docs/07 T 系列（T-1 标识符单一事实来源/T-2 已具备必须实测）；交接规则补条
+- **全库现状**：73 Skill / 49 sim_verified、**277 pytest 全绿 + 3 skipped(无 kubectl)**、
+  73 校验 / 67 仿真 全绿。
+- **需 Fable 八轮评审的重点**：
+  1. webhook 卡片的产品形态（钉钉/飞书两家格式、只荐不代执行边界、R11 不含凭据）
+  2. kubectl 只读白名单的完备性（exec 已拒；有无遗漏的写动词？token 判定够不够严）
+  3. field_verified 独立性判定（不同 attestor 且不同 env 分桶）是否符合 docs/05 §3 本意
+  4. 下一步方向：真实 registry 试点（keyring 签核跑一遍）、network 域真实执行器、
+     certified 认证阶梯（领域评审人签署，docs/05）
+- **交接给**：**Fable 5 —— 八轮评审**
+
+---
+
+## 历史状态存档（十四）
+
+- **更新者**：Fable 5（七轮评审）
+- 修 F-14(resume sid)、F-15(诚实性)、REPL 验收通过、第八轮任务书 X-1~X-5
 - **七轮评审结论**：
   - **W-1~W-4 验收通过，REPL 产品体验合格**（pty 真 TTY 实测：症状匹配/info/quit 顺畅，
     无 TTY 降级正确，防镀金边界守住）
