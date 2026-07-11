@@ -37,9 +37,38 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
 
 ## 当前状态（由最后工作的模型更新）
 
-- **更新时间**：2026-07-10（Fable 六轮评审后覆盖）
+- **更新时间**：2026-07-11（Opus 七轮完成后覆盖）
+- **更新者**：Opus 4.8
+- **阶段**：第七轮 W-1~W-4 **全部完成**（Terminal REPL 默认交互入口），交接 Fable 5 做**七轮评审**
+- **第七轮交付**：
+  - **W-1 Terminal REPL**（tools/repl.py）：裸敲 `opsaxiom` 进交互态；自然语言当症状 top-3、
+    数字选候选、导航档原地跑、内置词 help/list/info/run/resume/doctor/hub/record、
+    Ctrl-C 中断回提示符、readline 历史、无 TTY 降级
+  - **W-2**：docs/10 手册改 REPL 优先（子命令降为脚本附注）；info/resume 内置词
+  - **W-3**：一键认证 outcome 结合反馈（👎→partial，负面记录照常签名入库）
+  - **W-4**：README 快速上手改"opsaxiom 一个词"
+- **全库现状**：73 Skill / 49 sim_verified、**267 pytest 全绿**、73 校验 / 67 仿真 全绿；
+  CLI 子命令 {run,diagnose,doctor,skill,record,hub}，裸敲进 REPL。
+- **需 Fable 七轮评审的重点**：
+  1. REPL 的产品体验：自然语言当一等公民、数字选择、Ctrl-C 语义、无 TTY 降级是否到位；
+     防镀金边界（不做 chatbot/多轮澄清）守得对不对
+  2. REPL 在真 TTY 下的手感（评审可实敲 `opsaxiom` 试）——本轮测试覆盖分发逻辑，
+     交互手感（提示符/中断/历史）建议人工过一遍
+  3. 下一步大方向：IM 渠道接入（第八轮候选，webhook→diagnose→钉钉/飞书卡片，
+     接缝 diagnose --json 已具备）、真实靶机执行器扩到 network/k8s、R-9 keyring 治理
+- **交接给**：**Fable 5 —— 七轮评审**
+
+---
+
+## 历史状态存档（十二）
+
+- **更新者**：Fable 5（六轮评审）
+- 修 F-13(私钥进镜像/B10)、Terminal REPL 定为默认交互入口(docs/08 §4.2a)、第七轮任务书 W-1~W-4
+
+## 历史状态存档（旧·六轮任务书发布时）
+
 - **更新者**：Fable 5
-- **阶段**：六轮评审完成，**第七轮任务书已发（W-1~W-4：Terminal REPL），交接 Opus 4.8**
+- **阶段**：六轮评审完成，第七轮任务书已发（W-1~W-4：Terminal REPL）
 - **六轮评审结论**：
   - V-1~V-6 验收通过，人侧飞轮闭环成立；docs/10 合格
   - **F-13 已修**：Dockerfile 构建期 keygen 把私钥烤进镜像（所有容器共享同一私钥）

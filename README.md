@@ -48,16 +48,25 @@
 - **人侧飞轮已打通**（docs/08、docs/10）：一键部署（`install.sh`/docker/离线包）+ `doctor` 自检；
   经验捕获三通道（`skill from-session`/`record`/`skill new`）把日常排查变 Skill 草稿；
   排查终点一键认证（30 秒签名沉淀）；**Skills Hub**（`hub pull` 三道安全门 / `hub push` / 静态站生成器）。
-- 经六轮"Opus 生成 / Fable 对抗评审"迭代，累计沉淀 11+ 条生成规范教训（docs/07）。
+- **默认交互入口是 Terminal REPL**：裸敲 `opsaxiom` 进交互态，直接用自然语言描述问题
+  即触发匹配、输序号进入逐步排查（终端最普遍，不依赖 IM）。
+- 经七轮"Opus 生成 / Fable 对抗评审"迭代，累计沉淀 11+ 条生成规范教训（docs/07）。
 
-## 试一下运行时（导航档）
+## 快速上手：一个词
 
 ```bash
-# 按症状找 Skill
+opsaxiom                       # ← 进入交互态，然后敲字说问题
+#   axiom> 磁盘满了但 df 还有空间     → 列出候选
+#   axiom> 1                          → 就地进入逐步排查（你敲命令，它出方案与判读）
+#   axiom> help / list / info <id> / resume / doctor / quit
+```
+
+脚本/自动化仍可用子命令：
+
+```bash
 python3 tools/bin/opsaxiom diagnose "磁盘满了 No space left"
-# 走一遍排查（脚本驱动的演示；去掉 --answers 即为真人交互）
 python3 tools/bin/opsaxiom run host.storage.capacity.disk-full \
-  --answers demos/disk-full-guided.answers.yaml
+  --answers demos/disk-full-guided.answers.yaml   # 脚本驱动演示；去掉 --answers 即真人交互
 ```
 
 ## 开发者快速上手
