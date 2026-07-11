@@ -3,6 +3,7 @@
 maturity 流水线（P-4）—— 唯一被授权写 metadata.maturity 的工具（docs/03：maturity 由流水线写入）。
 
 promote <skill.yaml>            依据校验 + 仿真证据晋级到 sim_verified
+field   <skill.yaml>            ≥3 份独立且验签有效的 attestation → field_verified（X-4）
 demote  <skill.yaml> <reason>   降级回 draft 并记录原因
 
 晋级 sim_verified 的门槛（docs/05 §1 + S8）：
@@ -120,6 +121,58 @@ def promote(skill_path):
     return 0
 
 
+def _independent_valid_attestations(skill_dir):
+    """返回独立且验签有效的 attestation 数（docs/05 §3：不同 attestor 且 env 分桶不同）。
+
+    贪心选一个最大子集：attestor 互不相同 **且** env_fingerprint 分桶互不相同。
+    """
+    from importlib.machinery import SourceFileLoader
+    attest = SourceFileLoader("attest_p", str(HERE / "bin" / "opsaxiom-attest")).load_module()
+    adir = skill_dir / "attestations"
+    if not adir.is_dir():
+        return 0, []
+    seen_attestor, seen_env, kept = set(), set(), []
+    for af in sorted(adir.glob("*.yaml")):
+        att = yaml.safe_load(af.read_text(encoding="utf-8")) or {}
+        ok, _ = attest.verify_att(att)
+        if not ok:
+            continue
+        who = att.get("attestor", "")
+        env = att.get("env_fingerprint", {})
+        os_ = env.get("os", {})
+        envkey = (os_.get("family"), os_.get("version_bucket"), env.get("scale_bucket"))
+        if who in seen_attestor or envkey in seen_env:
+            continue                     # 不独立（同人或同环境分桶）
+        seen_attestor.add(who); seen_env.add(envkey); kept.append(af.name)
+    return len(kept), kept
+
+
+def promote_field(skill_path):
+    """sim_verified → field_verified：≥3 份独立且验签有效的 attestation（docs/05）。"""
+    skill_path = pathlib.Path(skill_path).resolve()
+    skill = yaml.safe_load(skill_path.read_text())
+    name, cur = skill["metadata"]["id"], skill["metadata"]["maturity"]
+    if cur != "sim_verified":
+        print(f"✘ 需先到 sim_verified（当前 {cur}）")
+        return 1
+    rep = V.validate_file(skill_path, V._default_validator())
+    if rep.errors:
+        print(f"✘ 校验未过：{[e[2] for e in rep.errors]}")
+        return 1
+    n, kept = _independent_valid_attestations(skill_path.parent)
+    if n < 3:
+        print(f"✘ 独立有效 attestation 不足 3 份（当前 {n}）——field_verified 需 ≥3 份"
+              f"（不同 attestor 且不同 env 分桶，验签有效）")
+        return 1
+    _maturity_line_replace(skill_path, "field_verified")
+    ev = {"skill": name, "action": "promote_field", "from": "sim_verified",
+          "to": "field_verified", "at": datetime.datetime.now().isoformat(timespec="seconds"),
+          "independent_attestations": n, "sources": kept}
+    (_evidence_dir(skill_path) / "field.json").write_text(json.dumps(ev, ensure_ascii=False, indent=2))
+    print(f"✔ {name}: sim_verified → field_verified（{n} 份独立有效 attestation）")
+    return 0
+
+
 def demote(skill_path, reason):
     skill_path = pathlib.Path(skill_path).resolve()
     skill = yaml.safe_load(skill_path.read_text())
@@ -138,9 +191,14 @@ def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     sp = sub.add_parser("promote"); sp.add_argument("skill")
+    fp = sub.add_parser("field"); fp.add_argument("skill")   # X-4
     sd = sub.add_parser("demote"); sd.add_argument("skill"); sd.add_argument("reason")
     args = ap.parse_args()
-    return promote(args.skill) if args.cmd == "promote" else demote(args.skill, args.reason)
+    if args.cmd == "promote":
+        return promote(args.skill)
+    if args.cmd == "field":
+        return promote_field(args.skill)
+    return demote(args.skill, args.reason)
 
 
 if __name__ == "__main__":
