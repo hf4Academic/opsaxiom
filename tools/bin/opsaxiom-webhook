@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""
+opsaxiom-webhook —— 告警入口 B（X-1，docs/08 §4.2 入口B）。
+
+闭环：Alertmanager/告警系统 POST 一条告警 → 取 alertname+description 拼成症状 →
+opsaxiom diagnose → 组装通知卡片（候选 top-3 + 第一步指导 + `opsaxiom run <id>` 提示）
+→ 出站到钉钉/飞书机器人 webhook。人在群里点开，回到 Terminal REPL 的排查流程。
+
+Terminal 是底座、IM 是增强（六轮已定）：本工具只把"告警→该用哪个 Skill"推到群里，
+不代执行任何命令。R11：卡片只含 Skill 信息与告警摘要，绝不含凭据。
+
+用法：
+  opsaxiom-webhook --listen :8899 --notify dingtalk --url <robot_url>
+  opsaxiom-webhook --dry-run        # 不监听，读 stdin 的告警 JSON，打印卡片（测试）
+"""
+import argparse
+import json
+import pathlib
+import sys
+import urllib.request
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools"))
+from opsaxiom_diagnose import diagnose_json  # noqa: E402
+
+_BADGE = {"draft": "⚪草稿", "sim_verified": "🔵已验证",
+          "field_verified": "🟢实地", "certified": "🟡认证"}
+
+
+def symptom_from_alert(payload):
+    """从 Alertmanager 风格 payload 提取症状文本（取首条告警的 name+description）。"""
+    alerts = payload.get("alerts") or [payload]
+    a = alerts[0] if alerts else {}
+    labels = a.get("labels", {})
+    ann = a.get("annotations", {})
+    parts = [labels.get("alertname", ""), ann.get("description", "") or ann.get("summary", ""),
+             labels.get("instance", "")]
+    return " ".join(p for p in parts if p).strip() or "未知告警"
+
+
+def build_card(symptom, hits):
+    """组装通知卡片（Markdown 文本，两家机器人都吃 markdown）。"""
+    lines = [f"**🔔 OpsAxiom 告警助手**", f"> 告警：{symptom}", ""]
+    if not hits:
+        lines.append("未匹配到现成排查 Skill。建议人工介入，或 `opsaxiom` 交互态换个说法搜。")
+    else:
+        lines.append("**建议的排查流程（择一开始）：**")
+        for i, h in enumerate(hits, 1):
+            lines.append(f"{i}. [{_BADGE.get(h['maturity'], h['maturity'])}] {h['name']}")
+            lines.append(f"   `opsaxiom run {h['id']}`")
+        lines.append("")
+        lines.append("在终端执行上面任一命令，进入逐步导航（你敲命令，Agent 只出方案与判读）。")
+    return "\n".join(lines)
+
+
+def _wrap_for(notify, text):
+    if notify == "feishu":
+        return {"msg_type": "text", "content": {"text": text.replace("**", "").replace("`", "")}}
+    # dingtalk markdown
+    return {"msgtype": "markdown", "markdown": {"title": "OpsAxiom 告警助手", "text": text}}
+
+
+def dispatch(payload, notify, url, top=3, dry_run=False):
+    symptom = symptom_from_alert(payload)
+    hits = diagnose_json(symptom, top=top)
+    text = build_card(symptom, hits)
+    if dry_run or not url:
+        print(text)
+        return text
+    body = json.dumps(_wrap_for(notify, text)).encode()
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        r.read()
+    return text
+
+
+def make_handler(args):
+    class H(BaseHTTPRequestHandler):
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length", 0))
+            try:
+                payload = json.loads(self.rfile.read(n) or b"{}")
+            except Exception:
+                payload = {}
+            try:
+                dispatch(payload, args.notify, args.url, top=args.top)
+                self.send_response(200)
+            except Exception as e:
+                self.send_response(500)
+                self.log_message("dispatch 失败：%s", e)
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, fmt, *a):
+            sys.stderr.write("[webhook] " + (fmt % a) + "\n")
+    return H
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="opsaxiom-webhook")
+    ap.add_argument("--listen", default=":8899", help="监听地址，如 :8899")
+    ap.add_argument("--notify", choices=["dingtalk", "feishu"], default="dingtalk")
+    ap.add_argument("--url", help="机器人 webhook URL（缺省=只打印不出站）")
+    ap.add_argument("--top", type=int, default=3)
+    ap.add_argument("--dry-run", action="store_true", help="读 stdin 告警 JSON，打印卡片后退出")
+    args = ap.parse_args()
+
+    if args.dry_run:
+        payload = json.loads(sys.stdin.read() or "{}")
+        dispatch(payload, args.notify, None, top=args.top, dry_run=True)
+        return 0
+
+    host, _, port = args.listen.partition(":")
+    srv = HTTPServer((host or "0.0.0.0", int(port or "8899")), make_handler(args))
+    print(f"opsaxiom-webhook 监听 {args.listen} → {args.notify}"
+          f"{'（未配 --url，只打印）' if not args.url else ''}", file=sys.stderr)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
