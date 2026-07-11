@@ -126,14 +126,52 @@ install.sh 职责：装依赖（venv）、软链 `opsaxiom` 进 PATH、初始化
 
 **主线交互模型：symptom → diagnose → run（导航）→ attest**，全程一个终端。
 
-- **入口 A（人找它）**：裸敲 `opsaxiom` 进入交互态——
-  ```
-  $ opsaxiom
-  OpsAxiom> 描述你的问题：磁盘满了但 df 显示有空间
-    1) [🔵] host.storage.capacity.disk-full …
-  OpsAxiom> 1        ← 直接进导航档，逐步指导，结束顺手 attest
-  ```
-  这层只是把 diagnose/run/attest 串成会话，不引入新概念。
+- **入口 A（人找它）**：裸敲 `opsaxiom` 进入交互态。**这是产品的默认交互入口**
+  （六轮评审确认，发起人拍板）：Terminal 是运维最普遍的环境——不是所有人能接飞书/钉钉，
+  但所有人都有终端。IM 是增强渠道，Terminal REPL 是底座。详细规格见 §4.2a。
+
+### 4.2a Terminal REPL 规格（第七轮 W-1 实施依据）
+
+**心智模型：像跟老师傅说话，不是像查手册。** 打开就能说人话，敲字就有反应，
+不需要先学任何子命令。
+
+```
+$ opsaxiom
+OpsAxiom v0.1 · 73 个 Skill（49 已验证）· 输入你遇到的问题，或 help 看用法
+axiom> 磁盘满了但 df 显示还有空间
+  找到 3 个匹配：
+  1) [🔵已验证] 磁盘空间耗尽排查与处置       host.storage.capacity.disk-full
+  2) [🔵已验证] inode 耗尽…
+  3) [⚪草稿  ] …
+axiom> 1
+  ━━ [排查] 定位是哪个挂载点满了 ━━        ← 原地进入导航档（不 spawn 子进程）
+  …（run 的完整流程，含变更简报/审批/verify/一键认证）…
+  ✅ 结论：…
+axiom> _                                    ← 回到提示符，接着问下一个问题
+```
+
+**行为规则（按优先级）：**
+1. **非命令输入一律当症状**——`磁盘满了`、`gpu 掉卡 xid 79`、`kafka 积压` 直接触发
+   diagnose，显示 top-3 带徽章与一行摘要。这是最重要的一条：自然语言是一等公民。
+2. **纯数字 = 选择上一次的候选**——`1` 就进第 1 个 Skill 的导航档。会话记住上次
+   diagnose 结果。
+3. **少量内置词**（全部可选，不学也能用）：`help`、`list [域]`、`info <id>`、
+   `run <id>`、`doctor`、`hub search/pull …`、`record start/stop …`、`quit`/`exit`。
+   内置词与症状冲突时内置词优先（都是英文单词，与中文症状天然不撞）。
+4. **导航档在 REPL 内原地跑**（复用 runtime.Session，同一进程），结束回提示符并接
+   一键认证；Ctrl-C 中断当前 Skill 回到提示符（进度已存，提示 `--resume` 或直接输 resume），
+   再 Ctrl-C 才退出。
+5. **readline 历史**（~/.opsaxiom/history），上下键翻历史。
+6. **无 TTY 不进 REPL**——脚本/管道场景打一行提示"用 opsaxiom diagnose/run 子命令"退出，
+   保证自动化路径不被交互卡死。
+7. 首次进入若检测到从未跑过 doctor，先内联跑一次并给一句"下一步输入你的问题试试"。
+
+**不做的**（边界，防镀金）：不做自然语言闲聊/大模型对话（本地 REPL 是决策树的壳，
+不是 chatbot）；不做多轮澄清对话（diagnose 不确定就把 top-3 都亮出来让人选）；
+不做颜色主题配置。
+
+**实现落点**：`tools/repl.py`；`opsaxiom` 主入口 argparse 改为"无子命令→进 REPL"；
+diagnose/run/attest 全部走既有模块内调用，REPL 不复制任何业务逻辑。
 - **入口 B（告警找它）**：webhook 收告警 → 自动 diagnose → 把"候选 Skill + 第一步指导"
   推到 IM（钉钉/飞书卡片），人点开后回到入口 A 的流程。IM 通道是留存生命线
   （docs/01 §2），**排第七轮**，本轮先把 webhook→CLI 的接缝(`opsaxiom diagnose --json`)留好。

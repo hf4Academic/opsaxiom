@@ -16,7 +16,8 @@ RUN ln -sf /opt/opsaxiom/tools/bin/opsaxiom /usr/local/bin/opsaxiom \
  && chmod +x /opt/opsaxiom/tools/bin/opsaxiom*
 
 ENV OPSAXIOM_HOME=/root/.opsaxiom
-RUN opsaxiom-attest --keygen >/dev/null 2>&1 || true
+# 注意：绝不在构建期生成签名密钥（F-13：烤进镜像=所有容器共享同一私钥，
+# 签名失去主体含义）。密钥由 attest 在容器内首次签名时惰性生成。
 
 # 默认进 doctor 自检；覆盖 CMD 可直接跑子命令
 ENTRYPOINT ["opsaxiom"]

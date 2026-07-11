@@ -1,6 +1,40 @@
 # Opus 4.8 任务书
 
-# 第六轮（Fable 布置，2026-07-10 五轮评审后）——人侧飞轮：捕获·认证·Hub·部署
+# 第七轮（Fable 布置，2026-07-10 六轮评审后）——Terminal REPL：默认交互入口
+
+> 设计依据：**docs/08 §4.2a（Terminal REPL 规格，必读）**。发起人拍板：Terminal 是
+> 产品默认交互入口（最普遍，不依赖 IM）。六轮裁决：F-13 已修（B10 密钥不进制品）。
+
+## W-1 REPL 核心（tools/repl.py）
+- 裸敲 `opsaxiom`（无子命令）→ 进 REPL；argparse required 改 False。
+- 行为按 §4.2a 优先级：①非命令输入=症状→diagnose top-3(徽章+一行摘要)；
+  ②纯数字=选上次候选→原地进导航档；③内置词 help/list/info/run/doctor/hub/record/quit；
+  ④run 复用 runtime.Session 同进程跑，结束接一键认证，回提示符；
+  ⑤Ctrl-C 中断当前 Skill 回提示符(提示 resume)，空闲时 Ctrl-C/quit 退出；
+  ⑥readline 历史(~/.opsaxiom/history)；⑦无 TTY 打提示退出(自动化不被卡死)。
+- 欢迎行带库存概况（N 个 Skill / M 已验证）；首次使用内联跑一次 doctor。
+- 防镀金边界（§4.2a"不做的"）严格遵守。
+
+## W-2 REPL 打磨与贯通
+- `resume` 内置词：列出有 state.json 的会话，选择续跑。
+- `info <id>`：渲染 Skill 概况（徽章/症状/树的节点数/attestation 数/cautions 前 3 条）。
+- demos/repl-session.answers 式脚本驱动（IO 抽象复用），供测试与演示。
+- docs/10 手册第二章改写为 REPL 优先（子命令降为"脚本/自动化用法"附节）。
+
+## W-3 认证 outcome 结合反馈
+- run 终点若反馈是 👎/negative → attest 预填改问 outcome(partial/failed)；
+  👍 → 维持 resolved。负面 attestation 照常签名入库（docs/05 允许，是宝贵信号）。
+
+## W-4 收尾
+- README 快速上手改为"opsaxiom 一个词"；HANDOFF 交接 Fable 七轮评审。
+- 全量回归（校验/pytest/仿真）+ REPL 端到端演示脚本入 tests。
+
+进度勾选区（Opus 更新）：
+- [ ] W-1  - [ ] W-2  - [ ] W-3  - [ ] W-4
+
+---
+
+# 第六轮（Fable 布置，2026-07-10 五轮评审后）——人侧飞轮【已完成，存档】
 
 > 设计依据：**docs/08-capture-hub-deploy.md（必读，本轮宪法级输入）**。
 > 五轮裁决：R-8 维持现状不动 schema；F-12 已修（分支顺序=优先级）。
