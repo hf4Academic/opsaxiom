@@ -43,6 +43,35 @@ def _cmd_hub(args):
         print(f"已打包：{tar}")
         print("推送：把该 bundle 摆渡到 registry 侧 `hub import`，或 git add+PR。")
         return 0
+    if sub == "keyring":
+        return _cmd_keyring(args)
+    return 2
+
+
+def _cmd_keyring(args):
+    op = args.keyring_op
+    if op == "list":
+        rows = hubtool.keyring_list()
+        if not rows:
+            print("信任 keyring 为空。add <公钥> --name <who> 加入签名者。")
+            return 0
+        for name, pub in rows:
+            print(f"  {name}: {pub[:16]}…")
+        return 0
+    if op == "add":
+        try:
+            p = hubtool.keyring_add(args.pub, args.name)
+        except ValueError as e:
+            print(f"🔴 {e}")
+            return 1
+        print(f"已信任 {args.name}：{p}")
+        return 0
+    if op == "remove":
+        print("已移除。" if hubtool.keyring_remove(args.name) else "没有这个签名者。")
+        return 0
+    if op == "export":
+        print(hubtool.keyring_export())
+        return 0
     return 2
 
 
@@ -62,4 +91,11 @@ def add_hub(subparsers):
     pl.add_argument("--allow-draft", action="store_true", help="放开 draft 拒收门")
     pu = hs.add_parser("push", help="打包一个 Skill 为 bundle")
     pu.add_argument("id")
+    kr = hs.add_parser("keyring", help="管理信任的签名者公钥")
+    krs = kr.add_subparsers(dest="keyring_op", required=True)
+    krs.add_parser("list")
+    ka = krs.add_parser("add")
+    ka.add_argument("pub"); ka.add_argument("--name", required=True)
+    krm = krs.add_parser("remove"); krm.add_argument("name")
+    krs.add_parser("export")
     hp.set_defaults(fn=_cmd_hub)

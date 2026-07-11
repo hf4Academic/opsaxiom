@@ -99,6 +99,20 @@ opsaxiom-registry/
   签核分发，`hub sync` 同步 keyring → "签名有效"与"签名者可信"彻底分离，
   五轮评审对 U-4 的裁决即：**TOFU 作为过渡正确，终态信任锚在 registry keyring**。
 
+### 3.3a keyring 签核流程（X-3 落地，关闭 R-9）
+
+"签名有效"是密码学事实（任何人可验）；"签名者可信"是治理决定（谁的公钥进 trusted）。
+两者分离，keyring 是治理这一侧的载体：
+
+- **本地**：`opsaxiom hub keyring add <pub> --name <who>` 把某签名者的公钥加入
+  `~/.opsaxiom/keys/trusted/`。加入即表示"我信任此人做的实地验证"。`list`/`remove`/`export` 管理。
+- **registry 侧签核流程**：贡献者发 PR 把自己的公钥加入 registry 的 `keyring/trusted.pub`；
+  **registry 维护者 = 签核人**，PR 需**双人复核**（一人是维护者）后合入——这道人工关卡是
+  "谁能成为可信签名者"的治理闸。合入后 `hub sync` 把 trusted.pub 分发到各客户端。
+- **信任传导**：客户端 `hub keyring add` 可直接引用 registry 分发的 trusted.pub 条目，
+  也可只信任自己认识的人（本地 keyring 是 registry keyring 的子集或超集，用户自主）。
+- 这样 U-4 的 TOFU（签名有效但签名者未知）就有了收敛路径：签名者进了 keyring → 可信。
+
 ### 3.4 Hub 网站 = 静态生成器（先不做动态服务）
 
 `tools/hubsite/`：读 registry 仓库 → 纯静态 HTML（首页按域浏览 + 搜索(前端 lunr/关键词) +

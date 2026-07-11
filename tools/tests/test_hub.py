@@ -57,3 +57,23 @@ def test_pull_draft_rejected(registry):
 def test_push_makes_bundle(registry, tmp_path):
     tar = hubtool.hub_push("sec.access.bruteforce", out_dir=tmp_path / "out")
     assert tar.exists() and tar.suffix == ".gz"
+
+
+def test_keyring_add_list_remove(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPSAXIOM_HOME", str(tmp_path))
+    import hubtool
+    # 合法 Ed25519 公钥（32 字节 base64）
+    import base64
+    pub = base64.b64encode(b"\x01" * 32).decode()
+    hubtool.keyring_add(pub, "alice")
+    assert ("alice", pub) in hubtool.keyring_list()
+    assert pub in hubtool.keyring_export()
+    assert hubtool.keyring_remove("alice") is True
+    assert hubtool.keyring_list() == []
+
+
+def test_keyring_rejects_bad_pubkey(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPSAXIOM_HOME", str(tmp_path))
+    import hubtool, pytest
+    with pytest.raises(ValueError):
+        hubtool.keyring_add("not-base64!!!", "bad")

@@ -182,6 +182,46 @@ def hub_pull(skill_id, allow_draft=False):
     return dst, report
 
 
+def _keyring_dir():
+    d = _home() / "keys" / "trusted"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def keyring_list():
+    """返回 [(name, pubkey)]。"""
+    out = []
+    for f in sorted(_keyring_dir().glob("*.pub")):
+        out.append((f.stem, f.read_text(encoding="utf-8").strip()))
+    return out
+
+
+def keyring_add(pub_b64, name):
+    """把某人的公钥加入本地信任 keyring（签核 = 决定信任谁的签名）。"""
+    import base64
+    try:
+        raw = base64.b64decode(pub_b64)
+        if len(raw) != 32:               # Ed25519 公钥恒 32 字节
+            raise ValueError("长度非 32 字节")
+    except Exception as e:
+        raise ValueError(f"公钥格式非法（应为 base64 的 Ed25519 公钥）：{e}")
+    (_keyring_dir() / f"{name}.pub").write_text(pub_b64.strip(), encoding="utf-8")
+    return _keyring_dir() / f"{name}.pub"
+
+
+def keyring_remove(name):
+    p = _keyring_dir() / f"{name}.pub"
+    if p.exists():
+        p.unlink()
+        return True
+    return False
+
+
+def keyring_export():
+    """汇出全部信任公钥（每行一个 b64），供 registry 侧 trusted.pub 合入。"""
+    return "\n".join(pub for _, pub in keyring_list())
+
+
 def hub_push(skill_id, out_dir=None):
     """打包 skill+tests+attestations 为 bundle（气隙摆渡）；返回 tar 路径。"""
     sp = next((p for p in (ROOT / "skills").rglob("skill.yaml")

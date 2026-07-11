@@ -320,3 +320,8 @@ abnormal-login 守住"只诊断不封禁"的 D1 边界。不合格项仅 F-12（
 ## 第八轮方向（发起人此前定的候选依序推进）
 
 IM 是增强渠道（Terminal 是底座，六轮已定），本轮做 webhook→IM 的最小闭环 + 信任治理收尾。
+
+> **[X-3 关闭 R-9，2026-07-11 Opus]** keyring 治理落地：hub keyring list/add/remove/export
+> 管理本地 trusted/；registry 侧签核流程（维护者=签核人，PR 双人复核入 trusted.pub，
+> hub sync 分发）写入 docs/08 §3.3a。"签名有效"（密码学）与"签名者可信"（治理）分离，
+> TOFU 有了收敛路径。R-9 关闭。
