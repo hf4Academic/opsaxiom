@@ -1,0 +1,8 @@
+skill: skills/k8s/oomkilled/skill.yaml
+scenario: 真实模式(需集群)：real-k8s-oomkilled
+mode: real
+requires:
+- kubectl
+bindings:
+  ns: default
+  pod: nginx

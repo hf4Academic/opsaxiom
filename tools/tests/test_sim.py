@@ -30,7 +30,12 @@ def test_scenario_path(scenario):
 
 @pytest.mark.parametrize("scenario", _REAL_SCENARIOS, ids=lambda p: p.stem)
 def test_scenario_real(scenario):
+    import shutil
     sc = _yaml.safe_load(scenario.read_text())
+    # X-2：声明依赖的外部工具（如 kubectl）不在环境里就跳过，不失败
+    for tool in sc.get("requires", []):
+        if shutil.which(tool) is None:
+            pytest.skip(f"缺 {tool}，跳过真实场景 {scenario.stem}")
     r = run_sim.run(ROOT / sc["skill"], scenario)
     assert r["completed"], f"真实模式未终止: {r['path']}"
     assert r["evidence"] == "real_roundtrip"
@@ -109,3 +114,16 @@ def test_real_mode_runs_end_to_end():
         r = run_sim.run(ROOT / d["skill"], sc)
         assert r["completed"], f"{name} 未跑到终止: {r['path']}"
         assert r["evidence"] == "real_roundtrip"
+
+
+def test_kubectl_readonly_gating():
+    """X-2：kubectl 只读动词放行，写动词(尤其 exec)一律拒。"""
+    ro = ["kubectl -n default get pod nginx -o json", "kubectl -n ns describe pod x",
+          "kubectl -n ns logs x --previous --tail=50", "kubectl top pod"]
+    wr = ["kubectl -n ns delete pod x", "kubectl apply -f x.yaml",
+          "kubectl exec x -- rm -rf /", "kubectl rollout undo deploy/x",
+          "kubectl scale deploy/x --replicas=3"]
+    for c in ro:
+        assert run_sim._is_readonly(c), c
+    for c in wr:
+        assert not run_sim._is_readonly(c), c

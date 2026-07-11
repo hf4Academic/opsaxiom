@@ -1,0 +1,8 @@
+skill: skills/k8s/image-pull-fail/skill.yaml
+scenario: 真实模式(需集群)：real-k8s-image-pull
+mode: real
+requires:
+- kubectl
+bindings:
+  ns: default
+  pod: nginx

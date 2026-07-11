@@ -48,10 +48,23 @@ _ALLOW_LEAD = {"cat", "df", "du", "free", "ps", "ss", "uptime", "nproc", "vmstat
                # 自研只读采集器（U-2）：只读指标，无副作用
                "opsaxiom-collect", "nvidia-smi"}
 _DENY = re.compile(r"\b(rm|mv|cp|dd|mkfs\w*|reboot|shutdown|kill|pkill|tee|truncate|chmod|chown)\b|>\s*/(?!dev/null)")
+# kubectl 子命令级白名单（X-2）：只读动词才放行；apply/delete/edit/scale/patch/exec 一律拒。
+# exec 尤其危险——能在容器内跑任意写命令，绝不算只读。用 token 集合判定，
+# 避开 `kubectl -n <ns> get ...` 里 flag 与其值的干扰。
+_KUBECTL_RO = {"get", "describe", "logs", "top", "explain", "version",
+               "api-resources", "cluster-info"}
+_KUBECTL_WRITE = {"apply", "delete", "edit", "scale", "patch", "exec", "create",
+                  "replace", "cordon", "drain", "annotate", "label", "set",
+                  "taint", "uncordon", "undo", "attach", "cp", "port-forward"}
 
 
 def _is_readonly(cmd):
     lead = cmd.strip().split()[0] if cmd.strip() else ""
+    if lead == "kubectl":
+        toks = set(cmd.split())
+        if toks & _KUBECTL_WRITE:          # 含任何写动词 → 拒
+            return False
+        return bool(toks & _KUBECTL_RO)    # 且含至少一个只读动词
     return lead in _ALLOW_LEAD and not _DENY.search(cmd)
 
 
@@ -90,8 +103,9 @@ def run_real(skill_path, scenario_path):
                 node = answers[node]; path.append(node); continue
             notes.append(f"到达 ask '{node}'（无预设答案，停止）")
             break
-        # check：跑真实命令
-        cmd = subst(n.get("run", {}).get("linux", ""))
+        # check：跑真实命令（取任一连接器键的命令：linux/kubectl/ssh/http…，X-2）
+        run_d = n.get("run", {}) or {}
+        cmd = subst(next(iter(run_d.values()), "") if isinstance(run_d, dict) else "")
         if not cmd or not _is_readonly(cmd):
             notes.append(f"节点 {node} 命令非只读白名单或为空，跳过真实执行：{cmd[:60]!r}")
             node = n.get("otherwise", "escalate"); path.append(node); continue
