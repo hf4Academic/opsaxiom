@@ -1,6 +1,64 @@
 # Opus 4.8 任务书
 
-# 第九轮（Fable 布置，2026-07-11 八轮评审后）——开源发布准备
+# 第十轮（Fable 布置，2026-07-12 发起人裁决后）——交互模型 v2：取证式诊断
+
+> **设计依据：docs/09-interaction-v2.md（必读，本轮宪法级输入）。**
+> 发起人裁决：现有交互是"回合制问答"，人在给机器当传输层——重设计。
+> **本轮优先于第九轮 Y 系列（发布准备顺延为第十一轮）**：带着问卷式交互发布，
+> 第一印象即定型，先把产品体验立起来。
+> 硬约束：**零 Skill 迁移**（73 个 skill.yaml 与 schema/ 一字不动）；宪法 R1–R12 不动；
+> 凡涉白名单/模型输出/粘贴解析的交付，必须附"对抗用例"小节（docs/09 §6 全部覆盖）。
+
+## Z-1 环境事实库 MVP（tools/facts.py，docs/09 §2）
+- fact = {key, value, source_cmd, target, ts, ttl}；key = 目标+归一化命令+解析器字段；
+  解析器输出自动入库；故障态默认 TTL 300s。
+- check 节点执行前查库命中即跳过（复用而非重问）；incident 结束事实随审计归档
+  `~/.opsaxiom/incidents/<iid>/facts.json`。
+- 单测：命中跳过 / 过期重取 / 跨 Skill 复用三条路径。
+
+## Z-2 检查前沿提取与取证计划（docs/09 §1.2）
+- 静态分析 skill 树：从 entry 可达、只读、模板参数当前已知的 check 节点集合；
+  多假设（top-K）合并去重（按事实键）→ 波次分组的取证计划（模板依赖前波输出的进后波）。
+- 单测覆盖三种代表形态：disk-full（带模板依赖，两波）、bgp-neighbor-down（网络设备）、
+  aicomp/xid-error（码表分支）；断言波次数与命令集。
+
+## Z-3 批量取证执行（docs/09 §1.2）
+- **本机协驾**：取证计划自动执行（严格复用 `_is_readonly` + kubectl 白名单，不新开口子）；
+  首次需一次性授权，记 `~/.opsaxiom/trust.yaml`；目标非本机一律不自动执行。
+- **导航档**：单粘贴块渲染（分隔符带会话 nonce）+ `opsaxiom collect`（自包含脚本→bundle
+  →`ingest` 回灌）。
+- 对抗用例：分隔符伪造判为数据；params 含 shell 元字符拒绝（T-3）；白名单外命令
+  绝不入取证计划。
+
+## Z-4 incident 会话与诊断卷宗（docs/09 §1.3–1.5，本轮产品核心）
+- incident 对象取代裸 skill session 成为顶层：症状/实体/假设列表（状态机
+  pending→confirmed/refuted/insufficient）/事实/时间线/处置记录；resume 按 incident。
+- 假设树在事实上"干跑"自动步进（判读仍全走 exprlang，一行判读逻辑都不许进 LLM/启发式）。
+- 卷宗渲染：已证实/已排除/证据不足三栏，每条带证据引用（命令+字段+值）与徽章（R8）；
+  escalate 输出移交卷宗；done 后可导出故障报告 markdown。
+- REPL 主循环改造：症状 → 直接进 incident 流（候选数字选择保留为兜底入口）；
+  action 审批/verify/attest 环节**原样复用** runtime 现有实现。
+- demos：disk-full（本机协驾全自动取证）与 bgp（导航一次粘贴）两个端到端 answers 脚本入 tests。
+
+## Z-5 LLM 适配层（可选可降级，docs/09 §3）
+- `~/.opsaxiom/model.yaml`；后端 ollama + openai-compatible 两种（stdlib urllib，不加依赖）。
+- 三个调用点：intake 理解（NL→JSON，schema 校验）/叙事/escalate 助理（只出库内 skill id）。
+  每一处无模型或校验失败 → 静默降级（bigram/模板渲染/全域索引），降级路径必须有测试。
+- ask 预填显示"（从你的描述预填：…——回车确认）"；送模型上下文过既有脱敏层（R11）。
+- 对抗用例：贴回输出注入 prompt（断言零影响）；越权/不存在 skill id 丢弃；
+  draft 建议徽章照常降级展示。
+
+## Z-6 收尾
+- docs/10 手册第二章改写为 v2 主线（陈述→取证→卷宗→处置→复盘）；README 交互示例更新。
+- 全量回归（validate/pytest/sim 三绿）；HANDOFF 更新，交接 Fable 十轮评审
+  （评审重点：卷宗 UX 手感、干跑步进的判读正确性、对抗用例完备性、降级链诚实性）。
+
+进度勾选区（Opus 更新）：
+- [ ] Z-1  - [ ] Z-2  - [ ] Z-3  - [ ] Z-4  - [ ] Z-5  - [ ] Z-6
+
+---
+
+# 第九轮（Fable 布置，2026-07-11 八轮评审后）——开源发布准备【顺延为第十一轮】
 
 > 八轮裁决：F-16（kubectl shell 注入）/F-17（webhook 卡片凭据回显）已由 Fable 修复。
 > **新纪律：凡涉白名单/脱敏/验签的交付，必须附"对抗用例"小节（注入/夹带/绕过各≥2 例）。**
