@@ -55,21 +55,46 @@
   即触发匹配、输序号进入逐步排查（终端最普遍，不依赖 IM）。
 - 经七轮"Opus 生成 / Fable 对抗评审"迭代，累计沉淀 11+ 条生成规范教训（docs/07）。
 
-## 快速上手：一个词
+## 开箱即用（实测流程）
+
+**1) 一键安装**（装依赖、软链命令、初始化密钥、自动体检）：
 
 ```bash
-opsaxiom                       # ← 进入交互态，然后敲字说问题
-#   axiom> 磁盘满了但 df 还有空间     → 列出候选
-#   axiom> 1                          → 就地进入逐步排查（你敲命令，它出方案与判读）
-#   axiom> help / list / info <id> / resume / doctor / quit
+git clone <本仓库> && cd OpsAxiom
+./install.sh
+export PATH="$HOME/.local/bin:$PATH"   # 若安装末尾提示 PATH，加这行（可写进 ~/.bashrc）
 ```
 
-脚本/自动化仍可用子命令：
+装完自动跑 `opsaxiom doctor`：🟢 全绿即可用；🟡 只是可选连接器缺失（如本机没装
+kubectl，只影响 k8s 域的真实执行，**导航档不受影响**）。
+
+**2) 用：敲一个词，然后说人话**
 
 ```bash
-python3 tools/bin/opsaxiom diagnose "磁盘满了 No space left"
-python3 tools/bin/opsaxiom run host.storage.capacity.disk-full \
+$ opsaxiom
+OpsAxiom v0.1 · 73 个 Skill（49 已验证）· 输入你遇到的问题，或 help 看用法
+axiom> 磁盘满了但 df 显示还有空间
+  1) [🔵已验证] 磁盘空间耗尽排查与处置       host.storage.capacity.disk-full
+axiom> 1          ← 输序号进入逐步排查：它出命令你来敲，粘贴输出后单独一行 END 结束
+axiom> gpu 掉卡 xid 79        ← 换个域接着问
+axiom> list aicomp            ← 浏览某个域
+axiom> info host.storage.capacity.disk-full
+axiom> quit
+```
+
+排查中的规矩：**写操作永远由你亲手执行**，它只给方案、变更简报和回滚命令；
+中途 Ctrl-C 暂停（进度已存），回到 `axiom>` 输 `resume` 续跑。
+
+**3) 脚本/自动化用子命令**：
+
+```bash
+opsaxiom doctor                                   # 环境自检（排障第一命令）
+opsaxiom diagnose "kafka 积压" --json             # 结构化候选（给自动化/webhook 用）
+opsaxiom run host.storage.capacity.disk-full \
   --answers demos/disk-full-guided.answers.yaml   # 脚本驱动演示；去掉 --answers 即真人交互
+
+# 告警→IM 卡片（--dry-run 只打印不出站）：
+echo '{"alerts":[{"labels":{"alertname":"GPU 掉卡 XID 79"}}]}' | opsaxiom-webhook --dry-run
 ```
 
 ## 开发者快速上手
