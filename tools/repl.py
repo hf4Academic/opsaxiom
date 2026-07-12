@@ -22,6 +22,7 @@ import diagnose        # noqa: E402
 import runtime         # noqa: E402
 import incident as I   # noqa: E402  交互 v2：取证式诊断
 import sweep           # noqa: E402
+import llm             # noqa: E402  可选 LLM 适配层（无模型时全走降级）
 
 _BADGE = {"draft": "⚪草稿", "sim_verified": "🔵已验证",
           "field_verified": "🟢实地", "certified": "🟡认证"}
@@ -47,6 +48,10 @@ class Repl:
         self.last_hits = []          # 上次 diagnose 的候选（供数字选择兜底）
         self.last_incident = None    # 上次陈述建立的 incident（供 sweep/report）
         self.running = True
+        try:
+            self.model_cfg = llm.load_config()   # None = 无模型，全走降级
+        except Exception:
+            self.model_cfg = None
 
     # ---------- 展示 ----------
     def _welcome(self):
@@ -175,9 +180,21 @@ class Repl:
         for i, h in enumerate(inc.hyps, 1):
             print(f"  {i}) [{h.badge}] {h.name}       {h.meta['id']}")
 
+    def _llm_prefill(self, symptom, params):
+        """有模型则从自然语言预填 params（显式 k=v 优先）；无模型原样返回。R11/T-3 由 llm 层保证。"""
+        if self.model_cfg is None:
+            return params
+        r = llm.intake(symptom, config=self.model_cfg)
+        prefilled = {k: v for k, v in r.get("params", {}).items() if k not in params}
+        if prefilled:
+            shown = ", ".join(f"{k}={v}" for k, v in prefilled.items())
+            print(f"  （从你的描述预填：{shown}——回车确认，或输 k=v 覆盖）")
+        return {**prefilled, **params}
+
     def _intake(self, line):
         """陈述入口：建 incident、列假设。交互态自动接一键取证；非 TTY 只列假设（不阻塞）。"""
         symptom, params = self._parse_symptom(line)
+        params = self._llm_prefill(symptom, params)
         self.last_hits = diagnose.match(symptom, idx=self.idx, top=3)
         if not self.last_hits:
             self._show_hits(self.last_hits)
@@ -247,6 +264,10 @@ class Repl:
                 return
         if all(h.status != I.CONFIRMED for h in inc.hyps):
             print("  未证实任何假设。输入 report 导出移交卷宗，转人工/强模型接手。")
+            if self.model_cfg is not None:           # escalate 助理：只荐库内 id（R8/R10）
+                sid = llm.suggest_skill(inc.handover(), self.idx, config=self.model_cfg)
+                if sid:
+                    print(f"  → 模型建议再看：run {sid}（库内 Skill，徽章以库为准）")
 
     def _report(self):
         if not self.last_incident:

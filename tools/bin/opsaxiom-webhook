@@ -28,20 +28,9 @@ _BADGE = {"draft": "⚪草稿", "sim_verified": "🔵已验证",
           "field_verified": "🟢实地", "certified": "🟡认证"}
 
 
-import re as _re
-
-# R11（F-17）：外发卡片会进 IM（外部服务），自由文本可能夹带凭据。脱敏这些形态。
-_SECRET_PATS = [
-    _re.compile(r"(?i)\b(password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key|bearer)\b\s*[:=]?\s*\S+"),
-    _re.compile(r"://[^/\s:@]+:[^/\s@]+@"),          # user:pass@host
-    _re.compile(r"\b(gh[pousr]_[A-Za-z0-9]{6,}|xox[baprs]-[A-Za-z0-9-]{6,}|AKIA[0-9A-Z]{8,})\b"),  # 常见 token
-]
-
-
-def _redact(text):
-    for p in _SECRET_PATS:
-        text = p.sub("〔已脱敏〕", text or "")
-    return text
+# R11（F-17）：外发卡片会进 IM（外部服务），自由文本可能夹带凭据。
+# 脱敏规则收敛到 tools/redact.py 单一事实来源（送 LLM 的上下文复用同一套，Z-5）。
+from redact import redact as _redact  # noqa: E402
 
 
 def match_text_from_alert(payload):
