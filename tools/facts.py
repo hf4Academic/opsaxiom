@@ -40,8 +40,13 @@ def make_key(target, cmd, field):
 
 
 def _scalars(parsed):
-    """从解析产物里挑出标量字段（排除 rows/lines/output 容器本身）。
-    嵌套 output.* 里的标量也提出来——它们是分支判据的主力（§7.6c）。"""
+    """从解析产物里挑出证据字段（供卷宗做"命令→字段=值"引用）。
+
+    三个来源都要收（否则卷宗少证据）：
+      · 顶层标量；
+      · output.* 里的标量（§7.6c 分支判据主力）；
+      · 首行 rows[0].*（df/ss 等表型解析器的判据都在行上，如 rows[0].pcent）。
+    """
     out = {}
     if not isinstance(parsed, dict):
         return out
@@ -54,6 +59,11 @@ def _scalars(parsed):
                     out[sk] = sv
         elif isinstance(v, (int, float, str, bool)):
             out[k] = v
+    rows = parsed.get("rows")
+    if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+        for k, v in rows[0].items():
+            if isinstance(v, (int, float, str, bool)):
+                out[f"rows[0].{k}"] = v
     return out
 
 

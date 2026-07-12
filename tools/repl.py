@@ -20,11 +20,13 @@ sys.path.insert(0, str(ROOT / "sim"))
 import yaml            # noqa: E402
 import diagnose        # noqa: E402
 import runtime         # noqa: E402
+import incident as I   # noqa: E402  交互 v2：取证式诊断
+import sweep           # noqa: E402
 
 _BADGE = {"draft": "⚪草稿", "sim_verified": "🔵已验证",
           "field_verified": "🟢实地", "certified": "🟡认证"}
 _BUILTINS = {"help", "?", "list", "info", "run", "doctor", "hub", "record",
-             "skill", "resume", "quit", "exit", "q"}
+             "skill", "resume", "quit", "exit", "q", "sweep", "report"}
 
 
 def _find_skill(skill_id):
@@ -42,7 +44,8 @@ def _home():
 class Repl:
     def __init__(self):
         self.idx = diagnose.load_index()
-        self.last_hits = []          # 上次 diagnose 的候选（供数字选择）
+        self.last_hits = []          # 上次 diagnose 的候选（供数字选择兜底）
+        self.last_incident = None    # 上次陈述建立的 incident（供 sweep/report）
         self.running = True
 
     # ---------- 展示 ----------
@@ -67,7 +70,11 @@ class Repl:
     def _help(self):
         print("""用法（大多数时候你只需要直接描述问题）：
   直接说问题        如：磁盘满了但df有空间 / gpu掉卡 xid 79 / kafka积压
-  <数字>            选择上一次列出的候选，进入逐步排查
+                    交互态会自动一键取证并出诊断卷宗（证实/排除/证据不足）
+  加参数            结尾带 k=v，如：磁盘满了 mount=/data（无模型时显式给实体）
+  sweep             对刚才的陈述一键取证：本机只读自动跑/远端出粘贴块 → 诊断卷宗
+  report            把当前卷宗导出为故障报告 markdown（可贴工单/转人工）
+  <数字>            兜底：进入某个假设的逐步排查（老导航档）
   list [域]         列出全部或某域的 Skill（域：host k8s network middleware aicomp obs sec proc）
   info <id>         看某个 Skill 的概况
   run <id>          直接进入某个 Skill 的排查
@@ -148,6 +155,105 @@ class Repl:
             m = metas[int(sel) - 1]
             self._run(m["skill_id"], resume=True, session_id=m["_sid"])
 
+    # ---------- 交互 v2：陈述 → 取证 → 卷宗 ----------
+    @staticmethod
+    def _parse_symptom(line):
+        """从陈述里剥出结尾的 k=v 参数（如 `磁盘满 mount=/data`）。
+        Z-5 的 LLM intake 会把这一步自动化（从自然语言抽实体）；无模型时靠这个显式兜底。"""
+        toks = line.split()
+        params, rest = {}, []
+        for t in toks:
+            if "=" in t and t.split("=")[0].isidentifier():
+                k, v = t.split("=", 1)
+                params[k] = v
+            else:
+                rest.append(t)
+        return " ".join(rest), params
+
+    def _show_hypotheses(self, inc):
+        print(f"  假设 {len(inc.hyps)} 个（按相关度）：")
+        for i, h in enumerate(inc.hyps, 1):
+            print(f"  {i}) [{h.badge}] {h.name}       {h.meta['id']}")
+
+    def _intake(self, line):
+        """陈述入口：建 incident、列假设。交互态自动接一键取证；非 TTY 只列假设（不阻塞）。"""
+        symptom, params = self._parse_symptom(line)
+        self.last_hits = diagnose.match(symptom, idx=self.idx, top=3)
+        if not self.last_hits:
+            self._show_hits(self.last_hits)
+            return
+        skills = []
+        for _, e in self.last_hits:
+            _, s = I.load_skill_by_id(e["id"])
+            if s:
+                skills.append(s)
+        inc = I.Incident(symptom, params=params, target=I.LOCAL)
+        inc.add_hypotheses(skills)
+        self.last_incident = inc
+        self._show_hypotheses(inc)
+        if sys.stdin.isatty():
+            self._sweep_incident()
+        else:
+            print("  → 输入 sweep 一键取证出诊断卷宗，或输序号进入某假设逐步排查。")
+
+    def _read_until_end(self):
+        lines = []
+        for line in sys.stdin:
+            if line.strip() == "END":
+                break
+            lines.append(line.rstrip("\n"))
+        return "\n".join(lines)
+
+    def _sweep_incident(self):
+        """一键取证：本机只读自动执行（需一次性授权）+ 远端/手动命令单粘贴块 → 干跑 → 卷宗。"""
+        inc = self.last_incident
+        if not inc:
+            print("  先描述一个问题，我才好取证。")
+            return
+        plan = inc.plan()
+        auto = [p for w in plan["waves"] for p in w["probes"] if p["auto"]]
+        if inc.target == I.LOCAL and auto:
+            if not sweep.is_trusted(I.LOCAL):
+                print(f"  本机可自动执行 {len(auto)} 条只读取证命令（均出自已验证 Skill，绝不含写操作）。")
+                try:
+                    ans = input("  授权本机自动取证？一次性，记 trust.yaml [y/N]: ")
+                except (EOFError, KeyboardInterrupt):
+                    ans = ""
+                if ans.strip().lower() in ("y", "yes", "是"):
+                    sweep.grant_trust(I.LOCAL)
+            if sweep.is_trusted(I.LOCAL):
+                print("  ▶ 取证中（本机只读自动执行）…")
+                inc.auto_sweep()
+        nonce = sweep.make_nonce()
+        block, probes = inc.paste_block(nonce, only_manual=True)
+        if probes:
+            print(block)
+            print("  贴回全部输出，单独一行 END 结束：")
+            try:
+                pasted = self._read_until_end()
+            except (EOFError, KeyboardInterrupt):
+                pasted = ""
+            if pasted.strip():
+                inc.ingest(pasted, nonce)
+        inc.dry_run()
+        print(inc.render_dossier())
+        self._offer_treatment(inc)
+
+    def _offer_treatment(self, inc):
+        for h in inc.hyps:
+            if h.status == I.CONFIRMED and h.pending:
+                print(f"  → 处置：run {h.meta['id']}"
+                      f"（进入导航档执行变更，变更简报/审批门/verify 不变）")
+                return
+        if all(h.status != I.CONFIRMED for h in inc.hyps):
+            print("  未证实任何假设。输入 report 导出移交卷宗，转人工/强模型接手。")
+
+    def _report(self):
+        if not self.last_incident:
+            print("  还没有可导出的排查。先描述问题并 sweep。")
+            return
+        print(self.last_incident.export_report())
+
     def _delegate(self, parts):
         """hub/record/skill/doctor 交给既有 CLI 模块处理（复用，不复制）。"""
         import argparse
@@ -190,6 +296,10 @@ class Repl:
             self._run(parts[1]); return
         if head == "resume":
             self._resume_pick(); return
+        if head == "sweep":
+            self._sweep_incident(); return
+        if head == "report":
+            self._report(); return
         if head in ("doctor", "hub", "record", "skill"):
             self._delegate(parts); return
         if line.isdigit():
@@ -199,9 +309,8 @@ class Repl:
             else:
                 print("  没有这个序号。先描述问题看到候选，再输序号。")
             return
-        # 默认：当症状
-        self.last_hits = diagnose.match(line, idx=self.idx, top=3)
-        self._show_hits(self.last_hits)
+        # 默认：当症状 → 陈述入口（交互 v2：建 incident、列假设、交互态自动取证）
+        self._intake(line)
 
     def loop(self):
         try:
