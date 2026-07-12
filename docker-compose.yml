@@ -1,0 +1,20 @@
+# OpsAxiom 便捷编排。默认起 full（pi 智能入口 + 内置千问）。
+#   docker compose run --rm axiom              # 交互进 pi 入口
+#   docker compose run --rm axiom opsaxiom classic     # 老 REPL
+#   docker compose run --rm axiom diagnose "磁盘满了"   # 一次性子命令
+services:
+  axiom:
+    build:
+      context: .
+      target: full          # core / llm / full 三选一
+    image: opsaxiom:full
+    stdin_open: true         # -i
+    tty: true                # -t（pi TUI 需要）
+    environment:
+      OPSAXIOM_AUTOSERVE: "1"          # 入口自动起模型服务并等就绪
+      OPSAXIOM_SERVE_PORT: "11435"
+    volumes:
+      # 持久化会话/密钥/attestation（模型已烤在镜像里，此卷不含模型）
+      - opsaxiom-home:/root/.opsaxiom
+volumes:
+  opsaxiom-home:
