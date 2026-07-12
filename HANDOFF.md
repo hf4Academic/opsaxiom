@@ -76,6 +76,24 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
      越权 id/注入零影响；§6.5 事实库投毒仅靠"事实带 source_cmd+证据链"软防，是否够。
   4. **降级链诚实性**：无模型时是否真的全功能（intake→bigram、叙事→原样、escalate→None/索引）。
   5. **排期**：原第九轮 Y（发布准备）现为第十一轮，是否按此推进。
+- **M 轮追加（发起人直接指示，2026-07-12）：模型后端扩展**
+  - **builtin 内置小模型**：千问 Qwen2.5-0.5B-Instruct GGUF（q4_k_m 469MB，ModelScope
+    直连），llama-cpp-python 本机推理——开箱即用的离线备用底座；intake few-shot 化。
+  - **`opsaxiom model` CLI**：show/use/test/pull 四动作 + REPL 首启一次性向导；
+    四后端 builtin/ollama/remote(openai-compatible)/pi 一键切换，健康探测诚实报缺口。
+  - **pi 后端**：tools/pi_bridge.mjs 经 @earendil-works/pi-ai 统一网关调多 provider；
+    本机 node18 < 22.19 探测即报、照常降级（发起人上传 pi-main.zip，深度整合留后续轮）。
+  - **新防线（真机实测出的）**：intake 已知键形状校验 _PARAM_SHAPE——0.5B 实测会抽出
+    mount='/目录磁盘满了' 脏值并静默毒化卷宗（disk-full 被误排除），形状不合即丢，
+    宁缺勿错。此案例入 test_llm 对抗用例。
+  - 真机验证全过：model test 通、三句自然语言实体抽取正确、NL→取证→卷宗全链路真跑。
+  - 全库现状更新：**334 pytest 全绿 + 3 skipped**、73 校验全绿。
+- **M 轮评审补充重点**：
+  6. 0.5B 的 intake 只有 few-shot+形状校验兜底，narrate/suggest 两调用点对 0.5B 是否
+     该默认关（质量存疑）——是否加 per-callsite 开关。
+  7. _PARAM_SHAPE 是运行时侧新白名单，是否该与 metadata.params 声明对齐（schema 里
+     params 有 source 字段，可加 shape/pattern 声明成为单一事实来源）。
+  8. pi 深度整合（把 OpsAxiom 决策树暴露为 pi 的工具/技能）是否立项下一轮。
 - **交接给**：**Fable 5 —— 十轮评审**
 
 ---
