@@ -1,20 +1,41 @@
-# OpsAxiom 可选 LLM 适配层配置样例（Z-5）。
-# 复制到 ~/.opsaxiom/model.yaml 并按需改。删掉此文件或 enabled: false = 无模型模式
-# （全功能仍可用：关键词匹配 + 机器判读；模型只做理解/叙事/建议，永不出命令、不判分支）。
+# OpsAxiom LLM 适配层配置样例（Z-5 + M 轮）。
+# 推荐用命令行配置，不用手编这个文件：
+#   opsaxiom model show    看当前配置与各后端可用性
+#   opsaxiom model use builtin|ollama|remote|pi|off  [--endpoint --model --api-key --provider]
+#   opsaxiom model test    发真实探针验证
+#   opsaxiom model pull [--with-deps]   下载内置小模型（并装推理依赖）
+# 首次裸敲 opsaxiom 也会有一次性向导。
+#
+# enabled: false 或删掉本文件 = 无模型模式（全功能仍可用：关键词匹配 + 机器判读；
+# 模型只做理解/叙事/建议，永不出命令、不判分支）。
 
 enabled: false            # 改成 true 才启用
 
-# 后端二选一：
-#   ollama              本地 Ollama（推荐内网/气隙）
-#   openai-compatible   任何 OpenAI 兼容 API（本地推理服务/自建网关）
-backend: ollama
+# ── 后端四选一 ─────────────────────────────────────────────
+# builtin   内置小模型（千问 Qwen2.5-0.5B GGUF，本机离线推理，开箱即用的备用）
+# ollama    本地 Ollama
+# openai-compatible   任何 OpenAI 兼容 API（远程/自建网关）
+# pi        Pi Agent Harness 多 provider 网关（OpenAI/Anthropic/Google/DeepSeek/…）
+backend: builtin
+
+# --- builtin 示例（opsaxiom model pull 自动下载到 ~/.opsaxiom/models/）---
+# model_path: ~/.opsaxiom/models/qwen2.5-0.5b-instruct-q4_k_m.gguf   # 缺省自动找
+# n_ctx: 2048
+# 依赖：pip install llama-cpp-python（model pull --with-deps 代劳）
 
 # --- ollama 示例 ---
-endpoint: http://localhost:11434
-model: qwen2.5:7b
+# backend: ollama
+# endpoint: http://localhost:11434
+# model: qwen2.5:7b
 
-# --- openai-compatible 示例（把上面两行换成下面这样）---
+# --- openai-compatible 示例 ---
 # backend: openai-compatible
 # endpoint: http://localhost:8000/v1
 # model: your-model-name
-# api_key: sk-xxxx          # 需要鉴权时填；本地服务通常不需要
+# api_key: sk-xxxx          # 需要鉴权时填
+
+# --- pi 示例（需 node>=22.19 + npm install @earendil-works/pi-ai）---
+# backend: pi
+# provider: openai          # openai/anthropic/google/deepseek/groq/openrouter/…
+# model: gpt-4o-mini
+# api_key: sk-xxxx          # 或不填，走 pi-ai 的环境变量解析（OPENAI_API_KEY 等）

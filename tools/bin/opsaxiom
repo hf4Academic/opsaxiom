@@ -102,6 +102,11 @@ def main():
         add_hub(sub)
     except Exception:
         pass
+    try:
+        from model_cli import add_model  # M-2 模型配置
+        add_model(sub)
+    except Exception:
+        pass
     args = ap.parse_args()
     if not getattr(args, "cmd", None):           # 裸敲 opsaxiom → Terminal REPL
         import repl

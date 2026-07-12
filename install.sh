@@ -63,3 +63,6 @@ echo "==> 运行 doctor 自检"
 
 echo
 echo "✅ 安装完成。试试： opsaxiom diagnose \"磁盘满了但 df 有空间\""
+echo "   可选：接一个模型让它更懂人话（不接也全功能可用）——"
+echo "        opsaxiom model pull --with-deps   # 内置千问 0.5B（本机离线，≈469MB）"
+echo "        opsaxiom model show               # 或看 ollama/远程API/pi 怎么接"

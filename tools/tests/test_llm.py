@@ -59,6 +59,25 @@ def test_intake_bad_key_dropped():
     assert "9bad" not in r["params"] and r["params"].get("ok") == "1"
 
 
+def test_intake_shape_validation_drops_garbage():
+    """对抗（M-1 真机实测案例）：小模型抽出的脏值必须被形状校验拦下——
+    mount='/目录磁盘满了' 这类值流进 df 会静默毒化卷宗。宁缺勿错。"""
+    r = llm.intake("x", config={}, caller=_caller(
+        '{"params":{"mount":"/目录磁盘满了","host":"主机","peer_ip":"999.1.2.3.4",'
+        '"xid":"79","good_mount":"/data"}}'))
+    assert "mount" not in r["params"]          # 含中文的伪路径 → 丢
+    assert "host" not in r["params"]           # 非法主机名 → 丢
+    assert "peer_ip" not in r["params"]        # 非法 IP → 丢
+    assert r["params"].get("xid") == "79"      # 合形状 → 留
+
+
+def test_intake_shape_known_keys_valid_pass():
+    r = llm.intake("x", config={}, caller=_caller(
+        '{"params":{"mount":"/data","host":"web-01","peer_ip":"10.0.0.1","pod":"nginx-abc"}}'))
+    assert r["params"] == {"mount": "/data", "host": "web-01",
+                           "peer_ip": "10.0.0.1", "pod": "nginx-abc"}
+
+
 def test_intake_non_json_degrades():
     r = llm.intake("x", config={}, caller=_caller("我觉得应该是磁盘问题"))
     assert r["params"] == {} and r["degraded"] is True

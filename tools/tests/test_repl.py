@@ -2,10 +2,19 @@
 import pathlib
 import sys
 
+import pytest
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "sim"))
 import repl  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _isolate_opsaxiom_home(monkeypatch, tmp_path):
+    """与用户 ~/.opsaxiom 隔离：测试不读真实 model.yaml（否则会真跑本地推理，
+    慢且不确定——M-1 内置模型启用后踩到）。"""
+    monkeypatch.setenv("OPSAXIOM_HOME", str(tmp_path))
 
 
 def test_symptom_sets_hits():

@@ -123,12 +123,30 @@ axiom> 磁盘满了但 df 显示还有空间 mount=/data
 默认所有 Skill 都走导航档。等你亲手验证过某个 Skill 几次、信得过了，可以对**那一个**
 开更省事的档位（只读命令自动跑，写操作仍要你确认）。信任不是一个全局开关，是一格一格加的。
 
-### 可选：接一个本地模型（让它更"懂"你的话）
+### 可选：接一个模型（让它更"懂"你的话）
 **不接也能用**——上面全部功能在没有模型时照样跑（关键词匹配 + 机器判读）。
-接了本地模型（如 Ollama）后，它只多做三件事：从你的话里认实体（自动预填 `mount=…`）、
-把判读讲得更顺口、排查无果时从**库内**推荐下一个 Skill。**模型永远不出命令、不做判读**
-——那是决策树和解析器的活。配置见 `~/.opsaxiom/model.yaml`（样例：`docs/model.yaml.example`），
-`enabled: false` 或删掉文件即回到无模型模式。送模型的内容一律先脱敏，凭据永不外泄。
+接了模型后，它只多做三件事：从你的话里认实体（自动预填 `mount=…`）、把判读讲得更顺口、
+排查无果时从**库内**推荐下一个 Skill。**模型永远不出命令、不做判读**——那是决策树和
+解析器的活。送模型的内容一律先脱敏，凭据永不外泄。
+
+首次裸敲 `opsaxiom` 会有一次性向导；之后随时用命令行切换：
+
+```
+opsaxiom model show     # 看当前配置 + 四个后端各自差什么（诚实红黄绿）
+opsaxiom model pull --with-deps   # 下载内置小模型（千问 0.5B，≈469MB）+ 装推理依赖
+opsaxiom model use builtin        # 用内置小模型（本机离线跑，气隙可用的备用）
+opsaxiom model use ollama --model qwen2.5:7b          # 用本地 Ollama
+opsaxiom model use remote --endpoint http://x/v1 --model m --api-key k   # 远程 API
+opsaxiom model use pi --provider anthropic --model claude-sonnet-4-6     # Pi 网关
+opsaxiom model test     # 发一条真实探针验证（"主机 web-01 的 /data 磁盘满了"→抽实体）
+opsaxiom model use off  # 关掉，回到纯确定性模式
+```
+
+四个后端一句话：**builtin** = 内置千问 0.5B（GGUF 本机推理，离线备用底座）；
+**ollama** = 本地 Ollama 服务；**remote** = 任何 OpenAI 兼容 API；
+**pi** = Pi Agent Harness 的多 provider 网关（一个配置就能换 OpenAI/Anthropic/Google/
+DeepSeek 等，需 node≥22.19 + `npm install @earendil-works/pi-ai`）。
+任何后端不可用时自动降级为无模型模式，绝不阻塞排查。
 
 ---
 

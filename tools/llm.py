@@ -45,6 +45,90 @@ def load_config(path=None):
     return cfg if cfg.get("enabled") else None
 
 
+# ---------- builtin：内置本地小模型（M-1，开箱即用的 floor）----------
+# 默认落地模型：千问最小档 Qwen2.5-0.5B-Instruct（GGUF q4_k_m ≈ 469MB），
+# 用 llama-cpp-python 纯本机推理——气隙可用、无常驻服务。国内直连 ModelScope 下载。
+BUILTIN_MODEL_FILE = "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+BUILTIN_MODEL_URL = ("https://modelscope.cn/models/Qwen/Qwen2.5-0.5B-Instruct-GGUF"
+                     "/resolve/master/" + BUILTIN_MODEL_FILE)
+
+
+def models_dir():
+    base = pathlib.Path(os.environ.get(
+        "OPSAXIOM_HOME", pathlib.Path.home() / ".opsaxiom"))
+    return base / "models"
+
+
+def builtin_model_path(cfg=None):
+    """解析 builtin 模型文件：cfg.model_path 优先，否则 models/ 下默认名，
+    再兜底 models/ 里任一 *.gguf。不存在返回 None。"""
+    if cfg and cfg.get("model_path"):
+        p = pathlib.Path(cfg["model_path"]).expanduser()
+        return p if p.exists() else None
+    p = models_dir() / BUILTIN_MODEL_FILE
+    if p.exists():
+        return p
+    ggufs = sorted(models_dir().glob("*.gguf")) if models_dir().is_dir() else []
+    return ggufs[0] if ggufs else None
+
+
+_BUILTIN_CACHE = {}          # path -> Llama 实例（0.5B 常驻内存 ~600MB，进程内单例）
+
+
+def _builtin_call(cfg, prompt, system):
+    """本机 GGUF 推理。llama_cpp 未装/模型缺失/推理异常 → None（降级）。"""
+    try:
+        from llama_cpp import Llama
+    except Exception:
+        return None
+    path = builtin_model_path(cfg)
+    if path is None:
+        return None
+    key = str(path)
+    if key not in _BUILTIN_CACHE:
+        try:
+            _BUILTIN_CACHE[key] = Llama(
+                model_path=key, n_ctx=int(cfg.get("n_ctx", 2048)),
+                n_threads=os.cpu_count() or 4, verbose=False)
+        except Exception:
+            return None
+    try:
+        out = _BUILTIN_CACHE[key].create_chat_completion(
+            messages=[{"role": "system", "content": system},
+                      {"role": "user", "content": prompt}],
+            max_tokens=int(cfg.get("max_tokens", 256)), temperature=0)
+        return out["choices"][0]["message"]["content"]
+    except Exception:
+        return None
+
+
+# ---------- pi：Pi Agent Harness 的多 provider 网关（M-3）----------
+# 通过 tools/pi_bridge.mjs 调 @earendil-works/pi-ai（OpenAI/Anthropic/Google/…统一 API）。
+# 要求 node>=22.19 且已 npm install @earendil-works/pi-ai；不满足 → None（降级），
+# `opsaxiom model test` 会诚实报出差什么。
+def _pi_call(cfg, prompt, system, timeout=60):
+    import subprocess
+    bridge = pathlib.Path(__file__).resolve().parent / "pi_bridge.mjs"
+    if not bridge.exists():
+        return None
+    payload = json.dumps({
+        "provider": cfg.get("provider", "openai"),
+        "model": cfg.get("model", ""),
+        "endpoint": cfg.get("endpoint"),
+        "apiKey": cfg.get("api_key") or os.environ.get(cfg.get("api_key_env", ""), ""),
+        "system": system, "prompt": prompt,
+        "maxTokens": int(cfg.get("max_tokens", 512))})
+    try:
+        r = subprocess.run(["node", str(bridge)], input=payload,
+                           capture_output=True, text=True, timeout=timeout)
+        if r.returncode != 0:
+            return None
+        obj = json.loads(r.stdout.strip() or "{}")
+        return obj.get("text") or None
+    except Exception:
+        return None
+
+
 # ---------- 后端调用（stdlib urllib）----------
 def _http_json(url, payload, timeout=20):
     import urllib.request
@@ -60,6 +144,10 @@ def backend_call(cfg, prompt, system):
     try:
         backend = cfg.get("backend")
         model = cfg.get("model", "")
+        if backend == "builtin":
+            return _builtin_call(cfg, prompt, system)
+        if backend == "pi":
+            return _pi_call(cfg, prompt, system)
         if backend == "ollama":
             url = cfg.get("endpoint", "http://localhost:11434") + "/api/chat"
             data = _http_json(url, {
@@ -109,17 +197,49 @@ def _extract_json(text):
 
 
 # ---------- 调用点 1：intake 理解 ----------
+# few-shot 是给 0.5B 级小模型的（M-1 实测：无示例时字段会放错层级），大模型同样受益。
 _INTAKE_SYS = (
-    "你是运维分诊助手。把用户的故障陈述转成 JSON：{\"params\":{键:值},\"entities\":[...]}"
-    "。params 只填你确信的实体（如 mount=/data, peer_ip=10.0.0.1, xid=79）。"
-    "只输出 JSON，不要命令、不要解释。")
+    "你是运维分诊助手。把用户的故障陈述转成 JSON，所有实体一律放进 params 对象："
+    "{\"params\":{键:值},\"entities\":[原文片段]}。常见键：mount(挂载点) host(主机) "
+    "peer_ip(对端IP) xid(GPU错误码) pod svc topic。没有就留空。只输出 JSON，不要解释。\n"
+    "示例1 输入：主机 web-01 的 /data 磁盘满了\n"
+    "示例1 输出：{\"params\":{\"host\":\"web-01\",\"mount\":\"/data\"},\"entities\":[\"web-01\",\"/data\"]}\n"
+    "示例2 输入：交换机 10.0.0.1 的 bgp 邻居掉了\n"
+    "示例2 输出：{\"params\":{\"peer_ip\":\"10.0.0.1\"},\"entities\":[\"10.0.0.1\"]}\n"
+    "示例3 输入：gpu 掉卡 xid 79\n"
+    "示例3 输出：{\"params\":{\"xid\":\"79\"},\"entities\":[\"xid 79\"]}")
+
+
+# 已知键的形状校验（确定性，R9/R10）：小模型的抽取不能裸信——M-1 真机实测
+# 0.5B 会把 mount 抽成 "/目录磁盘满了" 这类脏值，流进 df 命令即污染判读。
+# 不合形状 → 丢弃（宁缺勿错：缺参走"证据不足→粘贴块"，错参会静默毒化卷宗）。
+import re as _re
+_PARAM_SHAPE = {
+    "mount": _re.compile(r"^/[\x21-\x7e]*$"),                    # 绝对路径，仅可见 ASCII
+    "host": _re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-_]{0,62}$"),  # 主机名
+    "peer_ip": _re.compile(r"^\d{1,3}(\.\d{1,3}){3}$"),          # IPv4
+    "ip": _re.compile(r"^\d{1,3}(\.\d{1,3}){3}$"),
+    "xid": _re.compile(r"^\d{1,3}$"),
+    "pod": _re.compile(r"^[a-z0-9][a-z0-9.\-]{0,63}$"),
+    "svc": _re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-_]{0,63}$"),
+    "topic": _re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-_]{0,127}$"),
+}
+
+
+def _shape_ok(key, value):
+    pat = _PARAM_SHAPE.get(key)
+    if pat is not None:
+        return bool(pat.match(value))
+    # 未知键：无专用形状，仅要求可见 ASCII 且不超长（进命令模板的保守底线）
+    return len(value) <= 128 and all(0x21 <= ord(c) <= 0x7e for c in value)
 
 
 def intake(symptom, config=None, caller=None):
     """NL → 结构化 params（供渲染命令）。返回 {"params":{...}, "entities":[...]}。
 
     降级（无模型/超时/输出不合法/无 JSON）→ {"params":{}, "entities":[]}，
-    调用方照常用 bigram diagnose。抽出的 param 值过 shell 安全校验（不安全即丢，T-3）。
+    调用方照常用 bigram diagnose。抽出的 param 值过两道确定性校验：
+    shell 安全（T-3）+ 已知键形状（_PARAM_SHAPE）——模型输出永远不裸信。
     """
     fallback = {"params": {}, "entities": [], "degraded": True}
     call = _caller(config, caller)
@@ -134,7 +254,7 @@ def intake(symptom, config=None, caller=None):
         if not (isinstance(k, str) and k.isidentifier()):
             continue                              # 键须是合法标识符（能进模板）
         v = str(v)
-        if is_shell_safe(v):                      # T-3：不安全的 param 值一律丢
+        if is_shell_safe(v) and _shape_ok(k, v):  # T-3 + 形状：任一不过即丢
             params[k] = v
     ents = [str(x) for x in (obj.get("entities") or [])][:12]
     return {"params": params, "entities": ents, "degraded": False}
