@@ -13,6 +13,7 @@ opsaxiom —— OpsAxiom 运行时 CLI（导航档 MVP，T-1）。
   answers: {<node_id>: <粘贴的命令输出 / 选项序号 / y|n>}
 """
 import argparse
+import os
 import pathlib
 import sys
 
@@ -107,9 +108,29 @@ def main():
         add_model(sub)
     except Exception:
         pass
-    args = ap.parse_args()
-    if not getattr(args, "cmd", None):           # 裸敲 opsaxiom → Terminal REPL
+    try:
+        from incident_cli import add_incident  # N-1 取证式诊断（机器可读）
+        add_incident(sub)
+    except Exception:
+        pass
+    # N-3 入口策略：pi 智能入口优先，Python REPL 零依赖兜底（R3 不破）
+    import sys as _sys
+    argv1 = _sys.argv[1] if len(_sys.argv) > 1 else None
+    if argv1 == "classic":                       # 强制老 REPL
         import repl
+        return repl.start()
+    if argv1 == "pi":                            # 强制 pi 入口
+        import pi_entry
+        gap = pi_entry.launch(ROOT, _sys.argv[2:])
+        print(f"pi 入口不可用：{gap}", file=_sys.stderr)
+        return 2
+    args = ap.parse_args()
+    if not getattr(args, "cmd", None):           # 裸敲 opsaxiom
+        if _sys.stdin.isatty() and os.environ.get("OPSAXIOM_ENTRY") != "classic":
+            import pi_entry
+            if pi_entry.probe()[0]:
+                pi_entry.launch(ROOT)            # exec，不返回
+        import repl                              # 兜底：老 REPL（气隙/无 node 无感）
         return repl.start()
     return args.fn(args)
 

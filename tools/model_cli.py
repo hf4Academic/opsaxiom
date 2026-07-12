@@ -148,6 +148,41 @@ def cmd_test(args):
     return 0
 
 
+def cmd_serve(args):
+    """把内置 GGUF 起成 OpenAI 兼容服务（llama_cpp.server，含流式）——
+    pi 入口的 opsaxiom-local provider 与任何 OpenAI 客户端都能接（N-4）。"""
+    p = llm.builtin_model_path()
+    if p is None:
+        print("模型文件缺失，先 opsaxiom model pull")
+        return 1
+    try:
+        import llama_cpp.server  # noqa: F401
+        import uvicorn  # noqa: F401
+    except Exception:
+        print("缺 server 依赖：pip install 'llama-cpp-python[server]'"
+              "（或 opsaxiom model pull --with-deps --serve-deps）")
+        return 1
+    # 结构：<port> 垫片代理（拍平 content parts / 字段名映射，pi 直连这里）
+    #        → <port+1> llama_cpp.server 本体。
+    # 真机实锤：pi-ai 发 OpenAI content parts，llama 的 jinja 模板只认字符串→500。
+    up_port = args.port + 1
+    print(f"OpenAI 兼容服务 → http://127.0.0.1:{args.port}/v1"
+          f"（模型别名 qwen2.5-0.5b-instruct，Ctrl-C 停）")
+    proc = subprocess.Popen([sys.executable, "-m", "llama_cpp.server",
+                             "--model", str(p), "--host", "127.0.0.1",
+                             "--port", str(up_port),
+                             "--model_alias", "qwen2.5-0.5b-instruct",
+                             "--n_ctx", "4096"])
+    try:
+        import llm_proxy
+        llm_proxy.serve(listen_port=args.port, upstream_port=up_port)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        proc.terminate()
+    return 0
+
+
 def cmd_pull(args):
     llm.models_dir().mkdir(parents=True, exist_ok=True)
     dst = llm.models_dir() / llm.BUILTIN_MODEL_FILE
@@ -167,13 +202,16 @@ def cmd_pull(args):
         urllib.request.urlretrieve(llm.BUILTIN_MODEL_URL, dst, reporthook=hook)
         print(f"完成：{dst.stat().st_size >> 20} MB")
     if args.with_deps:
+        pkg = "llama-cpp-python[server]" if args.serve_deps else "llama-cpp-python"
         try:
             import llama_cpp  # noqa: F401
-            print("llama-cpp-python 已装。")
+            if args.serve_deps:
+                import llama_cpp.server  # noqa: F401
+            print(f"{pkg} 已装。")
         except Exception:
-            print("安装 llama-cpp-python（需编译，几分钟）…")
+            print(f"安装 {pkg}（需编译，几分钟）…")
             subprocess.run([sys.executable, "-m", "pip", "install", "cmake"], check=False)
-            r = subprocess.run([sys.executable, "-m", "pip", "install", "llama-cpp-python"],
+            r = subprocess.run([sys.executable, "-m", "pip", "install", pkg],
                                env={**os.environ, "CMAKE_ARGS": "-DGGML_NATIVE=OFF"})
             print("依赖安装" + ("成功" if r.returncode == 0 else "失败（见上方输出）"))
     ok, msg = probe_builtin()
@@ -223,5 +261,10 @@ def add_model(sub):
     p = s2.add_parser("pull")
     p.add_argument("--force", action="store_true")
     p.add_argument("--with-deps", dest="with_deps", action="store_true")
+    p.add_argument("--serve-deps", dest="serve_deps", action="store_true",
+                   help="连 server 依赖一起装（供 model serve / pi 入口用）")
     p.set_defaults(fn=cmd_pull)
+    p = s2.add_parser("serve")
+    p.add_argument("--port", type=int, default=11435)
+    p.set_defaults(fn=cmd_serve)
     ap.set_defaults(fn=cmd_show)     # 裸 `model` = show
