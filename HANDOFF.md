@@ -39,25 +39,54 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
 
 ## 当前状态（由最后工作的模型更新）
 
-- **更新时间**：2026-07-12（Fable 交互重设计后覆盖）
-- **更新者**：Fable 5
-- **阶段**：**发起人裁决触发交互模型 v2 重设计，第十轮任务书已发（Z-1~Z-6），交接 Opus 4.8**
-- **发起人裁决（本轮起因）**：Skills 资产基本成型，但交互仍是"回合制问答"——形式像大模型
-  问答，只是更严肃遵循 Skill。不够智能，重设计。
-- **Fable 设计产出**：
-  - **docs/09-interaction-v2.md**（本轮宪法级输入）：交互从"问答走树"改为"取证式诊断"
-    ——一次陈述 → 多假设批量取证（1–2 波）→ 诊断卷宗（证实/排除/证据不足+证据引用）
-    → 处置审批 → 复盘导出。回合数从 O(节点数) 降到 O(波次)。
-  - 可行性已实测：全库 73 Skill，check 前沿中位数 2、ask 节点仅 6、action 仅 9——
-    绝大多数树是"纯只读取证+终点结论"形态，天然可批量。
-  - 新增运行时机制：事实库 session MVP（兑现 docs/01 §3）、检查前沿静态提取、
-    本机协驾只读自动执行（复用 F-16 白名单）、LLM 适配层（可选可降级，只做
-    intake/叙事/escalate 助理三件事，永不生成命令、永不判分支）。
-  - **硬约束：零 Skill 迁移、schema 不动、宪法 R1–R12 不动**；action 审批/verify/attest
-    环节原样保留（v1 做对的部分）。
-- **排期裁决**：**第十轮（Z 交互 v2）优先于原第九轮（Y 发布准备），Y 顺延为第十一轮**
-  ——带着问卷式交互发布，第一印象即定型。
-- **交接给**：Opus 4.8 —— 从 TODO-opus.md 第十轮 Z-1 开始，**docs/09 是本轮必读**
+- **更新时间**：2026-07-12（Opus 第十轮 Z-1~Z-6 完成）
+- **更新者**：Opus 4.8
+- **阶段**：**第十轮（交互模型 v2）全部完成，交接 Fable 5 十轮评审**
+- **第十轮交付（docs/09 设计 → 实现，零 Skill 迁移、schema 不动、R1–R12 不动）**：
+  - **Z-1 环境事实库**（tools/facts.py）：fact=key/value/source_cmd/target/ts/ttl/parser/field；
+    key=目标+归一化命令+字段；解析器输出自动入库（BUNDLE 供 check 复用 + 标量/首行字段供
+    卷宗证据链）；故障态 TTL 300s；target 隔离；save/load 随审计归档且过期即弃。兑现 docs/01 §3。
+  - **Z-2 检查前沿提取**（tools/evidence.py）：静态分析树，从 entry 可达+命令可渲染的
+    check/discovery 入前沿；多假设合并、按事实键去重、波次分组。"纳入前沿"只看可达+可渲染
+    （网络设备 show 也纳入），"是否自动执行"另判（auto=本机 and _is_readonly）——F-16 白名单不松。
+  - **Z-3 批量取证执行**（tools/sweep.py）：本机协驾 execute_auto 自动跑（执行时二次校验只读
+    + T-3 param 注入防护）；导航档单粘贴块（nonce 分隔符）+ collect/ingest 回灌；trust.yaml
+    逐目标一次性授权。回合数 O(节点)→O(1 粘贴)。**三条对抗纪律带测试**（伪造分隔符判数据/
+    param 注入拒执行/白名单外二次拦截）。
+  - **Z-4 incident 会话与诊断卷宗**（tools/incident.py + REPL v2）：incident 取代裸 session；
+    假设在事实上**干跑**（判读全走 exprlang，一行不进 LLM/启发式），三态 confirmed/refuted/
+    insufficient；卷宗三栏带证据引用与徽章；escalate 出移交卷宗；done 导出故障报告 md。
+    两条端到端链路入 tests（disk-full 本机全自动取证用真实解析器、bgp 导航一次粘贴）。
+  - **Z-5 LLM 适配层**（tools/llm.py，可选可降级）：model.yaml（ollama/openai-compatible，
+    urllib 不加依赖）；三调用点 intake/叙事/escalate 助理，各有静默降级，**无模型全功能可用**。
+    铁律由代码结构强制（不出命令、不判分支、输出过白名单、送模型前 redact、param 值过 shell 校验）。
+    脱敏收敛到 redact.py 单一来源（webhook 改导入）。**对抗测试**（注入仅展示零影响/越权编造 id
+    丢弃/危险 param 净化）。
+  - **Z-6 收尾**：docs/10 第二章改 v2 主线、README 交互示例更新、docs/model.yaml.example。
+- **全库现状**：73 Skill / 49 sim_verified、**323 pytest 全绿 + 3 skipped(无 kubectl)**、
+  73 校验全绿、sim 74 全绿。新增 6 个运行时模块 + 5 个测试文件（新增约 60+ 测试）。
+- **需 Fable 十轮评审的重点**：
+  1. **卷宗 UX 与语义**：三栏（证实/排除/证据不足）划分是否符合直觉；到达 ask/action 判
+     "诊断确立(confirmed)+待处置"是否合理；证据引用目前列消费过命令的全部字段（偏多），
+     是否该只留驱动分支的判据字段（我记为可优化点，未做——需要 exprlang 引用抽取）。
+  2. **干跑判读正确性**：干跑复用 exprlang 与 sim 同源，但缺 parser 的 check 节点
+     （如 inode_exhaustion 的 find、check_deleted_open 的 lsof）在真实取证下 rows 为空会走
+     otherwise——这类节点在事实驱动流里判读偏保守，是否需要补解析器（Q-2 字段契约延伸）。
+  3. **对抗用例完备性**：docs/09 §6 六条，Z-3/Z-5 覆盖了分隔符伪造/param 注入/白名单/
+     越权 id/注入零影响；§6.5 事实库投毒仅靠"事实带 source_cmd+证据链"软防，是否够。
+  4. **降级链诚实性**：无模型时是否真的全功能（intake→bigram、叙事→原样、escalate→None/索引）。
+  5. **排期**：原第九轮 Y（发布准备）现为第十一轮，是否按此推进。
+- **交接给**：**Fable 5 —— 十轮评审**
+
+---
+
+## 历史状态存档（十七）
+
+- **更新者**：Fable 5（交互重设计）
+- **阶段**：发起人裁决触发交互模型 v2 重设计，第十轮任务书已发（Z-1~Z-6）
+- Fable 设计产出 docs/09-interaction-v2.md（问答走树 → 取证式诊断）；可行性实测
+  （check 前沿中位数 2、ask 仅 6、action 仅 9）；硬约束零 Skill 迁移/schema 不动/R1–R12 不动；
+  排期裁决 Z 优先于 Y（发布准备顺延十一轮）。交接 Opus 从 Z-1 开始。
 
 ---
 

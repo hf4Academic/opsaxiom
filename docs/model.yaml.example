@@ -1,0 +1,20 @@
+# OpsAxiom 可选 LLM 适配层配置样例（Z-5）。
+# 复制到 ~/.opsaxiom/model.yaml 并按需改。删掉此文件或 enabled: false = 无模型模式
+# （全功能仍可用：关键词匹配 + 机器判读；模型只做理解/叙事/建议，永不出命令、不判分支）。
+
+enabled: false            # 改成 true 才启用
+
+# 后端二选一：
+#   ollama              本地 Ollama（推荐内网/气隙）
+#   openai-compatible   任何 OpenAI 兼容 API（本地推理服务/自建网关）
+backend: ollama
+
+# --- ollama 示例 ---
+endpoint: http://localhost:11434
+model: qwen2.5:7b
+
+# --- openai-compatible 示例（把上面两行换成下面这样）---
+# backend: openai-compatible
+# endpoint: http://localhost:8000/v1
+# model: your-model-name
+# api_key: sk-xxxx          # 需要鉴权时填；本地服务通常不需要
