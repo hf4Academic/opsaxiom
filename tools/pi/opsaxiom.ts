@@ -122,14 +122,17 @@ function capybaraHeader(theme: any): string[] {
   const m = (s: string) => theme.fg("muted", s);
   const d = (s: string) => theme.fg("dim", s);
   // 憨厚小卡皮巴拉：顶上小圆耳(∩ ∩)、眯眯眼(-  -)、方吻(ᴥ)、鼓身、四小短腿
+  const num = (s: string) => theme.fg("accent", s);
   return [
     "",
-    `  ${a("   ∩      ∩")}`,
-    `  ${a(" (  -    -  )")}      ${a("◆ OpsAxiom")} ${d("× pi")}`,
-    `  ${a(" (    ᴥ     )")}      ${m("把运维专家的判断，编译成可回滚的资产")}`,
-    `  ${a(" (          )")}      ${m("直接说故障：")}${d("磁盘满了 / xid 79 / kafka 积压")}`,
-    `  ${a("  \\________/")}       ${d("/connect 接模型（自己输 Key）· /model 切换")}`,
-    `  ${a("   u u  u u")}        ${d("命令与判读永远出自已验证 Skill")}`,
+    `  ${a("   ∩      ∩")}       ${a("◆ OpsAxiom")} ${d("× pi")}   ${m("把运维专家的判断，编译成可回滚的资产")}`,
+    `  ${a(" (  -    -  )")}      ${m("直接说你的故障（磁盘满了 / xid 79 / kafka 积压），我取证出诊断卷宗。")}`,
+    `  ${a(" (    ᴥ     )")}`,
+    `  ${a(" (          )")}      ${num("1")} ${m("/login")}    对接 API 模型（选服务商 → 输 Key → 当场选模型）`,
+    `  ${a("  \\________/")}       ${num("2")} ${m("/skill")}    学怎么写一个 Skill（三种捕获通道 + 缺口清单）`,
+    `  ${a("   u u  u u")}        ${num("3")} ${m("/publish")}  把你的 Skill 发布到社区 Hub`,
+    `  ${a("           ")}        ${num("4")} ${m("/install")}  从社区 Hub 下载 Skill 并自动校验（三道安全门）`,
+    `  ${d("             命令与判读永远出自已验证 Skill；写操作过审批门 · /axiom 看状态")}`,
     "",
   ];
 }
@@ -327,12 +330,10 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // ---------- 命令：/connect 接模型向导（自己选家、自己输 Key） ----------
-  pi.registerCommand("connect", {
-    description: "接一个远程/本地模型：选服务商 → 输 API Key → 立即切换",
-    handler: async (_args, ctx) => {
+  // ---------- 命令：/login（/connect /logging 同义）接模型向导 ----------
+  const doConnect = async (_args: string, ctx: any) => {
       if (!ctx.hasUI) {
-        ctx.ui.notify("connect 需要交互终端", "error");
+        ctx.ui.notify("接模型需要交互终端", "error");
         return;
       }
       const labels = PROVIDER_PRESETS.map((p) => p.label);
@@ -421,6 +422,76 @@ export default function (pi: ExtensionAPI) {
           ctx.ui.notify(`已注册但切换失败，用 /model 手动选（检查 Key/端点）`, "warning");
         }
       }
+  };
+  const CONNECT_DESC = "对接 API 模型：选服务商 → 输 API Key → 当场选模型";
+  for (const name of ["login", "connect", "logging"]) {
+    pi.registerCommand(name, { description: CONNECT_DESC, handler: doConnect });
+  }
+
+  // ---------- 命令：/skill 学怎么写一个 Skill ----------
+  pi.registerCommand("skill", {
+    description: "怎么写一个 Skill（三种捕获通道 + 校验缺口清单）",
+    handler: async (args, ctx) => {
+      const guide = [
+        "写一个 Skill = 把你这次排查的判断，固化成可复用、可验证的决策树。三条通道任选：",
+        "",
+        "  A. 从刚才的排查会话生成草稿（最省力）",
+        "     opsaxiom skill from-session <会话id>   —— 审计自动回放成 skill.yaml 草稿",
+        "  B. 向导式从零问答生成",
+        "     opsaxiom skill new                     —— 边问边按规范生成",
+        "  C. 排查没走 Skill 时，先录一段",
+        "     opsaxiom record start / stop           —— 投喂关键命令+输出 → 同一条草稿管线",
+        "",
+        "  草稿落 skills-drafts/，跑校验看还差什么：",
+        "     opsaxiom skill lint <草稿>             —— validate + 缺口清单(缺 otherwise/caution/rollback…)",
+        "  补完 → 正常晋级流水线（sim_verified → field_verified）。规范全文见 docs/07。",
+        "",
+        "在这个 pi 界面里排查完，直接说“把这次排查存成 Skill”，我也会引导你走 from-session。",
+      ].join("\n");
+      ctx.ui.notify("Skill 写作三通道见下方", "info");
+      if (ctx.hasUI) ctx.ui.setWidget("axiom-skill", guide.split("\n"));
+      // 带了参数就直接跑对应子命令（如 /skill lint skills-drafts/foo）
+      if (args && args.trim()) {
+        const out = await runCli(["skill", ...args.trim().split(/\s+/)], 60000)
+          .catch((e) => String(e));
+        ctx.ui.notify(out.trim().slice(0, 500), "info");
+      }
+    },
+  });
+
+  // ---------- 命令：/publish 发布 Skill 到社区 Hub ----------
+  pi.registerCommand("publish", {
+    description: "把一个 Skill 发布到社区 Hub（打包+签名）",
+    handler: async (args, ctx) => {
+      let id = (args || "").trim();
+      if (!id && ctx.hasUI) {
+        id = (await ctx.ui.input("要发布的 Skill id（如 host.storage.capacity.disk-full）:", "")) || "";
+      }
+      if (!id) {
+        ctx.ui.notify("用法：/publish <skill-id>", "warning");
+        return;
+      }
+      const out = await runCli(["hub", "push", id], 120000).catch((e) => String(e));
+      ctx.ui.notify(out.trim().slice(0, 600) || "已打包，见上方输出", "info");
+    },
+  });
+
+  // ---------- 命令：/install 从社区 Hub 下载并自动校验 ----------
+  pi.registerCommand("install", {
+    description: "从社区 Hub 下载 Skill 到本地并自动校验（三道安全门）",
+    handler: async (args, ctx) => {
+      const q = (args || "").trim();
+      // 无参：先搜；有参：直接拉（pull 内含本地重跑校验+验签+draft 拒收）
+      if (!q) {
+        const kw = ctx.hasUI ? (await ctx.ui.input("搜关键词（或直接输 skill-id 回车拉取）:", "")) || "" : "";
+        if (!kw) return;
+        const searched = await runCli(["hub", "search", kw], 60000).catch((e) => String(e));
+        if (ctx.hasUI) ctx.ui.setWidget("axiom-hub", searched.trim().split("\n").slice(0, 12));
+        ctx.ui.notify("搜索结果见下方；再 /install <skill-id> 拉取并校验", "info");
+        return;
+      }
+      const out = await runCli(["hub", "pull", q], 120000).catch((e) => String(e));
+      ctx.ui.notify(out.trim().slice(0, 700) || "已拉取到 skills-community/（本地已重跑校验）", "info");
     },
   });
 
