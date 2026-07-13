@@ -51,7 +51,9 @@ def _skill_summary(s):
 
 
 # ---------- 建 registry（从 skills/ 生成，供演示/发布）----------
-def build_registry(skills_dir, out_dir):
+def build_registry(skills_dir, out_dir, include_draft=True):
+    """include_draft=False：过滤 ⚪draft（对外发布的 registry 用——与 policy.md
+    第 2 条、CI 的 draft 拒收一致；含 draft 的 registry 会被自己的 CI 打红）。"""
     skills_dir, out = pathlib.Path(skills_dir), pathlib.Path(out_dir)
     (out / "skills").mkdir(parents=True, exist_ok=True)
     (out / "keyring").mkdir(parents=True, exist_ok=True)
@@ -59,6 +61,8 @@ def build_registry(skills_dir, out_dir):
     for sp in sorted(skills_dir.rglob("skill.yaml")):
         s = yaml.safe_load(sp.read_text(encoding="utf-8"))
         m = s["metadata"]
+        if not include_draft and m.get("maturity") == "draft":
+            continue
         ver = m["version"]
         dst = out / "skills" / m["id"] / ver
         if dst.exists():

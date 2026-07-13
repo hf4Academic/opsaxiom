@@ -117,7 +117,16 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
       服务常驻~1GB+node+python 超内存）——0.5B 的 tool-calling 能力偏弱是已知风险，
       DeepSeek 等远程模型全链路已通（含系统守则遵循）。建议默认引导用远程/中等模型。
   11. Docker 镜像未实构建（本环境无 docker），仅静态校验+各部件单独真机验证。
-- **交接给**：**Fable 5 —— 十轮评审（含 M/N 追加）**
+- **里程碑（2026-07-12）：社区正式上线**
+  - registry：https://github.com/hf4Academic/opsaxiom-registry（49 个 sim_verified Skill；
+    首发含 draft 违反自身 policy 被 CI 打红——已用 build-registry --no-draft 重建对齐）
+  - 网站：https://hf4academic.github.io/opsaxiom-site（GitHub Pages，registry 只读投影）
+  - 主仓库：https://github.com/hf4Academic/opsaxiom（public；内网 origin cstcloud 保留双轨）
+  - 端到端验证：hub init(GitHub 地址)→sync 49→pull 三道安全门全过；
+    发布通道：pi /publish(上下键选)→bundle→fork+PR，CI 质检(validate+draft 拒收)+合入重建索引
+  - 推送基建：本机无 ssh 客户端，用 paramiko+dulwich 纯 python 推送（密钥 ~/.ssh/id_ed25519，
+    公钥已加发起人 GitHub 账号，不需要时可在 GitHub 侧吊销）
+- **交接给**：**Fable 5 —— 十轮评审（含 M/N 追加与社区上线）**
 
 ---
 

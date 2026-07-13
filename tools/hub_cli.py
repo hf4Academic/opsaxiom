@@ -9,7 +9,8 @@ def _cmd_hub(args):
         print(f"registry 已配置：{reg}")
         return 0
     if sub == "build-registry":
-        n = hubtool.build_registry(args.skills, args.out)
+        n = hubtool.build_registry(args.skills, args.out,
+                                   include_draft=not getattr(args, "no_draft", False))
         print(f"已从 {args.skills} 生成 registry 到 {args.out}（{n} 个 Skill，含 index.json）")
         return 0
     if sub == "sync":
@@ -83,6 +84,8 @@ def add_hub(subparsers):
     b = hs.add_parser("build-registry", help="从 skills/ 生成一个 registry")
     b.add_argument("skills")
     b.add_argument("out")
+    b.add_argument("--no-draft", dest="no_draft", action="store_true",
+                   help="过滤 draft（对外发布用，与收录政策一致）")
     hs.add_parser("sync", help="同步 registry 索引")
     se = hs.add_parser("search", help="搜索 registry")
     se.add_argument("kw")

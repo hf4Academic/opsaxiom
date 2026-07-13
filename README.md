@@ -3,6 +3,10 @@
 > 一个面向运维人员的开源智能体：把运维专家的判断编译成**可验证、可回滚、可认证**的
 > Skill 资产，让任何模型——包括跑在你内网的本地小模型——都能安全地使用它。
 
+> **社区已上线**：Skill 仓库 [opsaxiom-registry](https://github.com/hf4Academic/opsaxiom-registry) ·
+> 浏览网站 [hf4academic.github.io/opsaxiom-site](https://hf4academic.github.io/opsaxiom-site) ·
+> 接入：`opsaxiom hub init https://github.com/hf4Academic/opsaxiom-registry.git`
+
 ## 一句话定位
 
 别人是"把大模型接到运维工具上"；我们是把专家经验做成经过仿真与实地双重验证的决策树，
