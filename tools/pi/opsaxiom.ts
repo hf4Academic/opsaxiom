@@ -459,16 +459,37 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // ---------- 命令：/publish 发布 Skill 到社区 Hub ----------
+  // ---------- 命令：/publish 发布 Skill 到社区 Hub（上下键选，不用记 id） ----------
   pi.registerCommand("publish", {
-    description: "把一个 Skill 发布到社区 Hub（打包+签名）",
+    description: "把一个 Skill 发布到社区 Hub（上下键选择，打包+签名）",
     handler: async (args, ctx) => {
       let id = (args || "").trim();
       if (!id && ctx.hasUI) {
-        id = (await ctx.ui.input("要发布的 Skill id（如 host.storage.capacity.disk-full）:", "")) || "";
+        // 列出本地全部 Skill 供上下键选择（id — 名称 [徽章]）
+        const raw = await runCli(["list", "--json"], 60000).catch(() => "[]");
+        let skills: any[] = [];
+        try { skills = JSON.parse(raw); } catch { /* 空表 */ }
+        if (!skills.length) {
+          ctx.ui.notify("本地没有可发布的 Skill", "warning");
+          return;
+        }
+        const BADGE: Record<string, string> = {
+          draft: "⚪", sim_verified: "🔵", field_verified: "🟢", certified: "🟡" };
+        const labels = skills.map(
+          (s) => `${BADGE[s.maturity] ?? "?"} ${s.id} — ${s.name}`);
+        const picked = await ctx.ui.select("发布哪个 Skill？（↑↓ 选择）", labels);
+        if (picked == null) return;
+        id = skills[labels.indexOf(picked)].id;
+        // draft 提前提示（registry 收录政策要求 ≥ sim_verified）
+        const m = skills[labels.indexOf(picked)].maturity;
+        if (m === "draft") {
+          const go = await ctx.ui.confirm(
+            "还是草稿", "这个 Skill 还是 ⚪draft（社区 registry 默认拒收 draft）。仍要打包？");
+          if (!go) return;
+        }
       }
       if (!id) {
-        ctx.ui.notify("用法：/publish <skill-id>", "warning");
+        ctx.ui.notify("用法：/publish（上下键选择）或 /publish <skill-id>", "warning");
         return;
       }
       const out = await runCli(["hub", "push", id], 120000).catch((e) => String(e));
