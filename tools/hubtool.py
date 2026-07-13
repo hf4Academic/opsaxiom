@@ -99,10 +99,21 @@ def hub_init(location):
     return reg
 
 
+# 官方社区 registry——未配置时自动接入（零配置：pull/search 开箱即用）。
+# 私有环境用 `hub init <内网地址>` 覆盖即可，此默认不会覆盖已有配置。
+DEFAULT_REGISTRY = "https://github.com/hf4Academic/opsaxiom-registry.git"
+
+
 def _registry():
     cfg = _load_cfg()
     if not cfg.get("registry"):
-        raise RuntimeError("未配置 registry，先 opsaxiom hub init <目录或git地址>")
+        print(f"（首次使用：自动接入官方社区 {DEFAULT_REGISTRY}，可用 hub init 换）")
+        try:
+            return hub_init(DEFAULT_REGISTRY)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                f"接入官方社区失败（网络到 github 不通？）。可稍后重试，"
+                f"或 hub init <内网镜像/本地目录>。原因：git clone 退出码 {e.returncode}") from e
     return pathlib.Path(cfg["registry"])
 
 

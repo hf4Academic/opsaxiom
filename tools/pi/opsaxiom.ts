@@ -131,7 +131,7 @@ function capybaraHeader(theme: any): string[] {
     `  ${a(" (          )")}      ${num("1")} ${m("/login")}    对接 API 模型（选服务商 → 输 Key → 当场选模型）`,
     `  ${a("  \\________/")}       ${num("2")} ${m("/skill")}    学怎么写一个 Skill（三种捕获通道 + 缺口清单）`,
     `  ${a("   u u  u u")}        ${num("3")} ${m("/publish")}  把你的 Skill 发布到社区 Hub`,
-    `  ${a("           ")}        ${num("4")} ${m("/install")}  从社区 Hub 下载 Skill 并自动校验（三道安全门）`,
+    `  ${a("           ")}        ${num("4")} ${m("/pull")}     从社区下载 Skill：搜索→↑↓选→自动校验（三道安全门）`,
     `  ${d("             命令与判读永远出自已验证 Skill；写操作过审批门 · /axiom 看状态")}`,
     "",
   ];
@@ -497,24 +497,38 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // ---------- 命令：/install 从社区 Hub 下载并自动校验 ----------
-  pi.registerCommand("install", {
-    description: "从社区 Hub 下载 Skill 到本地并自动校验（三道安全门）",
-    handler: async (args, ctx) => {
-      const q = (args || "").trim();
-      // 无参：先搜；有参：直接拉（pull 内含本地重跑校验+验签+draft 拒收）
-      if (!q) {
-        const kw = ctx.hasUI ? (await ctx.ui.input("搜关键词（或直接输 skill-id 回车拉取）:", "")) || "" : "";
+  // ---------- 命令：/pull（/install 同义）从社区下载并自动校验 ----------
+  // 零配置：未配置 registry 时 CLI 侧自动接入官方社区。
+  // 无参 = 搜索→上下键选→拉取，一条命令走完（发起人验收：别让人记 id）。
+  const doPull = async (args: string, ctx: any) => {
+      let q = (args || "").trim();
+      if (!q && ctx.hasUI) {
+        const kw = (await ctx.ui.input("想找什么 Skill？（关键词，如 磁盘 / xid / kafka）:", "")) || "";
         if (!kw) return;
-        const searched = await runCli(["hub", "search", kw], 60000).catch((e) => String(e));
-        if (ctx.hasUI) ctx.ui.setWidget("axiom-hub", searched.trim().split("\n").slice(0, 12));
-        ctx.ui.notify("搜索结果见下方；再 /install <skill-id> 拉取并校验", "info");
-        return;
+        const searched = await runCli(["hub", "search", kw], 120000).catch(() => "");
+        // 解析搜索行 "[徽章] id —— 名称"，供上下键选择
+        const items = searched.split("\n")
+          .map((l) => l.match(/\[([^\]]+)\]\s+(\S+)\s+——\s+(.+)/))
+          .filter(Boolean)
+          .map((mm: any) => ({ id: mm[2], label: `${mm[1]} ${mm[2]} — ${mm[3]}` }));
+        if (!items.length) {
+          ctx.ui.notify("没搜到。换个关键词试试。", "warning");
+          return;
+        }
+        const picked = await ctx.ui.select("拉取哪个？（↑↓ 选择）", items.map((i) => i.label));
+        if (picked == null) return;
+        q = items[items.map((i) => i.label).indexOf(picked)].id;
       }
-      const out = await runCli(["hub", "pull", q], 120000).catch((e) => String(e));
+      if (!q) return;
+      const out = await runCli(["hub", "pull", q], 180000).catch((e) => String(e));
       ctx.ui.notify(out.trim().slice(0, 700) || "已拉取到 skills-community/（本地已重跑校验）", "info");
-    },
-  });
+  };
+  for (const name of ["pull", "install"]) {
+    pi.registerCommand(name, {
+      description: "从社区下载 Skill：搜索 → 上下键选 → 自动三道安全门校验",
+      handler: doPull,
+    });
+  }
 
   // ---------- 命令：/axiom 快速状态 ----------
   pi.registerCommand("axiom", {

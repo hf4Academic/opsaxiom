@@ -5,7 +5,10 @@ Hub 静态网站生成器（V-5，docs/08 §3.4）——registry → 纯静态 H
 （决策树文本可视化、cautions、maturity 徽章、attestation 列表与验签状态）。
 私有环境对内网 registry 跑一遍即得内部 Hub。
 
-用法：python tools/hubsite/build.py <registry_dir> <out_dir>
+导航（发起人验收意见）：浅色主题；全站导航栏（首页/怎么用/怎么贡献/治理与投诉）；
+详情页有明显返回；每个 Skill 带 👎 投诉按钮 → registry 仓库 GitHub Issue（进入治理流程）。
+
+用法：python tools/hubsite/build.py <registry_dir> <out_dir> [github_repo_url]
 """
 import html
 import json
@@ -17,26 +20,39 @@ ROOT = HERE.parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import yaml            # noqa: E402
 
+DEFAULT_REPO = "https://github.com/hf4Academic/opsaxiom-registry"
+
 BADGE = {"draft": ("⚪", "#9ca3af"), "sim_verified": ("🔵", "#3b82f6"),
          "field_verified": ("🟢", "#22c55e"), "certified": ("🟡", "#eab308")}
 
+# 浅色主题（发起人验收：浅色更好看）
 CSS = """
-:root{--bg:#0b1020;--card:#161c2e;--fg:#e5e9f0;--mut:#94a3b8;--acc:#60a5fa}
+:root{--bg:#f8fafc;--card:#ffffff;--fg:#1e293b;--mut:#64748b;--acc:#2563eb;--line:#e2e8f0}
 *{box-sizing:border-box}body{margin:0;font:15px/1.6 -apple-system,Segoe UI,Roboto,'Noto Sans CJK SC',sans-serif;background:var(--bg);color:var(--fg)}
 a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
-header{padding:24px 32px;border-bottom:1px solid #243}
-h1{margin:0;font-size:22px}.sub{color:var(--mut);font-size:13px}
+nav{display:flex;gap:18px;align-items:center;padding:12px 32px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0}
+nav .brand{font-weight:700;color:var(--fg)}nav a{color:var(--mut);font-size:14px}nav a.on,nav a:hover{color:var(--acc)}
+nav .gh{margin-left:auto}
+header{padding:22px 32px;border-bottom:1px solid var(--line);background:#fff}
+h1{margin:0;font-size:22px}.sub{color:var(--mut);font-size:13px;margin-top:4px}
 .wrap{max-width:1000px;margin:0 auto;padding:24px 32px}
-input#q{width:100%;padding:12px 14px;border-radius:10px;border:1px solid #2a3550;background:#0f1526;color:var(--fg);font-size:15px;margin-bottom:20px}
+input#q{width:100%;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:#fff;color:var(--fg);font-size:15px;margin-bottom:20px}
 .dom{color:var(--mut);text-transform:uppercase;font-size:12px;letter-spacing:.08em;margin:22px 0 8px}
-.card{background:var(--card);border:1px solid #223;border-radius:12px;padding:14px 16px;margin:8px 0}
-.card h3{margin:0 0 4px;font-size:16px}.badge{font-size:12px;padding:2px 8px;border-radius:999px;color:#000;font-weight:600}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:8px 0;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+.card h3{margin:0 0 4px;font-size:16px}.badge{font-size:12px;padding:2px 8px;border-radius:999px;color:#fff;font-weight:600}
 .mut{color:var(--mut);font-size:13px}
-.node{background:#0f1526;border-left:3px solid #2a3550;padding:8px 12px;margin:6px 0;border-radius:6px}
-.node .t{font-weight:600}.caut{color:#fbbf24;font-size:13px;margin:3px 0 3px 12px}
+.node{background:#f1f5f9;border-left:3px solid #cbd5e1;padding:8px 12px;margin:6px 0;border-radius:6px}
+.node .t{font-weight:600}.caut{color:#b45309;font-size:13px;margin:3px 0 3px 12px}
 .exit-done{border-left-color:#22c55e}.exit-esc{border-left-color:#f59e0b}
-table{width:100%;border-collapse:collapse;margin-top:8px}td,th{text-align:left;padding:6px 8px;border-bottom:1px solid #223;font-size:13px}
+table{width:100%;border-collapse:collapse;margin-top:8px}td,th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);font-size:13px}
 .pill{font-size:12px;color:var(--mut)}
+.btn{display:inline-block;padding:8px 14px;border-radius:10px;border:1px solid var(--line);background:#fff;font-size:14px}
+.btn:hover{border-color:var(--acc);text-decoration:none}
+.btn.warn{color:#b91c1c;border-color:#fecaca}.btn.warn:hover{border-color:#b91c1c}
+.step{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:12px 0}
+.step h3{margin:0 0 6px;font-size:15px}
+code,pre{background:#f1f5f9;border-radius:6px;padding:1px 6px;font-size:13px}
+pre{padding:12px 14px;overflow:auto;line-height:1.5}
 """
 
 
@@ -49,9 +65,19 @@ def _badge_html(m):
     return f'<span class="badge" style="background:{color}">{icon} {_esc(m)}</span>'
 
 
+def _nav(depth, on, repo):
+    p = "../" * depth
+    def cls(k):
+        return ' class="on"' if k == on else ""
+    return (f'<nav><span class="brand">🦫 OpsAxiom Hub</span>'
+            f'<a href="{p}index.html"{cls("home")}>Skill 库</a>'
+            f'<a href="{p}contribute.html"{cls("contrib")}>怎么贡献</a>'
+            f'<a href="{p}governance.html"{cls("gov")}>治理与投诉</a>'
+            f'<a class="gh" href="{repo}">GitHub ↗</a></nav>')
+
+
 def _tree_html(skill):
     out = []
-    nodes = {n["id"]: n for n in skill.get("tree", {}).get("nodes", [])}
     entry = skill.get("tree", {}).get("entry")
     out.append(f'<p class="mut">入口：<code>{_esc(entry)}</code></p>')
     for n in skill.get("tree", {}).get("nodes", []):
@@ -97,24 +123,79 @@ def _page(title, body):
             f'<title>{_esc(title)}</title><style>{CSS}</style></head><body>{body}</body></html>')
 
 
-def build_site(registry_dir, out_dir):
+def _report_url(repo, skill_id):
+    """👎 投诉链接：预填标题/标签的 GitHub Issue —— 治理流程入口。"""
+    return (f'{repo}/issues/new?labels=report'
+            f'&title=%5Breport%5D%20{skill_id}'
+            f'&body=%23%23%20被投诉%20Skill%0A%60{skill_id}%60%0A%0A'
+            f'%23%23%20问题（误导%2F翻车%2F过时%2F安全隐患）%0A%0A'
+            f'%23%23%20环境与复现%0A')
+
+
+def _contribute_html(repo):
+    return f'''
+<header><h1>怎么贡献你验证过的 Skill</h1>
+<div class="sub">两条通道殊途同归：都落到本仓库的一个 Pull Request，CI 自动质检，维护者合入即上架。</div></header>
+<div class="wrap">
+<div class="step"><h3>通道一：客户端（推荐，全程引导）</h3>
+<pre>opsaxiom skill from-session &lt;会话id&gt;   # 把你刚做完的排查自动变成草稿
+opsaxiom skill lint &lt;草稿&gt;             # 校验 + 缺口清单，补完
+# 仿真验证晋级到 🔵 后：
+opsaxiom hub push &lt;skill-id&gt;           # 打包 bundle（pi 界面里 /publish 上下键选）</pre>
+<p class="mut">得到 bundle 后：fork 本仓库 → 解包到 <code>skills/&lt;id&gt;/&lt;version&gt;/</code> → 提 PR。</p></div>
+<div class="step"><h3>通道二：纯网页（不装客户端）</h3>
+<p>1. <a href="{repo}/fork">Fork 本仓库</a>；</p>
+<p>2. 在你的 fork 里进入 <code>skills/</code>，用网页 <b>Add file → Upload files</b> 上传你的
+<code>&lt;skill-id&gt;/&lt;version&gt;/</code> 目录（skill.yaml + tests/ + attestations/）；</p>
+<p>3. 发起 Pull Request——PR 就是发布表单：描述你在什么环境验证过、结果如何。</p></div>
+<div class="step"><h3>收录标准（CI 自动检查 + 维护者评审）</h3>
+<p>① 校验全绿（结构 + 语义 S1–S13 + 命令语法树）；② 成熟度 ≥ 🔵 sim_verified（⚪draft 拒收）；
+③ 实地验证记录（attestation）签名有效；④ 任何写操作必须带经过验证的回滚方案。</p>
+<p class="mut">完整政策见 <a href="{repo}/blob/main/policy.md">policy.md</a>。</p></div>
+</div>'''
+
+
+def _governance_html(repo):
+    return f'''
+<header><h1>治理与投诉</h1>
+<div class="sub">发现某个 Skill 误导、翻车、过时或有安全隐患？投诉它，进入治理流程。</div></header>
+<div class="wrap">
+<div class="step"><h3>怎么投诉（👎）</h3>
+<p>每个 Skill 详情页都有 <b>👎 投诉此 Skill</b> 按钮——它会带着 Skill id 打开一个
+GitHub Issue（标签 <code>report</code>），你只需写清：<b>什么问题 + 什么环境 + 怎么复现</b>。
+不需要账号以外的任何东西。</p></div>
+<div class="step"><h3>投诉之后发生什么（治理流程）</h3>
+<p>1. <b>核实</b>：维护者按 Issue 复现（必要时在仿真环境重跑该 Skill 的 tests）；</p>
+<p>2. <b>处置</b>（按严重度）：修正（提 PR 修复）／<b>降级</b>（撤销徽章，如 🟢→🔵）／
+<b>下架</b>（git revert 移出 registry——留痕不删档，历史可查）；</p>
+<p>3. <b>公示</b>：处置结论回帖在原 Issue，负面 attestation 同样入库（负面记录是社区的宝贵信号）。</p></div>
+<div class="step"><h3>谁在治理</h3>
+<p>维护者 = 本仓库有合入权限的人；可信签名者名单在 <code>keyring/trusted.pub</code>，
+加入需维护者双人复核（PR 形式）。所有治理动作都是 git 提交——可追溯、可回滚。</p>
+<p><a class="btn" href="{repo}/issues?q=label%3Areport">查看历史投诉与处置 ↗</a></p></div>
+</div>'''
+
+
+def build_site(registry_dir, out_dir, repo=DEFAULT_REPO):
     reg = pathlib.Path(registry_dir)
     out = pathlib.Path(out_dir)
     (out / "skill").mkdir(parents=True, exist_ok=True)
     index = json.loads((reg / "index.json").read_text(encoding="utf-8"))
 
-    # 详情页
+    # 详情页（导航栏 + 明显返回 + 👎 投诉按钮）
     for e in index:
         sd = reg / "skills" / e["id"] / e["version"]
         skill = yaml.safe_load((sd / "skill.yaml").read_text(encoding="utf-8"))
-        body = (f'<header><h1>{_esc(e["name"])} {_badge_html(e["maturity"])}</h1>'
-                f'<div class="sub"><code>{_esc(e["id"])}</code> · {_esc(e["taxonomy"])} · v{_esc(e["version"])}'
-                f' · <a href="../index.html">← 返回 Hub</a></div></header>'
+        body = (_nav(1, "home", repo) +
+                f'<header><h1>{_esc(e["name"])} {_badge_html(e["maturity"])}</h1>'
+                f'<div class="sub"><code>{_esc(e["id"])}</code> · {_esc(e["taxonomy"])} · v{_esc(e["version"])}</div>'
+                f'<div style="margin-top:10px"><a class="btn" href="../index.html">← 返回首页</a> '
+                f'<a class="btn warn" href="{_report_url(repo, e["id"])}">👎 投诉此 Skill</a></div></header>'
                 f'<div class="wrap"><h2>决策树</h2>{_tree_html(skill)}'
                 f'<h2>实地验证（attestation）</h2>{_att_html(sd)}</div>')
         (out / "skill" / f"{e['id']}.html").write_text(_page(e["name"], body), encoding="utf-8")
 
-    # 首页（域分组 + 客户端搜索）
+    # 首页（导航栏 + 域分组 + 客户端搜索）
     doms = {}
     for e in index:
         doms.setdefault(e["domain"], []).append(e)
@@ -134,19 +215,29 @@ def build_site(registry_dir, out_dir):
           "document.querySelectorAll('.dom').forEach(d=>{let n=d.nextElementSibling,any=false;"
           "while(n&&n.classList.contains('card')){if(n.style.display!=='none')any=true;n=n.nextElementSibling;}"
           "d.style.display=any?'':'none';});});</script>")
-    body = (f'<header><h1>OpsAxiom Skills Hub</h1>'
-            f'<div class="sub">{len(index)} 个可信运维 Skill · 徽章表示成熟度 · 点开看决策树与实地验证</div></header>'
+    body = (_nav(0, "home", repo) +
+            f'<header><h1>OpsAxiom Skills Hub</h1>'
+            f'<div class="sub">{len(index)} 个可信运维 Skill · 徽章表示成熟度 · 点开看决策树与实地验证 · '
+            f'终端接入：<code>opsaxiom hub pull &lt;id&gt;</code>（首次自动指向本社区）</div></header>'
             f'<div class="wrap"><input id="q" placeholder="搜索症状 / id / 域…（如 磁盘、xid、暴破）">'
             f'{"".join(cards)}</div>{js}')
     (out / "index.html").write_text(_page("OpsAxiom Skills Hub", body), encoding="utf-8")
+
+    # 贡献 / 治理页
+    (out / "contribute.html").write_text(
+        _page("怎么贡献", _nav(0, "contrib", repo) + _contribute_html(repo)), encoding="utf-8")
+    (out / "governance.html").write_text(
+        _page("治理与投诉", _nav(0, "gov", repo) + _governance_html(repo)), encoding="utf-8")
     return len(index)
 
 
 def main():
-    if len(sys.argv) != 3:
-        print("用法：python tools/hubsite/build.py <registry_dir> <out_dir>", file=sys.stderr)
+    if len(sys.argv) not in (3, 4):
+        print("用法：python tools/hubsite/build.py <registry_dir> <out_dir> [github_repo_url]",
+              file=sys.stderr)
         return 2
-    n = build_site(sys.argv[1], sys.argv[2])
+    repo = sys.argv[3].rstrip("/") if len(sys.argv) == 4 else DEFAULT_REPO
+    n = build_site(sys.argv[1], sys.argv[2], repo=repo)
     print(f"已生成静态站点：{sys.argv[2]}（{n} 个 Skill，首页 index.html）")
     return 0
 
