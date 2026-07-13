@@ -121,17 +121,15 @@ function rhinoHeader(theme: any): string[] {
   const a = (s: string) => theme.fg("accent", s);   // 轮廓/角
   const m = (s: string) => theme.fg("muted", s);
   const d = (s: string) => theme.fg("dim", s);
-  const t = (s: string) => s;
-  // 透明线稿小犀牛：角朝左、圆背、三组小短腿（发起人验收：腿要全、要可爱）
+  // 圆滚滚小犀牛：大圆脸、小三角角(◅)、豆豆眼、鼓身、小蹄子（发起人验收：更圆更 Q）
   return [
     "",
-    `  ${a("      ,-~~-.___")}`,
-    `  ${a(" /\\  /  ")}${t("●")}${a("      `~~-.__")}`,
-    `  ${a("(  \\(                 `--.")}      ${a("◆ OpsAxiom")} ${d("× pi")}`,
-    `  ${a(" \\  `,                    \\")}     ${m("把运维专家的判断，编译成可回滚的资产")}`,
-    `  ${a("  `-. \\_,-,______,-,___,-,'")}     ${m("直接说故障：")}${d("磁盘满了 / xid 79 / kafka 积压")}`,
-    `  ${a("      | |      | |     | |")}      ${d("/connect 接模型（自己输 Key）· /model 切换")}`,
-    `  ${a("      ˘ ˘      ˘ ˘     ˘ ˘")}      ${d("命令与判读永远出自已验证 Skill")}`,
+    `  ${a("    .-~~~-.")}`,
+    `  ${a("   /  ●  ● \\")}       ${a("◆ OpsAxiom")} ${d("× pi")}`,
+    `  ${a(" ◅(    ▿    )")}      ${m("把运维专家的判断，编译成可回滚的资产")}`,
+    `  ${a("   \\  ‿‿  /")}       ${m("直接说故障：")}${d("磁盘满了 / xid 79 / kafka 积压")}`,
+    `  ${a("   (_|   |_)")}       ${d("/connect 接模型（自己输 Key）· /model 切换")}`,
+    `  ${a("     ˘   ˘")}         ${d("命令与判读永远出自已验证 Skill")}`,
     "",
   ];
 }
@@ -152,7 +150,7 @@ const PROVIDER_PRESETS: Array<{
     defaultModel: "qwen-plus", keyHint: "sk-…（百炼控制台 API-KEY）" },
   { label: "月之暗面 Kimi", provider: "moonshot-cn", builtin: false,
     baseUrl: "https://api.moonshot.cn/v1", defaultModel: "moonshot-v1-8k" },
-  { label: "自定义 OpenAI 兼容端点（vLLM/网关/内网）", provider: "custom", builtin: false },
+  { label: "✎ 自定义（自己填 URL / API Key / Model ID）", provider: "custom", builtin: false },
 ];
 
 export default function (pi: ExtensionAPI) {
@@ -341,24 +339,28 @@ export default function (pi: ExtensionAPI) {
       const picked = await ctx.ui.select("接哪家模型？", labels);
       if (picked == null) return;
       const preset = PROVIDER_PRESETS[labels.indexOf(picked)];
+      const isCustom = preset.provider === "custom";
 
-      // 自定义端点：多问 baseUrl
+      // 自定义：三件套自己填（起个名 → URL → Model ID）
+      let label = preset.label;
       let baseUrl = preset.baseUrl;
-      if (preset.provider === "custom") {
-        baseUrl = (await ctx.ui.input("OpenAI 兼容端点（如 http://10.0.0.5:8000/v1）:", "")) || "";
+      if (isCustom) {
+        label = (await ctx.ui.input("给这个连接起个名（如 公司网关 / 我的vLLM）:", "自定义")) || "自定义";
+        baseUrl = (await ctx.ui.input(
+          "Base URL（OpenAI 兼容，须含 /v1，如 https://host/v1）:", "")) || "";
         if (!baseUrl) return;
       }
       // 模型名（自定义/预置 OpenAI 兼容端点需要；内置 provider 用 pi 自带目录）
       let modelId = preset.defaultModel;
       if (!preset.builtin) {
         modelId = (await ctx.ui.input(
-          `模型名${preset.defaultModel ? `（回车用 ${preset.defaultModel}）` : ""}:`,
+          `Model ID${preset.defaultModel ? `（回车用 ${preset.defaultModel}）` : "（如 deepseek-chat / gpt-4o-mini）"}:`,
           preset.defaultModel || "",
         )) || preset.defaultModel;
         if (!modelId) return;
       }
       const apiKey = (await ctx.ui.input(
-        `API Key${preset.keyHint ? `（${preset.keyHint}）` : ""}（本机 0600 保存，不上传）:`,
+        `API Key${preset.keyHint ? `（${preset.keyHint}）` : ""}（本机 0600 保存，不上传；无鉴权可留空）:`,
         "",
       )) || "";
       if (preset.builtin && !apiKey) {
@@ -366,11 +368,20 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      const providerId = preset.provider === "custom"
-        ? `custom-${new URL(baseUrl!).hostname.replace(/\./g, "-")}`
-        : preset.provider;
+      // provider id：自定义从 host 派生（非法 URL 不崩），其余用预置 id
+      let providerId = preset.provider;
+      if (isCustom) {
+        let host = "endpoint";
+        try {
+          host = new URL(baseUrl!).hostname.replace(/[^a-z0-9]/gi, "-");
+        } catch {
+          ctx.ui.notify("Base URL 格式不对（要 http(s)://…/v1）", "error");
+          return;
+        }
+        providerId = `custom-${host}`;
+      }
       const conn: SavedConn = {
-        provider: providerId, label: preset.label, apiKey,
+        provider: providerId, label, apiKey,
         baseUrl, modelId, builtin: preset.builtin,
       };
       try {
