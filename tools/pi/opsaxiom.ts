@@ -15,6 +15,8 @@ import { Type } from "typebox";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import * as path from "node:path";
+import * as fs from "node:fs";
+import * as os from "node:os";
 
 // 仓库根：本文件在 <root>/tools/pi/ 下；OPSAXIOM_ROOT 可覆盖
 const ROOT =
@@ -49,24 +51,114 @@ const SYSTEM_RULES = `
 5. 证据不足就说证据不足，需要什么命令的输出就说清楚。宁可拒绝，不可翻车。
 `;
 
+// ---------- 已保存的模型连接（/connect 落盘，重启自动恢复） ----------
+const CONNECT_FILE = path.join(
+  process.env.OPSAXIOM_HOME || path.join(os.homedir(), ".opsaxiom"),
+  "pi-connect.json",
+);
+
+type SavedConn = {
+  provider: string;          // pi 内的 provider id
+  label: string;
+  apiKey: string;
+  baseUrl?: string;          // 自定义/预置 OpenAI 兼容端点才有
+  modelId?: string;          // 自定义 provider 注册的模型
+  builtin: boolean;          // true=覆盖 pi 内置 provider；false=新注册
+};
+
+function loadConns(): SavedConn[] {
+  try {
+    return JSON.parse(fs.readFileSync(CONNECT_FILE, "utf-8"));
+  } catch {
+    return [];
+  }
+}
+
+function saveConns(conns: SavedConn[]) {
+  fs.mkdirSync(path.dirname(CONNECT_FILE), { recursive: true });
+  fs.writeFileSync(CONNECT_FILE, JSON.stringify(conns, null, 2), { mode: 0o600 });
+}
+
+function registerConn(pi: ExtensionAPI, c: SavedConn) {
+  if (c.builtin) {
+    // 覆盖 pi 内置 provider 的 apiKey（模型目录用 pi 自带的）
+    pi.registerProvider(c.provider, { apiKey: c.apiKey });
+  } else {
+    pi.registerProvider(c.provider, {
+      name: c.label,
+      baseUrl: c.baseUrl!,
+      apiKey: c.apiKey || "none",
+      api: "openai-completions",
+      models: [
+        {
+          id: c.modelId!,
+          name: `${c.modelId}（${c.label}）`,
+          reasoning: false,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 32768,
+          maxTokens: 4096,
+        },
+      ],
+    });
+  }
+}
+
+// ---------- 透明小犀牛（发起人钦定吉祥物）+ 欢迎文案 ----------
+function rhinoHeader(theme: any): string[] {
+  const a = (s: string) => theme.fg("accent", s);   // 轮廓/角
+  const m = (s: string) => theme.fg("muted", s);
+  const d = (s: string) => theme.fg("dim", s);
+  const t = (s: string) => s;
+  // 透明线稿小犀牛：角朝左，圆身短腿
+  return [
+    "",
+    `   ${a("     ,~~-.___")}`,
+    `   ${a("/\\  /  ")}${t("●")}${a("     `--~-._")}`,
+    `  ${a("(  \\(               `,")}   ${a("◆ OpsAxiom")} ${d("× pi")}`,
+    `  ${a(" \\  `,   ,__    __   |")}   ${m("把运维专家的判断，编译成可回滚的资产")}`,
+    `  ${a("  `-.,__/   |,-'  \\,-'")}   ${m("直接说故障：")}${d("磁盘满了 / xid 79 / kafka 积压")}`,
+    `   ${a("    ||     ||")}          ${d("/connect 接模型（自己输 Key）· /model 切换")}`,
+    `   ${a("    ˘˘     ˘˘")}          ${d("命令与判读永远出自已验证 Skill，模型只做理解与转述")}`,
+    "",
+  ];
+}
+
+// ---------- /connect 预置菜单 ----------
+// builtin=true：pi 自带模型目录，只需 Key；builtin=false：OpenAI 兼容端点直连
+const PROVIDER_PRESETS: Array<{
+  label: string; provider: string; builtin: boolean;
+  baseUrl?: string; defaultModel?: string; keyHint?: string;
+}> = [
+  { label: "DeepSeek", provider: "deepseek", builtin: true },
+  { label: "Anthropic Claude", provider: "anthropic", builtin: true },
+  { label: "OpenAI", provider: "openai", builtin: true },
+  { label: "Google Gemini", provider: "google", builtin: true },
+  { label: "OpenRouter（一个 Key 通多家）", provider: "openrouter", builtin: true },
+  { label: "阿里云百炼（通义千问）", provider: "bailian", builtin: false,
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    defaultModel: "qwen-plus", keyHint: "sk-…（百炼控制台 API-KEY）" },
+  { label: "月之暗面 Kimi", provider: "moonshot-cn", builtin: false,
+    baseUrl: "https://api.moonshot.cn/v1", defaultModel: "moonshot-v1-8k" },
+  { label: "自定义 OpenAI 兼容端点（vLLM/网关/内网）", provider: "custom", builtin: false },
+];
+
 export default function (pi: ExtensionAPI) {
-  // ---------- 欢迎界面（发起人指定：入口即 OpsAxiom 门面） ----------
+  // 启动即恢复已保存连接（Key 存本地 0600 文件，永不入日志）
+  for (const c of loadConns()) {
+    try {
+      registerConn(pi, c);
+    } catch {
+      /* 单条坏配置不阻塞启动 */
+    }
+  }
+
+  // ---------- 欢迎界面：透明小犀牛 ----------
   pi.on("session_start", async (_event, ctx) => {
     if (ctx.mode === "tui") {
       ctx.ui.setHeader((_tui, theme) => ({
         render(_width: number): string[] {
-          const a = (s: string) => theme.fg("accent", s);
-          const m = (s: string) => theme.fg("muted", s);
-          const d = (s: string) => theme.fg("dim", s);
-          return [
-            "",
-            `  ${a("◆ OpsAxiom")} ${d("× pi")}`,
-            `  ${m("把运维专家的判断，编译成可验证、可回滚、可认证的资产")}`,
-            "",
-            `  ${m("直接说你的故障：")}${d("磁盘满了但 df 有空间 / gpu 掉卡 xid 79 / kafka 积压")}`,
-            `  ${d("模型只做理解与转述；命令与判读永远出自已验证 Skill（/model 换模型）")}`,
-            "",
-          ];
+          return rhinoHeader(theme);
         },
         invalidate() {},
       }));
@@ -222,6 +314,75 @@ export default function (pi: ExtensionAPI) {
       const out = JSON.parse(await runCli(args));
       const md = out.report_markdown || out.note || "（无报告：可能未授权取证）";
       return { content: [{ type: "text", text: md }], details: {} };
+    },
+  });
+
+  // ---------- 命令：/connect 接模型向导（自己选家、自己输 Key） ----------
+  pi.registerCommand("connect", {
+    description: "接一个远程/本地模型：选服务商 → 输 API Key → 立即切换",
+    handler: async (_args, ctx) => {
+      if (!ctx.hasUI) {
+        ctx.ui.notify("connect 需要交互终端", "error");
+        return;
+      }
+      const labels = PROVIDER_PRESETS.map((p) => p.label);
+      const picked = await ctx.ui.select("接哪家模型？", labels);
+      if (picked == null) return;
+      const preset = PROVIDER_PRESETS[labels.indexOf(picked)];
+
+      // 自定义端点：多问 baseUrl
+      let baseUrl = preset.baseUrl;
+      if (preset.provider === "custom") {
+        baseUrl = (await ctx.ui.input("OpenAI 兼容端点（如 http://10.0.0.5:8000/v1）:", "")) || "";
+        if (!baseUrl) return;
+      }
+      // 模型名（自定义/预置 OpenAI 兼容端点需要；内置 provider 用 pi 自带目录）
+      let modelId = preset.defaultModel;
+      if (!preset.builtin) {
+        modelId = (await ctx.ui.input(
+          `模型名${preset.defaultModel ? `（回车用 ${preset.defaultModel}）` : ""}:`,
+          preset.defaultModel || "",
+        )) || preset.defaultModel;
+        if (!modelId) return;
+      }
+      const apiKey = (await ctx.ui.input(
+        `API Key${preset.keyHint ? `（${preset.keyHint}）` : ""}（本机 0600 保存，不上传）:`,
+        "",
+      )) || "";
+      if (preset.builtin && !apiKey) {
+        ctx.ui.notify("内置服务商必须有 Key", "error");
+        return;
+      }
+
+      const providerId = preset.provider === "custom"
+        ? `custom-${new URL(baseUrl!).hostname.replace(/\./g, "-")}`
+        : preset.provider;
+      const conn: SavedConn = {
+        provider: providerId, label: preset.label, apiKey,
+        baseUrl, modelId, builtin: preset.builtin,
+      };
+      try {
+        registerConn(pi, conn);
+      } catch (e) {
+        ctx.ui.notify(`注册失败：${String(e).slice(0, 120)}`, "error");
+        return;
+      }
+      // 持久化（同 provider 覆盖旧条目）
+      const conns = loadConns().filter((c) => c.provider !== providerId);
+      conns.push(conn);
+      saveConns(conns);
+
+      // 立即切换：内置 provider 让用户从目录挑；自定义直接上
+      if (preset.builtin) {
+        ctx.ui.notify(`${preset.label} 已接入。用 /model 挑一个具体模型。`, "info");
+      } else {
+        const model = ctx.modelRegistry.find(providerId, modelId!);
+        if (model && (await pi.setModel(model))) {
+          ctx.ui.notify(`已切到 ${preset.label} / ${modelId}`, "info");
+        } else {
+          ctx.ui.notify(`已注册但切换失败，用 /model 手动选（检查 Key/端点）`, "warning");
+        }
+      }
     },
   });
 
