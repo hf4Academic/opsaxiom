@@ -116,20 +116,20 @@ function registerConn(pi: ExtensionAPI, c: SavedConn) {
   }
 }
 
-// ---------- 透明小犀牛（发起人钦定吉祥物）+ 欢迎文案 ----------
-function rhinoHeader(theme: any): string[] {
-  const a = (s: string) => theme.fg("accent", s);   // 轮廓/角
+// ---------- 卡皮巴拉（发起人钦定吉祥物）+ 欢迎文案 ----------
+function capybaraHeader(theme: any): string[] {
+  const a = (s: string) => theme.fg("accent", s);   // 轮廓
   const m = (s: string) => theme.fg("muted", s);
   const d = (s: string) => theme.fg("dim", s);
-  // 圆滚滚小犀牛：大圆脸、小三角角(◅)、豆豆眼、鼓身、小蹄子（发起人验收：更圆更 Q）
+  // 憨厚小卡皮巴拉：顶上小圆耳(∩ ∩)、眯眯眼(-  -)、方吻(ᴥ)、鼓身、四小短腿
   return [
     "",
-    `  ${a("    .-~~~-.")}`,
-    `  ${a("   /  ●  ● \\")}       ${a("◆ OpsAxiom")} ${d("× pi")}`,
-    `  ${a(" ◅(    ▿    )")}      ${m("把运维专家的判断，编译成可回滚的资产")}`,
-    `  ${a("   \\  ‿‿  /")}       ${m("直接说故障：")}${d("磁盘满了 / xid 79 / kafka 积压")}`,
-    `  ${a("   (_|   |_)")}       ${d("/connect 接模型（自己输 Key）· /model 切换")}`,
-    `  ${a("     ˘   ˘")}         ${d("命令与判读永远出自已验证 Skill")}`,
+    `  ${a("   ∩      ∩")}`,
+    `  ${a(" (  -    -  )")}      ${a("◆ OpsAxiom")} ${d("× pi")}`,
+    `  ${a(" (    ᴥ     )")}      ${m("把运维专家的判断，编译成可回滚的资产")}`,
+    `  ${a(" (          )")}      ${m("直接说故障：")}${d("磁盘满了 / xid 79 / kafka 积压")}`,
+    `  ${a("  \\________/")}       ${d("/connect 接模型（自己输 Key）· /model 切换")}`,
+    `  ${a("   u u  u u")}        ${d("命令与判读永远出自已验证 Skill")}`,
     "",
   ];
 }
@@ -163,12 +163,12 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  // ---------- 欢迎界面：透明小犀牛 ----------
+  // ---------- 欢迎界面：卡皮巴拉 ----------
   pi.on("session_start", async (_event, ctx) => {
     if (ctx.mode === "tui") {
       ctx.ui.setHeader((_tui, theme) => ({
         render(_width: number): string[] {
-          return rhinoHeader(theme);
+          return capybaraHeader(theme);
         },
         invalidate() {},
       }));
