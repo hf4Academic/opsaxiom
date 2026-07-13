@@ -33,6 +33,9 @@
 | `docs/04-taxonomy.md` | 运维知识地图 / 故障分类树 |
 | `docs/05-certification.md` | 社区验证与认证体系 |
 | `skills/` | Skill 库（含 2 个金标准样例） |
+| `docs/09-interaction-v2.md` | 交互模型 v2：取证式诊断（陈述→取证→卷宗→处置→复盘） |
+| `tools/pi/opsaxiom.ts` | pi 智能入口扩展（欢迎界面 / `/connect` / axiom_* 工具 / 工具面收窄） |
+| `Dockerfile` + `docker-compose.yml` | 多阶段镜像（core / llm / full 三档重量） |
 | `TODO-opus.md` | 当前执行批次的任务书 |
 
 ## 项目状态
@@ -106,6 +109,39 @@ opsaxiom run host.storage.capacity.disk-full \
 # 告警→IM 卡片（--dry-run 只打印不出站）：
 echo '{"alerts":[{"labels":{"alertname":"GPU 掉卡 XID 79"}}]}' | opsaxiom-webhook --dry-run
 ```
+
+## pi 智能入口（可选升级层）
+
+装了 [Pi Agent Harness](https://pi.dev)（node≥22.19）后，裸敲 `opsaxiom` 会**自动进 pi 智能入口**；
+探测不到 node/pi 就无感回落到上面的 Terminal REPL（气隙/无 node 环境一字不变，导航档零依赖承诺不破）。
+`opsaxiom classic` 可强制老 REPL。
+
+pi 入口是"模型驱动的外壳，OpsAxiom 是法律"：模型能调的只有 `axiom_diagnose`/`axiom_incident`/
+`axiom_report` 三个工具，工具内部全是确定性引擎——**模型永远拿不到出命令、判分支的权力**
+（R7/R9/R10 在工具边界上成立）；写操作仍走 `opsaxiom run` 的审批门。
+
+```
+   ∩      ∩
+ (  -    -  )      ◆ OpsAxiom × pi          ← 启动欢迎：卡皮巴拉
+ (    ᴥ     )
+axiom 里可用的命令：
+  /connect   接一个模型：选服务商 → 输 API Key → 当场选模型（连接本机 0600 保存，重启恢复）
+             预置 DeepSeek/Claude/OpenAI/Gemini/OpenRouter/阿里百炼/Kimi，
+             或「✎ 自定义」自己填 Base URL / API Key / Model ID（vLLM/内网网关都行）
+  /model     在已接入的模型间切换
+  /axiom     看 Skill 库与模型后端状态
+```
+
+一键装 pi（用国内 npm 镜像）：
+
+```bash
+export PATH="$HOME/.local/node22/bin:$PATH"     # 若用便携版 node22
+npm install --prefix ~/.local/pi-agent @earendil-works/pi-coding-agent
+opsaxiom            # 裸敲即自动进 pi 入口（首次先 /connect 接你的模型）
+```
+
+三种模型接法，都在 `/connect` 里：**远程 API**（自己输 Key，最省心）/ **本机 Ollama** /
+**内置千问 0.5B**（`opsaxiom model pull` 下载后 `opsaxiom model serve` 起服务，离线备用）。
 
 ## 开发者快速上手
 

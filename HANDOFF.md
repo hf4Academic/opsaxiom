@@ -94,7 +94,30 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
   7. _PARAM_SHAPE 是运行时侧新白名单，是否该与 metadata.params 声明对齐（schema 里
      params 有 source 字段，可加 shape/pattern 声明成为单一事实来源）。
   8. pi 深度整合（把 OpsAxiom 决策树暴露为 pi 的工具/技能）是否立项下一轮。
-- **交接给**：**Fable 5 —— 十轮评审**
+- **N 轮追加（发起人指示：pi 深度整合 + Docker，2026-07-12）**
+  - **pi 智能入口**（tools/pi/opsaxiom.ts）：裸敲 opsaxiom 探测 node≥22.19+pi→自动进 pi，
+    否则无感回落老 REPL（R3 零依赖承诺不破）；pi 是外壳、OpsAxiom 是法律——模型只能调
+    axiom_diagnose/incident/report 三工具（内部全确定性引擎），setActiveTools 砍写工具与
+    裸 shell、before_agent_start 注入运维守则。欢迎界面吉祥物（发起人钦定卡皮巴拉）。
+  - **incident JSON API**（tools/incident_cli.py）：opsaxiom incident --json 全链路，
+    本机取证有授权门（needs_grant→--grant），远端只出粘贴块计划不执行。pi 工具的后端。
+  - **/connect 接模型**：TUI 内选服务商→输 Key→当场选模型，预置 DeepSeek/Claude/OpenAI/
+    Gemini/OpenRouter/百炼/Kimi + 自定义(自填 URL/Key/Model)；连接 0600 落盘重启恢复。
+  - **model serve + llm_proxy**：内置千问起 OpenAI 兼容服务；垫片解 3 个真机实锤兼容问题
+    （content parts 数组→字符串、max_completion_tokens 字段名、HTTP/1.1 chunked SSE）。
+  - **Docker**：多阶段 core/llm/full 三档；full 入口先起模型服务并等就绪（解 pi 连模型竞态）。
+  - **两个真机实锤修复**：① registerProvider 部分覆盖抹掉内置 provider 的 baseUrl→
+    Connection error → 内置服务商改 env 注入 Key；② 千问 GGUF 服务与 pi-ai 的 OpenAI
+    兼容差异（见 llm_proxy）。
+  - 全库现状更新：**348 pytest 全绿 + 3 skipped**、73 校验全绿。
+- **N 轮评审补充重点**：
+  9. pi 入口的"工具面收窄"（砍 bash/写工具、只留 axiom_*+只读）是否够严——模型仍能
+     调 read/grep/find/ls，是否有信息外泄/绕过取证边界的风险。
+  10. **本地 0.5B 驱动 pi 工具调用未端到端验证**（发起人本地自测；容器内疑似 OOM，
+      服务常驻~1GB+node+python 超内存）——0.5B 的 tool-calling 能力偏弱是已知风险，
+      DeepSeek 等远程模型全链路已通（含系统守则遵循）。建议默认引导用远程/中等模型。
+  11. Docker 镜像未实构建（本环境无 docker），仅静态校验+各部件单独真机验证。
+- **交接给**：**Fable 5 —— 十轮评审（含 M/N 追加）**
 
 ---
 
