@@ -79,10 +79,22 @@ function saveConns(conns: SavedConn[]) {
   fs.writeFileSync(CONNECT_FILE, JSON.stringify(conns, null, 2), { mode: 0o600 });
 }
 
+// 内置服务商 → pi-ai 的环境变量名（env-api-keys.ts 的解析口径）。
+// 教训（发起人真机实测）：registerProvider 部分覆盖会抹掉内置 provider 的 baseUrl，
+// 之后所有请求打到空地址 → "Connection error."。内置服务商只能走 env 注入 Key。
+const BUILTIN_ENV: Record<string, string> = {
+  deepseek: "DEEPSEEK_API_KEY",
+  anthropic: "ANTHROPIC_API_KEY",
+  openai: "OPENAI_API_KEY",
+  google: "GEMINI_API_KEY",
+  openrouter: "OPENROUTER_API_KEY",
+};
+
 function registerConn(pi: ExtensionAPI, c: SavedConn) {
   if (c.builtin) {
-    // 覆盖 pi 内置 provider 的 apiKey（模型目录用 pi 自带的）
-    pi.registerProvider(c.provider, { apiKey: c.apiKey });
+    // 不动 provider 定义，只注入 Key（pi-ai 请求时从 env 解析鉴权）
+    const env = BUILTIN_ENV[c.provider];
+    if (env) process.env[env] = c.apiKey;
   } else {
     pi.registerProvider(c.provider, {
       name: c.label,
@@ -110,16 +122,16 @@ function rhinoHeader(theme: any): string[] {
   const m = (s: string) => theme.fg("muted", s);
   const d = (s: string) => theme.fg("dim", s);
   const t = (s: string) => s;
-  // 透明线稿小犀牛：角朝左，圆身短腿
+  // 透明线稿小犀牛：角朝左、圆背、三组小短腿（发起人验收：腿要全、要可爱）
   return [
     "",
-    `   ${a("     ,~~-.___")}`,
-    `   ${a("/\\  /  ")}${t("●")}${a("     `--~-._")}`,
-    `  ${a("(  \\(               `,")}   ${a("◆ OpsAxiom")} ${d("× pi")}`,
-    `  ${a(" \\  `,   ,__    __   |")}   ${m("把运维专家的判断，编译成可回滚的资产")}`,
-    `  ${a("  `-.,__/   |,-'  \\,-'")}   ${m("直接说故障：")}${d("磁盘满了 / xid 79 / kafka 积压")}`,
-    `   ${a("    ||     ||")}          ${d("/connect 接模型（自己输 Key）· /model 切换")}`,
-    `   ${a("    ˘˘     ˘˘")}          ${d("命令与判读永远出自已验证 Skill，模型只做理解与转述")}`,
+    `  ${a("      ,-~~-.___")}`,
+    `  ${a(" /\\  /  ")}${t("●")}${a("      `~~-.__")}`,
+    `  ${a("(  \\(                 `--.")}      ${a("◆ OpsAxiom")} ${d("× pi")}`,
+    `  ${a(" \\  `,                    \\")}     ${m("把运维专家的判断，编译成可回滚的资产")}`,
+    `  ${a("  `-. \\_,-,______,-,___,-,'")}     ${m("直接说故障：")}${d("磁盘满了 / xid 79 / kafka 积压")}`,
+    `  ${a("      | |      | |     | |")}      ${d("/connect 接模型（自己输 Key）· /model 切换")}`,
+    `  ${a("      ˘ ˘      ˘ ˘     ˘ ˘")}      ${d("命令与判读永远出自已验证 Skill")}`,
     "",
   ];
 }
@@ -372,8 +384,23 @@ export default function (pi: ExtensionAPI) {
       conns.push(conn);
       saveConns(conns);
 
-      // 立即切换：内置 provider 让用户从目录挑；自定义直接上
+      // 立即切换：内置 provider 从 pi 模型目录列出该家模型让用户当场挑；自定义直接上
       if (preset.builtin) {
+        const mine = ctx.modelRegistry
+          .getAll()
+          .filter((mm: any) => mm.provider === providerId);
+        if (mine.length) {
+          const ids = mine.map((mm: any) => mm.id);
+          const pickedModel = await ctx.ui.select(
+            `${preset.label} 已接入，选一个模型：`, ids);
+          if (pickedModel != null) {
+            const model = ctx.modelRegistry.find(providerId, pickedModel);
+            if (model && (await pi.setModel(model))) {
+              ctx.ui.notify(`已切到 ${preset.label} / ${pickedModel}`, "info");
+              return;
+            }
+          }
+        }
         ctx.ui.notify(`${preset.label} 已接入。用 /model 挑一个具体模型。`, "info");
       } else {
         const model = ctx.modelRegistry.find(providerId, modelId!);
