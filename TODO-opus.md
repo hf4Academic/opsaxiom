@@ -167,7 +167,10 @@
   G-4 的内存水位 abort、G-5 的 CUDA 对照表；PR 走查文档是否够发起人做机制评估）。
 
 进度勾选区（Opus 更新）：
-- [ ] G-1  - [ ] G-2  - [ ] G-3  - [ ] G-4  - [ ] G-5  - [ ] G-6  - [ ] G-7
+- [x] G-1  - [x] G-2  - [x] G-3  - [x] G-4  - [x] G-5  - [x] G-6  - [x] G-7
+
+全部完成。78 Skill(54 sim_verified)、368 pytest 全绿、78 校验全绿。5 新 Skill + gitpush.py
++ mysqlvar mock 回滚基建 + docs/11 发布走查(submit 分支已推 GitHub 待发起人开 PR)。
 
 ---
 

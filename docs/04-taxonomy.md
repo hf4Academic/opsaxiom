@@ -110,12 +110,14 @@
 - `host/storage/fs-corruption` — "文件系统报错/需要 fsck/坏块"
 - `host/storage/raid-degraded` — "RAID 降级/掉盘/阵列重建"
 - `host/storage/mount-failed` — "挂载失败/开机卡在挂载"
+- `host/storage/smart-failing` — "SMART 告警/dmesg 有 I/O error/怀疑盘要坏"
 
 **host/network-stack**
 - `host/network-stack/conntrack-full` — "conntrack table full/新连接建不了"
 - `host/network-stack/timewait-flood` — "TIME_WAIT 堆积/端口耗尽/连接失败"
 - `host/network-stack/fd-exhausted-socket` — "Too many open files/socket 建不了"
 - `host/network-stack/dns-resolve-fail` — "域名解析失败/DNS 超时/间歇解析不了"
+- `host/network-stack/dns-flaky` — "DNS 偶发慢/有时 5 秒才通/重试就好/间歇性 Name or service not known"
 - `host/network-stack/packet-drop-local` — "本机丢包/ethtool 计数增长/ring buffer 满"
 
 **host/process**
@@ -223,6 +225,7 @@
 - `aicomp/gpu/ecc-error` — "GPU ECC 错误/显存报错"
 - `aicomp/gpu/fell-off-bus` — "掉卡/nvidia-smi 少了卡/GPU is lost"
 - `aicomp/gpu/thermal-throttle` — "GPU 降频/温度过高/功耗墙"
+- `aicomp/gpu/driver-mismatch` — "Failed to initialize NVML/Driver library version mismatch/CUDA insufficient"
 
 **aicomp/fabric**
 - `aicomp/fabric/ib-link-down` — "IB 链路 down/InfiniBand 端口异常"
@@ -249,7 +252,7 @@
 - `middleware/mysql/slow-query` — "MySQL 慢/慢查询多/CPU 高"
 - `middleware/mysql/replication-lag` — "主从延迟大/从库落后"
 - `middleware/mysql/replication-broken` — "主从断了/复制报错/Slave 停了"
-- `middleware/mysql/connection-exhausted` — "连接数满/Too many connections"
+- `middleware/mysql/connections-exhausted` — "连接数满/Too many connections/连接池获取超时/1040"
 - `middleware/mysql/deadlock` — "死锁/lock wait timeout"
 
 **middleware/redis**

@@ -39,9 +39,37 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
 
 ## 当前状态（由最后工作的模型更新）
 
-- **更新时间**：2026-07-12（Opus 第十轮 Z-1~Z-6 完成）
+- **更新时间**：2026-07-14（Opus 第十二轮 G-1~G-7 完成）
 - **更新者**：Opus 4.8
-- **阶段**：**第十轮（交互模型 v2）全部完成，交接 Fable 5 十轮评审**
+- **阶段**：**第十二轮（G 系列：Skill 扩容 + 发布实战）全部完成，交接 Fable 评审**
+- **第十二轮交付（G 系列）**：
+  - **5 个新 Skill 全部 sim_verified**：host.cpu.throttled（cgroup 限流）、
+    host.network-stack.dns-flaky（DNS 间歇）、host.storage.smart-failing（SMART，CRC≠坏盘）、
+    middleware.mysql.connections-exhausted（Hybrid，真 inverse 回滚往返）、
+    aicomp.gpu.driver-mismatch（CUDA↔驱动对照表）。全库 **78 Skill / 54 sim_verified**。
+  - 新解析器 4 个模块（cgroup/dns/smart/gpu）+ mw 增 2，字段契约入 parser_fields.yaml。
+  - **新 sim 基建**：opsaxiom-mysqlvar mock 可逆变量工具 + run_sim mysqlvar 回滚往返验证器
+    （G-4 借此达成真 Hybrid 回滚往返）。
+  - **G-6 发布实战**：tools/gitpush.py（纯 Python SSH 推送，工具化）；docs/11 走查文档；
+    **已把 host.cpu.throttled 的投稿真实推成 registry 的 `submit/host-cpu-throttled` 分支**
+    —— 发起人可直接去 GitHub 开 PR 评估机制（PR 创建/合并特意留给发起人）。
+  - docs/04 §5 回填 4 个新叶子（throttled 已存在）；REVIEW-QUEUE 记 G-3 编写判断。
+  - 全量回归：**368 pytest 全绿 + 3 skipped、78 校验全绿**。
+- **需 Fable G 轮评审重点**：
+  1. 5 个 Skill 领域正确性抽查：G-3 的"CRC≠坏盘/SMART PASSED≠健康"、G-4 内存水位 abort
+     防 OOM、G-5 的 CUDA↔驱动对照表数值、G-1 的 throttle_ratio 阈值。
+  2. **REVIEW-QUEUE 的 G-3 判断**：human_only+advisory 回滚 action 无法 sim_verified，
+     Opus 改建 done 节点——是否追认，或需 schema 支持"无回滚 human_only action"晋级路径。
+  3. G-4 的 mysqlvar mock 回滚往返设计是否达到 sim_verified 证据强度预期。
+  4. docs/11 走查文档能否支撑发起人评估 PR 机制。
+- **给发起人的行动项**：GitHub 上 opsaxiom-registry 有 `submit/host-cpu-throttled` 分支
+  待开 PR（docs/11 §4 步骤）——开 PR → 看 CI → merge，走一遍社区投稿闭环。
+
+---
+
+## 历史状态存档（第十轮，Fable 评审待办）
+
+- **阶段**：第十轮（交互模型 v2）全部完成
 - **第十轮交付（docs/09 设计 → 实现，零 Skill 迁移、schema 不动、R1–R12 不动）**：
   - **Z-1 环境事实库**（tools/facts.py）：fact=key/value/source_cmd/target/ts/ttl/parser/field；
     key=目标+归一化命令+字段；解析器输出自动入库（BUNDLE 供 check 复用 + 标量/首行字段供
