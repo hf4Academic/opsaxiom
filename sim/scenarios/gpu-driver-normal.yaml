@@ -1,0 +1,8 @@
+skill: skills/aicomp/gpu/driver-mismatch/skill.yaml
+scenario: 驱动/CUDA 都正常（问题在别处，升级）
+expect_path: [check_nvml, check_cuda, escalate]
+node_ctx:
+  check_nvml:
+    output: {nvml_ok: 1, mismatch_hint: 0}
+  check_cuda:
+    output: {driver_ver: 550.54, cuda_ver: "12.2", min_driver: 535.54, compat_ok: 1}

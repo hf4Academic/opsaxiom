@@ -1,0 +1,82 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.gpu.driver-mismatch
+  name: GPU 驱动/CUDA 版本不匹配排查
+  taxonomy: aicomp/gpu/driver-mismatch
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - {os: linux}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8, reviewed_by: [claude-fable-5]}
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors: [ssh]
+  facts: [os.family, gpu.driver.version]
+discovery:
+- id: nvml
+  run: {linux: "nvidia-smi 2>&1 | head -3"}
+  parser: gpu/nvml-v1
+tree:
+  entry: check_nvml
+  nodes:
+  - id: check_nvml
+    type: check
+    title: 确认 NVML 是否可用
+    run: {linux: "nvidia-smi 2>&1 | head -3"}
+    parser: gpu/nvml-v1
+    branch:
+    - {when: "output.nvml_ok == 1", goto: check_cuda}
+    - {when: "output.mismatch_hint == 1", goto: check_driver_versions}
+    - {when: "output.nvml_ok == 0 and output.mismatch_hint == 0", goto: escalate}
+    otherwise: escalate
+    cautions:
+    - "'Failed to initialize NVML: Driver/library version mismatch' 是经典症状：内核里加载的模块与用户态库版本漂移，最常见诱因是 unattended-upgrades 自动升了驱动包但没重启"
+  - id: check_driver_versions
+    type: check
+    title: 比对内核模块与用户态驱动版本
+    run: {linux: "cat /proc/driver/nvidia/version | head -1; (dpkg -l 'nvidia-driver*' 2>/dev/null | grep ^ii || rpm -qa 'nvidia-driver*') | head -1"}
+    parser: gpu/driver-versions-v1
+    branch:
+    - {when: "output.same_ver == 0", goto: done_reload_or_reboot}
+    - {when: "output.same_ver == 1", goto: escalate}
+    otherwise: escalate
+    cautions:
+    - "内核模块版本(/proc/driver/nvidia/version)与已安装包版本不一致=典型漂移，重载或重启驱动即可恢复"
+  - id: done_reload_or_reboot
+    type: done
+    summary: >-
+      内核模块({{output.kernel_mod_ver}})与用户态包({{output.userland_ver}})版本不一致——升级后未重载驱动。
+      处置（**Agent 只出指导，不代执行**）：① 无 GPU 进程时可热重载——先 `fuser -v /dev/nvidia*` 确认无进程，
+      再 `rmmod nvidia_uvm nvidia_drm nvidia_modeset nvidia && modprobe nvidia`；
+      ② **有训练任务在跑绝不可 rmmod**，改为择机重启。根治：`apt-mark hold` 驱动包，避免 unattended-upgrades 再次自动升级。
+  - id: check_cuda
+    type: check
+    title: NVML 正常，检查 CUDA 运行时兼容性
+    run: {linux: "nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1; nvcc --version 2>/dev/null | tail -1"}
+    parser: gpu/cuda-compat-v1
+    branch:
+    - {when: "output.compat_ok == 0", goto: done_cuda_too_new}
+    - {when: "output.compat_ok == 1", goto: escalate}
+    otherwise: escalate
+    cautions:
+    - "容器场景 libnvidia-ml 由 nvidia-container-toolkit 从宿主注入，容器内 dpkg 查不到驱动包是正常的——以宿主驱动版本为准"
+  - id: done_cuda_too_new
+    type: done
+    summary: >-
+      CUDA 运行时({{output.cuda_ver}})比宿主驱动({{output.driver_ver}})所能支持的更新——该 CUDA 至少需要驱动
+      {{output.min_driver}}。处置二选一：把训练镜像换成匹配当前驱动的 CUDA 版本，或把宿主驱动升级到 {{output.min_driver}} 以上。
+  - id: escalate
+    type: escalate
+    summary: "打包升级：nvidia-smi 完整输出、/proc/driver/nvidia/version、已装驱动包版本、nvcc/容器 CUDA 版本、是否有训练进程占用 GPU。"
+tests:
+- scenario: gpu-mismatch-reload
+  expect_path: [check_nvml, check_driver_versions, done_reload_or_reboot]
+- scenario: gpu-cuda-too-new
+  expect_path: [check_nvml, check_cuda, done_cuda_too_new]
+- scenario: gpu-driver-normal
+  expect_path: [check_nvml, check_cuda, escalate]
+feedback: {ask: GPU 驱动/CUDA 问题定位了吗？}

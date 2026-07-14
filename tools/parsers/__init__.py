@@ -61,6 +61,7 @@ from . import obssec  # noqa: E402
 from . import cgroup  # noqa: E402
 from . import dns     # noqa: E402
 from . import smart   # noqa: E402
+from . import gpu     # noqa: E402
 table.install(register)
 health.install(register)
 mw.install(register)
@@ -69,3 +70,4 @@ obssec.install(register)
 cgroup.install(register)
 dns.install(register)
 smart.install(register)
+gpu.install(register)

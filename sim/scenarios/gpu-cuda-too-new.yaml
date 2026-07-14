@@ -1,0 +1,8 @@
+skill: skills/aicomp/gpu/driver-mismatch/skill.yaml
+scenario: 容器 CUDA 比宿主驱动新
+expect_path: [check_nvml, check_cuda, done_cuda_too_new]
+node_ctx:
+  check_nvml:
+    output: {nvml_ok: 1, mismatch_hint: 0}
+  check_cuda:
+    output: {driver_ver: 535.54, cuda_ver: "12.4", min_driver: 550.54, compat_ok: 0}

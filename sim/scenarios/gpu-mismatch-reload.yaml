@@ -1,0 +1,8 @@
+skill: skills/aicomp/gpu/driver-mismatch/skill.yaml
+scenario: 驱动升级后未重载（版本漂移）
+expect_path: [check_nvml, check_driver_versions, done_reload_or_reboot]
+node_ctx:
+  check_nvml:
+    output: {nvml_ok: 0, mismatch_hint: 1}
+  check_driver_versions:
+    output: {kernel_mod_ver: "535.104.05", userland_ver: "550.54.15", same_ver: 0}

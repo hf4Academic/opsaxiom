@@ -95,3 +95,6 @@ parsers:
   dns/dig-multi-v1: {rows: [ns, ok, ms], scalars: [dead_ns_count, slow_ns_count, probed]}
   smart/health-v1: {rows: [dev, passed], scalars: [disk_count, failed_count]}
   smart/attrs-v1: {scalars: [reallocated, pending, uncorrectable, crc_errors]}
+  gpu/nvml-v1: {scalars: [nvml_ok, mismatch_hint]}
+  gpu/driver-versions-v1: {scalars: [kernel_mod_ver, userland_ver, same_ver]}
+  gpu/cuda-compat-v1: {scalars: [driver_ver, cuda_ver, min_driver, compat_ok]}
