@@ -1,0 +1,29 @@
+{
+  "skill": "host.storage.smart-failing",
+  "action": "promote",
+  "from": "draft",
+  "to": "sim_verified",
+  "at": "2026-07-14T08:05:29",
+  "validator": "0 ERROR",
+  "evidence": "context_walk",
+  "scenarios": [
+    {
+      "scenario": "smart-cable.yaml",
+      "mode": "context_walk",
+      "path_ok": true,
+      "rollback_ok": null
+    },
+    {
+      "scenario": "smart-dying.yaml",
+      "mode": "context_walk",
+      "path_ok": true,
+      "rollback_ok": null
+    },
+    {
+      "scenario": "smart-healthy.yaml",
+      "mode": "context_walk",
+      "path_ok": true,
+      "rollback_ok": null
+    }
+  ]
+}

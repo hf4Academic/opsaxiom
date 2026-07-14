@@ -1,0 +1,8 @@
+skill: skills/host/storage/smart-failing/skill.yaml
+scenario: 线缆问题（CRC 高，盘本身没坏）
+expect_path: [scan_health, check_attrs, done_check_cable]
+node_ctx:
+  scan_health:
+    output: {disk_count: 1, failed_count: 0}
+  check_attrs:
+    output: {reallocated: 0, pending: 0, uncorrectable: 0, crc_errors: 1420}

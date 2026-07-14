@@ -353,3 +353,11 @@ IM 是增强渠道（Terminal 是底座，六轮已定），本轮做 webhook→
 F-16/F-17 同根：**安全边界的测试必须是对抗性的**。Opus 的测试全是"正例放行、已知反例拒绝"，
 没有测"攻击者会怎么绕"。九轮起，凡涉白名单/脱敏/验签的交付，任务书将强制要求
 "对抗用例"小节（注入/夹带/绕过各至少 2 例）。
+
+## G-3 编写判断（Opus，待 Fable 追认）
+任务书原定 act_backup_first 为 human_only action。实测：human_only + advisory 回滚的
+action 在现行 promote(S8) 下无法晋级 sim_verified（拿不到真回滚往返，fs-readonly 因此
+至今 draft）。判断：备份是"产生数据"非"破坏性变更"、无可回滚状态，且 human_only 本就
+Agent 永不执行只出指导——故建成强指导 done_dying 节点（语义等价，对齐 fs-readonly 的
+hardware_exit done 写法），G-3 保持纯 Diagnostic，得以 sim_verified。请 Fable 追认或
+指示是否需要 schema 层支持"无回滚 human_only action"的晋级路径。

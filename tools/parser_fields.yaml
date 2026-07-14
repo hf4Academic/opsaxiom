@@ -93,3 +93,5 @@ parsers:
   cgroup/cpu-max-v1: {scalars: [quota_cores]}
   dns/resolv-v1: {rows: [ns], scalars: [nameserver_count, has_timeout_opt, has_rotate, first_ns]}
   dns/dig-multi-v1: {rows: [ns, ok, ms], scalars: [dead_ns_count, slow_ns_count, probed]}
+  smart/health-v1: {rows: [dev, passed], scalars: [disk_count, failed_count]}
+  smart/attrs-v1: {scalars: [reallocated, pending, uncorrectable, crc_errors]}

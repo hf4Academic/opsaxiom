@@ -1,0 +1,8 @@
+skill: skills/host/storage/smart-failing/skill.yaml
+scenario: 健康盘
+expect_path: [scan_health, check_attrs, done_healthy]
+node_ctx:
+  scan_health:
+    output: {disk_count: 2, failed_count: 0}
+  check_attrs:
+    output: {reallocated: 0, pending: 0, uncorrectable: 0, crc_errors: 2}

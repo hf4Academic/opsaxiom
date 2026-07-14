@@ -1,0 +1,79 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.storage.smart-failing
+  name: 磁盘 SMART 预警排查
+  taxonomy: host/storage/smart-failing
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - {os: linux}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8, reviewed_by: [claude-fable-5]}
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors: [ssh]
+  facts: [os.family]
+discovery:
+- id: scan
+  run: {linux: "smartctl --scan | awk '{print $1}'"}
+  parser: smart/health-v1
+tree:
+  entry: scan_health
+  nodes:
+  - id: scan_health
+    type: check
+    title: 逐盘 SMART 总体健康判定
+    run: {linux: "for d in $(smartctl --scan | awk '{print $1}'); do echo \"$d:\"; smartctl -H $d; done"}
+    parser: smart/health-v1
+    branch:
+    - {when: "output.failed_count >= 1", goto: check_attrs}
+    - {when: "output.failed_count == 0", goto: check_attrs}
+    otherwise: check_attrs
+    cautions:
+    - "SMART PASSED 不代表盘健康！总体判定只反映厂商预设阈值，关键属性（pending/uncorrectable）越界前常仍显示 PASSED——必须看属性明细，这是本 Skill 存在的核心原因"
+    - "RAID 卡后面的物理盘直连扫不到，要 `smartctl -A -d megaraid,N /dev/sda`（N 为盘位）"
+  - id: check_attrs
+    type: check
+    title: 读取关键属性区分根因
+    run: {linux: "for d in $(smartctl --scan | awk '{print $1}'); do smartctl -A $d; done"}
+    parser: smart/attrs-v1
+    branch:
+    - {when: "output.pending > 0 or output.uncorrectable > 0", goto: done_dying}
+    - {when: "output.reallocated > 50", goto: done_plan_replace}
+    - {when: "output.crc_errors > 100", goto: done_check_cable}
+    - {when: "output.pending == 0 and output.uncorrectable == 0 and output.reallocated <= 50 and output.crc_errors <= 100", goto: done_healthy}
+    otherwise: escalate
+    cautions:
+    - "NVMe 属性字段名不同（Percentage_Used/Media_and_Data_Integrity_Errors），解析器两种都认"
+    - "Current_Pending_Sector>0 是最危险信号：有扇区读不出来正等待重映射，盘随时可能整片失效"
+  - id: done_dying
+    type: done
+    summary: >-
+      盘即将失效：有待重映射/不可修复扇区（pending={{output.pending}}、uncorrectable={{output.uncorrectable}}）。
+      **立即人工处置（Agent 不代执行）：① 先 rsync/备份该盘数据到安全位置，动作要快——源盘随时可能整片失效；
+      ② 备份完成后计划性换盘。中止信号：备份过程中 dmesg 的 I/O error 激增说明盘在恶化，优先抢救最关键数据。**
+  - id: done_plan_replace
+    type: done
+    summary: "重映射扇区偏多（reallocated={{output.reallocated}}>50）。盘在缓慢劣化，尚可用但寿命有限——排入计划性换盘窗口，换前确保有备份。"
+  - id: done_check_cable
+    type: done
+    summary: >-
+      CRC 错误多（crc_errors={{output.crc_errors}}>100）。**这是 SATA 线缆/接口/背板问题，不是盘坏！**
+      换盘白花钱。处置：重插或更换数据线、检查背板供电与接口氧化。CRC 错误只影响传输、不影响盘上数据。
+  - id: done_healthy
+    type: done
+    summary: "关键属性均在安全范围（无 pending/uncorrectable、重映射少、CRC 低）。当前无换盘必要，建议纳入定期 SMART 巡检基线跟踪趋势。"
+  - id: escalate
+    type: escalate
+    summary: "打包升级：各盘 -H 总判 + -A 全属性、盘型号与接口类型、dmesg 近期 I/O error。"
+tests:
+- scenario: smart-dying
+  expect_path: [scan_health, check_attrs, done_dying]
+- scenario: smart-cable
+  expect_path: [scan_health, check_attrs, done_check_cable]
+- scenario: smart-healthy
+  expect_path: [scan_health, check_attrs, done_healthy]
+feedback: {ask: 磁盘 SMART 问题判断清楚了吗？}

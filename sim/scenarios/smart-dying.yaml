@@ -1,0 +1,8 @@
+skill: skills/host/storage/smart-failing/skill.yaml
+scenario: 将死盘（pending>0，SMART 仍 PASSED）
+expect_path: [scan_health, check_attrs, done_dying]
+node_ctx:
+  scan_health:
+    output: {disk_count: 1, failed_count: 0}
+  check_attrs:
+    output: {reallocated: 8, pending: 24, uncorrectable: 3, crc_errors: 0}
