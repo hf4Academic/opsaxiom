@@ -440,6 +440,78 @@ export default function (pi: ExtensionAPI) {
     pi.registerCommand(name, { description: CONNECT_DESC, handler: doConnect });
   }
 
+  // ---------- 分类三级选择器（域→类→叶子；列表优先，随处可新建） ----------
+  // 数据 = docs/04 的运维分类全量清单（9域/43类/136叶）+ 本地已占用 id 标记。
+  const SLUG = /^[a-z0-9][a-z0-9-]*$/;
+  const pickTaxonomy = async (ctx: any): Promise<{ id: string; taxonomy: string } | null> => {
+    let tax: any = null;
+    try { tax = JSON.parse(await runCli(["taxonomy", "--json"], 30000)); } catch { /* 退化为手输 */ }
+    const claimed = new Set<string>();
+    try {
+      JSON.parse(await runCli(["list", "--json", "--drafts"], 30000))
+        .forEach((s: any) => claimed.add(s.id));
+    } catch { /* 无标记也能用 */ }
+    const askSlug = async (prompt: string) => {
+      const v = ((await ctx.ui.input(prompt, "")) || "").trim();
+      if (!v) return null;
+      if (!SLUG.test(v)) {
+        ctx.ui.notify("只能小写字母/数字/中划线（如 zombie-storm）", "warning");
+        return null;
+      }
+      return v;
+    };
+    // ① 域
+    let l1: string | null;
+    if (tax) {
+      const opts = tax.domains.map((d: any) => `${d.l1} — ${d.desc || ""}`);
+      opts.push("✎ 列表里没有，新建一个域");
+      const p = await ctx.ui.select("① 这个问题属于哪个域？", opts);
+      if (p == null) return null;
+      l1 = p.startsWith("✎") ? await askSlug("新域名（小写，如 storage-array）:") : p.split(" ")[0];
+    } else {
+      l1 = await askSlug("域（如 host）:");
+    }
+    if (!l1) return null;
+    // ② 类
+    const dom = tax?.domains.find((d: any) => d.l1 === l1);
+    let l2: string | null;
+    if (dom) {
+      const opts = dom.l2.map((x: any) => `${x.name}（${x.leaves.length} 个叶子）`);
+      opts.push("✎ 列表里没有，新建一个类");
+      const p = await ctx.ui.select(`② ${l1} 下面属于哪一类？`, opts);
+      if (p == null) return null;
+      l2 = p.startsWith("✎") ? await askSlug("新类名（小写，如 process）:") : p.split("（")[0];
+    } else {
+      l2 = await askSlug("类（如 process）:");
+    }
+    if (!l2) return null;
+    // ③ 叶子：优先认领现成空缺（分类树 136 叶 > 现有 73 Skill，大量可直接用）
+    const cat = dom?.l2.find((x: any) => x.name === l2);
+    let leaf: string | null = null;
+    if (cat && cat.leaves.length) {
+      const opts = ["✎ 都不是，新建一个叶子"].concat(
+        cat.leaves.map((lf: any) => {
+          const used = claimed.has(`${l1}.${l2}.${lf.leaf}`);
+          return `${used ? "● 已有Skill" : "○ 空缺"} ${lf.leaf}${lf.symptom ? " — " + lf.symptom : ""}`;
+        }));
+      const p = await ctx.ui.select(`③ 具体是哪个问题？（○ = 还没人写，可直接认领）`, opts);
+      if (p == null) return null;
+      if (!p.startsWith("✎")) {
+        leaf = p.split(" ")[2].split(" —")[0];
+        if (p.startsWith("●")) {
+          const go = await ctx.ui.confirm(
+            "已有同名 Skill", `${l1}.${l2}.${leaf} 已存在，继续会生成同 id 草稿（评审时需合并/改名）。继续？`);
+          if (!go) return null;
+        }
+      }
+    }
+    if (!leaf) {
+      leaf = await askSlug("叶子名（这个具体问题，小写，如 zombie-storm）:");
+      if (!leaf) return null;
+    }
+    return { id: `${l1}.${l2}.${leaf}`, taxonomy: `${l1}/${l2}/${leaf}` };
+  };
+
   // ---------- 命令：/skill 写 Skill（全程菜单，不用记会话 id / 路径） ----------
   pi.registerCommand("skill", {
     description: "把排查沉淀成 Skill：最近会话一键生成草稿 / 向导新建 / lint 缺口",
@@ -478,12 +550,11 @@ export default function (pi: ExtensionAPI) {
         const picked = await ctx.ui.select("用哪次排查？（最上面=最近）", labels);
         if (picked == null) return;
         const sid = sess[labels.indexOf(picked)].sid;
-        const id = (await ctx.ui.input("新 Skill 的 id（域.类.名，如 host.process.zombie-storm）:", "")) || "";
-        if (!id) return;
-        const name = (await ctx.ui.input("中文名（如 僵尸进程风暴排查）:", "")) || id;
-        const tax = (await ctx.ui.input(`taxonomy（回车用 ${id.replace(/\./g, "/")}）:`, "")) || id.replace(/\./g, "/");
+        const t = await pickTaxonomy(ctx);      // 域→类→叶子三级选择，免手拼 id
+        if (!t) return;
+        const name = (await ctx.ui.input("中文名（如 僵尸进程风暴排查）:", "")) || t.id;
         const out = await runCli(["skill", "from-session", sid,
-                                  "--id", id, "--name", name, "--taxonomy", tax], 60000)
+                                  "--id", t.id, "--name", name, "--taxonomy", t.taxonomy], 60000)
           .catch((e) => String(e));
         if (ctx.hasUI) ctx.ui.setWidget("axiom-skill", out.trim().split("\n").slice(0, 10));
         ctx.ui.notify("草稿已生成。补全后 /skill 选③检查缺口，晋级后 /publish 发布。", "info");
@@ -515,8 +586,9 @@ export default function (pi: ExtensionAPI) {
         spec.name = (await ctx.ui.input("① 这个问题叫什么（一句话症状）？", "")) || "";
         if (!spec.name) return done();
         overview();
-        spec.taxonomy = (await ctx.ui.input("② 归到哪个分类（如 host/process/zombie）？", "")) || "";
-        if (!spec.taxonomy) return done();
+        const t = await pickTaxonomy(ctx);      // ② 分类：域→类→叶子选择器
+        if (!t) return done();
+        spec.taxonomy = t.taxonomy;
         overview();
         spec.cmd = (await ctx.ui.input("③ 第一步查什么命令（只读）？", "")) || "";
         if (!spec.cmd) return done();
@@ -693,12 +765,11 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify(out.trim().split("\n")[0] || "录制结束", "info");
         const go = await ctx.ui.confirm("转草稿", "现在就把这段录制转成 Skill 草稿吗？");
         if (go) {
-          const id = (await ctx.ui.input("新 Skill 的 id（域.类.名）:", "")) || "";
-          if (!id) return;
-          const name2 = (await ctx.ui.input("中文名:", "")) || id;
-          const tax = (await ctx.ui.input(`taxonomy（回车用 ${id.replace(/\./g, "/")}）:`, "")) || id.replace(/\./g, "/");
+          const t = await pickTaxonomy(ctx);    // 域→类→叶子三级选择，免手拼 id
+          if (!t) return;
+          const name2 = (await ctx.ui.input("中文名:", "")) || t.id;
           const out2 = await runCli(["skill", "from-session",
-                                     "--id", id, "--name", name2, "--taxonomy", tax], 60000)
+                                     "--id", t.id, "--name", name2, "--taxonomy", t.taxonomy], 60000)
             .catch((e) => String(e));   // 缺省 sid=最近会话（刚 stop 的这段）
           if (ctx.hasUI) ctx.ui.setWidget("axiom-skill", out2.trim().split("\n").slice(0, 8));
         }

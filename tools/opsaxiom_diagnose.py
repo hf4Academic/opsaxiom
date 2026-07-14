@@ -75,6 +75,30 @@ def cmd_list(args):
     return 0
 
 
+def cmd_taxonomy(args):
+    """输出运维分类体系（docs/04 §2 域描述 + §5 L3 全量清单）——
+    供 pi 的三级选择器（选域→选类→选/建叶子）消费。"""
+    import pathlib
+    import re
+    ROOT = pathlib.Path(__file__).resolve().parents[1]
+    doc = (ROOT / "docs" / "04-taxonomy.md").read_text(encoding="utf-8")
+    # L1 描述：'### host —— 主机与操作系统'
+    l1_desc = dict(re.findall(r"^### ([a-z0-9]+) —— (.+)$", doc, re.M))
+    # L3：'- `l1/l2/leaf` — "症状"'
+    tree = {}
+    for m in re.finditer(r"^- `([a-z0-9]+)/([a-z0-9\-]+)/([a-z0-9\-]+)`(?:[^\n\"“]*[\"“]([^\n\"”]+))?",
+                         doc, re.M):
+        l1, l2, leaf, sym = m.group(1), m.group(2), m.group(3), (m.group(4) or "").strip()
+        tree.setdefault(l1, {}).setdefault(l2, []).append(
+            {"leaf": leaf, "symptom": sym})
+    out = {"domains": [{"l1": l1, "desc": l1_desc.get(l1, ""),
+                        "l2": [{"name": l2, "leaves": leaves}
+                               for l2, leaves in sorted(tree[l1].items())]}
+                       for l1 in sorted(tree)]}
+    print(json.dumps(out, ensure_ascii=False))
+    return 0
+
+
 def add_diagnose(sub):
     dp = sub.add_parser("diagnose", help="按症状匹配 Skill")
     dp.add_argument("symptom")
@@ -87,3 +111,6 @@ def add_diagnose(sub):
     lp.add_argument("--recent", action="store_true", help="按最近修改排序")
     lp.add_argument("--drafts", action="store_true", help="包含 skills-drafts/")
     lp.set_defaults(fn=cmd_list)
+    tp = sub.add_parser("taxonomy", help="输出运维分类体系（域/类/叶子）")
+    tp.add_argument("--json", action="store_true")
+    tp.set_defaults(fn=cmd_taxonomy)
