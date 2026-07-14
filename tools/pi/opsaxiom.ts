@@ -42,6 +42,13 @@ function runCli(args: string[], timeoutMs = 120000): Promise<string> {
 const SYSTEM_RULES = `
 ## OpsAxiom 运维助手守则（不可违反）
 你是 OpsAxiom 运维排查助手，面对的是生产环境。
+0. 开始任何排查前，先确定目标在哪：
+   - 用户说的是本机/这台机器/未提及且语境像本机 → axiom_incident 用 target=local，直接取证；
+   - 像是远端系统（提到别的主机名/交换机/集群/URL）→ 先问一句"排查哪台？怎么访问
+     （ssh 主机名 / 控制台 URL）？"；拿到名字后用 target=<名字> 调工具——它会返回
+     一份让人执行的只读命令清单（绝不盲执行远端命令）；
+   - 用户说不清访问方式 → 仍用 target=<名字> 拿命令清单给他，同时可以给出基于
+     Skill 树的初步推测，但必须显式声明"以下是未经取证的推测，请以取证结果为准"。
 1. 排查一律通过 axiom_* 工具进行：先 axiom_incident 取证出诊断卷宗，再讲结论。
 2. 绝不自己编造/建议 shell 命令让用户执行——所有命令只能来自工具返回的已验证 Skill 内容。
 3. 转述卷宗时必须保留：证据引用（哪条命令→哪个字段=什么值）、Skill 的成熟度徽章
@@ -49,6 +56,7 @@ const SYSTEM_RULES = `
 4. 任何变更（写操作）你无权执行也无权代劳：卷宗给出 treatment 时，引导用户在终端跑
    opsaxiom run <skill-id>（那里有变更简报、审批门、verify 与回滚）。
 5. 证据不足就说证据不足，需要什么命令的输出就说清楚。宁可拒绝，不可翻车。
+6. 排查顺利结束后，可以提醒一句：/skill 能把这次排查一键沉淀成可复用的 Skill 草稿。
 `;
 
 // ---------- 已保存的模型连接（/connect 落盘，重启自动恢复） ----------
@@ -428,33 +436,72 @@ export default function (pi: ExtensionAPI) {
     pi.registerCommand(name, { description: CONNECT_DESC, handler: doConnect });
   }
 
-  // ---------- 命令：/skill 学怎么写一个 Skill ----------
+  // ---------- 命令：/skill 写 Skill（全程菜单，不用记会话 id / 路径） ----------
   pi.registerCommand("skill", {
-    description: "怎么写一个 Skill（三种捕获通道 + 校验缺口清单）",
+    description: "把排查沉淀成 Skill：最近会话一键生成草稿 / 向导新建 / lint 缺口",
     handler: async (args, ctx) => {
-      const guide = [
-        "写一个 Skill = 把你这次排查的判断，固化成可复用、可验证的决策树。三条通道任选：",
-        "",
-        "  A. 从刚才的排查会话生成草稿（最省力）",
-        "     opsaxiom skill from-session <会话id>   —— 审计自动回放成 skill.yaml 草稿",
-        "  B. 向导式从零问答生成",
-        "     opsaxiom skill new                     —— 边问边按规范生成",
-        "  C. 排查没走 Skill 时，先录一段",
-        "     opsaxiom record start / stop           —— 投喂关键命令+输出 → 同一条草稿管线",
-        "",
-        "  草稿落 skills-drafts/，跑校验看还差什么：",
-        "     opsaxiom skill lint <草稿>             —— validate + 缺口清单(缺 otherwise/caution/rollback…)",
-        "  补完 → 正常晋级流水线（sim_verified → field_verified）。规范全文见 docs/07。",
-        "",
-        "在这个 pi 界面里排查完，直接说“把这次排查存成 Skill”，我也会引导你走 from-session。",
-      ].join("\n");
-      ctx.ui.notify("Skill 写作三通道见下方", "info");
-      if (ctx.hasUI) ctx.ui.setWidget("axiom-skill", guide.split("\n"));
-      // 带了参数就直接跑对应子命令（如 /skill lint skills-drafts/foo）
+      // 带参数 = 直通 CLI（老用法保留，如 /skill lint <路径>）
       if (args && args.trim()) {
         const out = await runCli(["skill", ...args.trim().split(/\s+/)], 60000)
           .catch((e) => String(e));
-        ctx.ui.notify(out.trim().slice(0, 500), "info");
+        if (ctx.hasUI) ctx.ui.setWidget("axiom-skill", out.trim().split("\n").slice(0, 16));
+        return;
+      }
+      if (!ctx.hasUI) {
+        ctx.ui.notify("交互终端里使用，或直接 opsaxiom skill --help", "warning");
+        return;
+      }
+      const choice = await ctx.ui.select("写 Skill —— 你想做什么？", [
+        "① 把最近的排查会话变成草稿（自动识别会话，最省力）",
+        "② 向导式从零新建（回答几个问题生成）",
+        "③ 检查草稿还差什么（lint 缺口清单）",
+      ]);
+      if (choice == null) return;
+
+      if (choice.startsWith("①")) {
+        // 列最近会话 ↑↓ 选（缺省第一个 = 最近一次）
+        let sess: any[] = [];
+        try { sess = JSON.parse(await runCli(["skill", "sessions", "--json"], 30000)); }
+        catch { /* 无会话 */ }
+        if (!sess.length) {
+          ctx.ui.notify("还没有排查会话。先排查一次（直接说故障），或 opsaxiom record 录一段。", "warning");
+          return;
+        }
+        const labels = sess.map((s: any) => {
+          const t = new Date(s.mtime * 1000).toLocaleString("zh-CN", { hour12: false });
+          return `${t}  ${s.skill_id || "(record)"}  ${s.outcome || ""}`;
+        });
+        const picked = await ctx.ui.select("用哪次排查？（最上面=最近）", labels);
+        if (picked == null) return;
+        const sid = sess[labels.indexOf(picked)].sid;
+        const id = (await ctx.ui.input("新 Skill 的 id（域.类.名，如 host.process.zombie-storm）:", "")) || "";
+        if (!id) return;
+        const name = (await ctx.ui.input("中文名（如 僵尸进程风暴排查）:", "")) || id;
+        const tax = (await ctx.ui.input(`taxonomy（回车用 ${id.replace(/\./g, "/")}）:`, "")) || id.replace(/\./g, "/");
+        const out = await runCli(["skill", "from-session", sid,
+                                  "--id", id, "--name", name, "--taxonomy", tax], 60000)
+          .catch((e) => String(e));
+        if (ctx.hasUI) ctx.ui.setWidget("axiom-skill", out.trim().split("\n").slice(0, 10));
+        ctx.ui.notify("草稿已生成。补全后 /skill 选③检查缺口，晋级后 /publish 发布。", "info");
+      } else if (choice.startsWith("②")) {
+        ctx.ui.notify("向导是问答式的，去终端跑：opsaxiom skill new", "info");
+      } else {
+        // lint：列草稿 ↑↓ 选（最近优先）
+        let drafts: any[] = [];
+        try {
+          const all = JSON.parse(await runCli(["list", "--json", "--recent", "--drafts"], 60000));
+          drafts = all.filter((s: any) => s.source === "drafts");
+        } catch { /* 空 */ }
+        if (!drafts.length) {
+          ctx.ui.notify("skills-drafts/ 里没有草稿。先用①或②生成一个。", "warning");
+          return;
+        }
+        const labels = drafts.map((s: any) => `${s.id} — ${s.name}`);
+        const picked = await ctx.ui.select("检查哪个草稿？（最上面=最近）", labels);
+        if (picked == null) return;
+        const p = drafts[labels.indexOf(picked)].path;   // list --json 给的真实路径
+        const out = await runCli(["skill", "lint", p], 60000).catch((e) => String(e));
+        if (ctx.hasUI) ctx.ui.setWidget("axiom-skill", out.trim().split("\n").slice(0, 16));
       }
     },
   });
@@ -465,8 +512,9 @@ export default function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       let id = (args || "").trim();
       if (!id && ctx.hasUI) {
-        // 列出本地全部 Skill 供上下键选择（id — 名称 [徽章]）
-        const raw = await runCli(["list", "--json"], 60000).catch(() => "[]");
+        // 上下键选择，最近产生/修改的排最前（含草稿目录，便于看到刚沉淀的）
+        const raw = await runCli(["list", "--json", "--recent", "--drafts"], 60000)
+          .catch(() => "[]");
         let skills: any[] = [];
         try { skills = JSON.parse(raw); } catch { /* 空表 */ }
         if (!skills.length) {
@@ -476,8 +524,8 @@ export default function (pi: ExtensionAPI) {
         const BADGE: Record<string, string> = {
           draft: "⚪", sim_verified: "🔵", field_verified: "🟢", certified: "🟡" };
         const labels = skills.map(
-          (s) => `${BADGE[s.maturity] ?? "?"} ${s.id} — ${s.name}`);
-        const picked = await ctx.ui.select("发布哪个 Skill？（↑↓ 选择）", labels);
+          (s) => `${BADGE[s.maturity] ?? "?"} ${s.id} — ${s.name}${s.source === "drafts" ? "（草稿目录）" : ""}`);
+        const picked = await ctx.ui.select("发布哪个 Skill？（↑↓ 选择，最上面=最近）", labels);
         if (picked == null) return;
         id = skills[labels.indexOf(picked)].id;
         // draft 提前提示（registry 收录政策要求 ≥ sim_verified）

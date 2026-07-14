@@ -33,17 +33,45 @@ def cmd_diagnose(args):
 
 
 def cmd_list(args):
-    """列出本地 Skill（--json 供 pi 扩展选择器等程序化消费）。"""
-    idx = sorted(diagnose.load_index(), key=lambda s: s["id"])
+    """列出本地 Skill（--json 供 pi 扩展选择器等程序化消费）。
+
+    --recent：按文件修改时间新→旧排（发布选择器用：最近产生的排最前）；
+    --drafts：把 skills-drafts/ 一并列出（maturity 标 draft，来源标 drafts）。
+    """
+    import pathlib
+    import yaml
+    ROOT = pathlib.Path(__file__).resolve().parents[1]
+    rows = []
+    dirs = [("skills", ROOT / "skills")]
+    if getattr(args, "drafts", False):
+        dirs.append(("drafts", ROOT / "skills-drafts"))
+    for src, base in dirs:
+        if not base.is_dir():
+            continue
+        for p in base.rglob("skill.yaml"):
+            try:
+                m = (yaml.safe_load(p.read_text(encoding="utf-8")) or {}).get("metadata", {})
+            except Exception:
+                continue
+            if not m.get("id"):
+                continue
+            rows.append({"id": m["id"], "name": m.get("name", ""),
+                         "maturity": m.get("maturity", "draft"),
+                         "l1": (m.get("taxonomy") or "?").split("/")[0],
+                         "source": src, "mtime": int(p.stat().st_mtime),
+                         "path": str(p.relative_to(ROOT))})
     if args.domain:
-        idx = [s for s in idx if s["l1"] == args.domain]
+        rows = [s for s in rows if s["l1"] == args.domain]
+    if getattr(args, "recent", False):
+        rows.sort(key=lambda s: -s["mtime"])
+    else:
+        rows.sort(key=lambda s: s["id"])
     if getattr(args, "json", False):
-        print(json.dumps([{"id": s["id"], "name": s["name"],
-                           "maturity": s["maturity"], "l1": s["l1"]}
-                          for s in idx], ensure_ascii=False))
+        print(json.dumps(rows, ensure_ascii=False))
         return 0
-    for s in idx:
-        print(f"[{_BADGE.get(s['maturity'], s['maturity'])}] {s['id']}  —— {s['name']}")
+    for s in rows:
+        tag = "（草稿目录）" if s["source"] == "drafts" else ""
+        print(f"[{_BADGE.get(s['maturity'], s['maturity'])}] {s['id']}  —— {s['name']}{tag}")
     return 0
 
 
@@ -56,4 +84,6 @@ def add_diagnose(sub):
     lp = sub.add_parser("list", help="列出本地 Skill")
     lp.add_argument("domain", nargs="?", help="按域过滤（host/k8s/network/…）")
     lp.add_argument("--json", action="store_true")
+    lp.add_argument("--recent", action="store_true", help="按最近修改排序")
+    lp.add_argument("--drafts", action="store_true", help="包含 skills-drafts/")
     lp.set_defaults(fn=cmd_list)
