@@ -57,7 +57,12 @@ def _cmd_skill(args):
         print("下一步：opsaxiom skill lint " + str(sf) + "  然后补全 TODO（分支表达式/cautions/结论）")
         return 0
     if sub == "new":
-        sf = capture.wizard()
+        if getattr(args, "spec_json", False):
+            # pi TUI 多轮对话收集好答案后经 stdin 传 spec（同一构建逻辑，不复制）
+            spec = json.loads(sys.stdin.read())
+            sf = capture.wizard_from_spec(spec)
+        else:
+            sf = capture.wizard()
         print(f"已生成草稿：{sf}")
         print("下一步：opsaxiom skill lint " + str(sf))
         return 0
@@ -107,6 +112,8 @@ def add_capture(subparsers):
     fs.add_argument("--name", required=True)
     fs.add_argument("--taxonomy", required=True, help="如 host/process/foo")
     ne = ssub.add_parser("new", help="向导式从零生成草稿")
+    ne.add_argument("--spec-json", dest="spec_json", action="store_true",
+                    help="从 stdin 读 JSON spec（pi TUI 对话流用）")
     ln = ssub.add_parser("lint", help="校验草稿并列出缺口")
     ln.add_argument("path")
     sp.set_defaults(fn=_cmd_skill)

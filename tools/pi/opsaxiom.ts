@@ -25,9 +25,9 @@ const ROOT =
 const PY = process.env.OPSAXIOM_PY || "python3";
 const CLI = path.join(ROOT, "tools", "bin", "opsaxiom");
 
-function runCli(args: string[], timeoutMs = 120000): Promise<string> {
+function runCli(args: string[], timeoutMs = 120000, stdin?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(
+    const child = execFile(
       PY,
       [CLI, ...args],
       { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 },
@@ -36,6 +36,10 @@ function runCli(args: string[], timeoutMs = 120000): Promise<string> {
         else resolve(stdout);
       },
     );
+    if (stdin !== undefined && child.stdin) {
+      child.stdin.write(stdin);
+      child.stdin.end();
+    }
   });
 }
 
@@ -484,7 +488,31 @@ export default function (pi: ExtensionAPI) {
         if (ctx.hasUI) ctx.ui.setWidget("axiom-skill", out.trim().split("\n").slice(0, 10));
         ctx.ui.notify("草稿已生成。补全后 /skill 选③检查缺口，晋级后 /publish 发布。", "info");
       } else if (choice.startsWith("②")) {
-        ctx.ui.notify("向导是问答式的，去终端跑：opsaxiom skill new", "info");
+        // 向导直接在 TUI 里多轮对话（发起人验收：不用跑出去执行指令）
+        const name = (await ctx.ui.input("① 这个问题叫什么（一句话症状）？", "")) || "";
+        if (!name) return;
+        const tax = (await ctx.ui.input("② 归到哪个分类（如 host/process/zombie）？", "")) || "";
+        if (!tax) return;
+        const cmd = (await ctx.ui.input("③ 第一步查什么命令（只读）？", "")) || "";
+        if (!cmd) return;
+        const caution = (await ctx.ui.input("④ 这一步有什么坑要提醒？（回车跳过）", "")) || "";
+        const cases: Array<{ when: string; conclusion: string }> = [];
+        for (let i = 1; i <= 5; i++) {
+          const when = (await ctx.ui.input(
+            `⑤ 情况${i}的判据表达式（如 count(rows)>0；回车=不再加）`, "")) || "";
+          if (!when) break;
+          const conclusion = (await ctx.ui.input(`   情况${i}成立时的结论/处置方向？`, "")) || "";
+          cases.push({ when, conclusion });
+        }
+        if (!cases.length) {
+          ctx.ui.notify("至少要有一种情况的判据。", "warning");
+          return;
+        }
+        const spec = JSON.stringify({ name, taxonomy: tax, cmd, caution, cases });
+        const out = await runCli(["skill", "new", "--spec-json"], 60000, spec)
+          .catch((e) => String(e));
+        if (ctx.hasUI) ctx.ui.setWidget("axiom-skill", out.trim().split("\n").slice(0, 8));
+        ctx.ui.notify("草稿已生成。/skill 选③检查缺口。", "info");
       } else {
         // lint：列草稿 ↑↓ 选（最近优先）
         let drafts: any[] = [];
@@ -577,6 +605,62 @@ export default function (pi: ExtensionAPI) {
       handler: doPull,
     });
   }
+
+  // ---------- 命令：/record 录一段排查（状态感知：没在录→开始；在录→投喂/结束） ----------
+  const RECORDING_FLAG = path.join(
+    process.env.OPSAXIOM_HOME || path.join(os.homedir(), ".opsaxiom"),
+    "recording.current",
+  );
+  pi.registerCommand("record", {
+    description: "录一段排查过程 → 结束后一键转 Skill 草稿",
+    handler: async (_args, ctx) => {
+      if (!ctx.hasUI) {
+        ctx.ui.notify("交互终端里使用，或 opsaxiom record --help", "warning");
+        return;
+      }
+      if (!fs.existsSync(RECORDING_FLAG)) {
+        const name = (await ctx.ui.input("给这段排查起个名（如 交换机丢包排查）:", "")) || "";
+        if (!name) return;
+        const out = await runCli(["record", "start", name], 30000).catch((e) => String(e));
+        ctx.ui.notify(out.trim().split("\n")[0] || "已开始录制。再 /record 投喂步骤或结束。", "info");
+        return;
+      }
+      const act = await ctx.ui.select("正在录制中——", [
+        "① 投喂一步（我贴命令和输出）",
+        "② 自动执行一条只读命令并记录",
+        "③ 结束录制（然后可 /skill 转草稿）",
+        "④ 先不动（返回）",
+      ]);
+      if (act == null || act.startsWith("④")) return;
+      if (act.startsWith("①")) {
+        const cmd = (await ctx.ui.input("这一步执行的命令:", "")) || "";
+        if (!cmd) return;
+        const output = (await ctx.ui.input("它的输出（粘贴，可截关键部分）:", "")) || "";
+        const out = await runCli(["record", "note", cmd], 30000, output).catch((e) => String(e));
+        ctx.ui.notify(out.trim() || "已记录", "info");
+      } else if (act.startsWith("②")) {
+        const cmd = (await ctx.ui.input("只读命令（白名单校验，写命令会被拒）:", "")) || "";
+        if (!cmd) return;
+        const out = await runCli(["record", "exec", ...cmd.split(/\s+/)], 60000)
+          .catch((e) => String(e));
+        ctx.ui.notify(out.trim().slice(0, 300) || "已执行并记录", "info");
+      } else {
+        const out = await runCli(["record", "stop"], 30000).catch((e) => String(e));
+        ctx.ui.notify(out.trim().split("\n")[0] || "录制结束", "info");
+        const go = await ctx.ui.confirm("转草稿", "现在就把这段录制转成 Skill 草稿吗？");
+        if (go) {
+          const id = (await ctx.ui.input("新 Skill 的 id（域.类.名）:", "")) || "";
+          if (!id) return;
+          const name2 = (await ctx.ui.input("中文名:", "")) || id;
+          const tax = (await ctx.ui.input(`taxonomy（回车用 ${id.replace(/\./g, "/")}）:`, "")) || id.replace(/\./g, "/");
+          const out2 = await runCli(["skill", "from-session",
+                                     "--id", id, "--name", name2, "--taxonomy", tax], 60000)
+            .catch((e) => String(e));   // 缺省 sid=最近会话（刚 stop 的这段）
+          if (ctx.hasUI) ctx.ui.setWidget("axiom-skill", out2.trim().split("\n").slice(0, 8));
+        }
+      }
+    },
+  });
 
   // ---------- 命令：/axiom 快速状态 ----------
   pi.registerCommand("axiom", {

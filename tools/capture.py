@@ -188,21 +188,25 @@ def record_stop():
 
 
 # ---------- 通道三：向导 ----------
-def wizard(inp=input):
-    name = inp("这个问题叫什么（一句话症状）？ ").strip()
-    taxonomy = inp("归到哪个分类（如 host/process/xxx）？ ").strip()
+def wizard_from_spec(spec):
+    """从结构化 spec 生成向导草稿（终端问答与 pi TUI 多轮对话共用同一构建逻辑）。
+
+    spec = {name, taxonomy, cmd, caution, cases: [{when, conclusion}, ...]}
+    """
+    name = (spec.get("name") or "").strip()
+    taxonomy = (spec.get("taxonomy") or "").strip()
     skill_id = taxonomy.replace("/", ".")
-    n = int(inp("分几种情况判断？(1-5) ").strip() or "2")
-    cmd = inp("第一步查什么命令？ ").strip()
+    cmd = (spec.get("cmd") or "").strip()
+    caution = (spec.get("caution") or "").strip() or "TODO"
     nodes = [{"id": "check1", "type": "check", "title": name,
               "run": {"linux": cmd}, "branch": [], "otherwise": "escalate",
-              "cautions": [inp("这一步有什么坑要提醒？ ").strip() or "TODO"]}]
-    for i in range(n):
-        cond = inp(f"情况{i+1}的判据表达式（如 count(rows)>0）？ ").strip()
-        concl = inp(f"情况{i+1}的结论/处置方向？ ").strip()
+              "cautions": [caution]}]
+    for i, c in enumerate(spec.get("cases") or []):
         eid = f"exit{i+1}"
-        nodes[0]["branch"].append({"when": cond or "TODO", "goto": eid})
-        nodes.append({"id": eid, "type": "done", "summary": concl or "TODO"})
+        nodes[0]["branch"].append({"when": (c.get("when") or "").strip() or "TODO",
+                                   "goto": eid})
+        nodes.append({"id": eid, "type": "done",
+                      "summary": (c.get("conclusion") or "").strip() or "TODO"})
     nodes.append({"id": "escalate", "type": "escalate", "summary": "TODO 打包升级证据"})
     skill = {
         "apiVersion": "skill/v0.1", "kind": "Diagnostic",
@@ -217,6 +221,20 @@ def wizard(inp=input):
         "feedback": {"ask": f"{name} 定位了吗？"},
     }
     return write_draft(skill, {}, _slugify(skill_id.split(".")[-1]))
+
+
+def wizard(inp=input):
+    name = inp("这个问题叫什么（一句话症状）？ ").strip()
+    taxonomy = inp("归到哪个分类（如 host/process/xxx）？ ").strip()
+    n = int(inp("分几种情况判断？(1-5) ").strip() or "2")
+    cmd = inp("第一步查什么命令？ ").strip()
+    caution = inp("这一步有什么坑要提醒？ ").strip()
+    cases = []
+    for i in range(n):
+        cases.append({"when": inp(f"情况{i+1}的判据表达式（如 count(rows)>0）？ ").strip(),
+                      "conclusion": inp(f"情况{i+1}的结论/处置方向？ ").strip()})
+    return wizard_from_spec({"name": name, "taxonomy": taxonomy, "cmd": cmd,
+                             "caution": caution, "cases": cases})
 
 
 # ---------- lint：validate + 缺口清单 ----------
