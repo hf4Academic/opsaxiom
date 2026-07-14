@@ -1,5 +1,176 @@
 # Opus 4.8 任务书
 
+# 第十二轮（Fable 布置，2026-07-13）——G 系列：Skill 扩容 + 社区发布流程实战
+
+> 发起人指示：设计几个有用的 Skill 交 Opus 实现；并模拟真实用户走通
+> "客户端验证 → 发布 → GitHub PR → 合入上架"全流程，供发起人评估 PR 机制。
+> 通用要求不变：读 HANDOFF → 小步提交 `[G-n]` → 严守 docs/07 全部规则 →
+> 疑问进 REVIEW-QUEUE 不改设计。5 个 Skill 全部先 context_walk 场景 → promote 晋级。
+> **社区上线后的新纪律：G-1~G-5 晋级后要更新 docs/04 §5（新叶子回填分类树）。**
+
+## G-1 host.cpu.throttled —— 容器/cgroup CPU 限流（Diagnostic）
+- 症状："容器里 CPU 用不满但应用卡/延迟尖刺/K8s limit 设了之后变慢"。
+- 树骨架（Fable 定，判据照抄）：
+  - e1 check 确认 cgroup 版本与限流计数：
+    `cat /sys/fs/cgroup/cpu.stat 2>/dev/null || cat /sys/fs/cgroup/cpu/cpu.stat`
+    → parser `cgroup/cpu-stat-v1`（scalars: nr_periods, nr_throttled, throttled_usec）
+    - when `nr_throttled == 0` → done_not_throttled（没被限流，转查负载/steal）
+    - when `nr_throttled > 0 and nr_periods > 0` → e2
+  - e2 check 限流比例与配额：`cat cpu.max`（v2）或 `cpu.cfs_quota_us`+`cpu.cfs_period_us`（v1）
+    → parser 派生标量 `throttle_ratio = nr_throttled/nr_periods`（解析器算好，勿在
+    when 里做除法——exprlang 无除法时用预派生，B6 纪律）、`quota_cores`
+    - when `throttle_ratio >= 0.25` → done_severe（配额严重不足：建议 limit 上调或去 limit，
+      给出当前 quota_cores 与实际需求对比）
+    - when `throttle_ratio < 0.25` → done_mild（轻度限流：多为突发尖刺，建议观察或调 burst）
+  - cautions 必写：①K8s 下改 limit 要走 deployment 而非直接改 cgroup（改了会被 kubelet 覆写）；
+    ②cgroup v1/v2 文件路径不同，两个命令都给；③throttled_usec 高但 ratio 低=长尾尖刺，
+    看 P99 而非均值。
+- sim：v2 高限流 / v1 轻度 / 未限流 三场景。
+
+## G-2 host.network-stack.dns-flaky —— DNS 间歇性慢/失败（Diagnostic）
+- 症状："偶发 Name or service not known/curl 有时 5 秒才通/重试就好"。
+  与已有 dns-resolve-fail（完全解析失败）区分：这是**间歇**问题，根因谱系不同。
+- 树骨架：
+  - e1 check resolv.conf 配置形态：`cat /etc/resolv.conf`
+    → parser `dns/resolv-v1`（scalars: nameserver_count, has_timeout_opt, has_rotate,
+    first_ns；rows: nameservers[]）
+    - when `nameserver_count >= 2 and not has_timeout_opt` → e2（多 server 无 timeout 选项
+      =默认 5s 超时轮询，间歇 5s 慢的头号元凶）
+    - otherwise → e2
+  - e2 check 逐个 server 连通与耗时：`for ns in $(grep ^nameserver /etc/resolv.conf | awk '{print $2}'); do (time dig @$ns example.com +tries=1 +time=2) 2>&1 | tail -3; done`
+    → parser `dns/dig-multi-v1`（rows: [{ns, ok, ms}]，派生 scalars: dead_ns_count, slow_ns_count(ms>500)）
+    - when `dead_ns_count >= 1` → done_dead_ns（第一/某个 nameserver 死了：默认串行轮询，
+      每次解析都要先等死者超时——结论给出死的是哪台+建议顺序/摘除）
+    - when `slow_ns_count >= 1` → done_slow_ns
+    - when `dead_ns_count == 0 and slow_ns_count == 0` → e3
+  - e3 check 本地缓存/ systemd-resolved：`systemctl is-active systemd-resolved && resolvectl statistics 2>/dev/null | head -20`
+    - when `service_active` → done_check_resolved（看 cache miss / DNSSEC 失败计数）
+    - otherwise → escalate
+  - cautions：①容器里 resolv.conf 是挂载的，改宿主机无效；②ndots:5（K8s 默认）叠加
+    多 search 域=每次解析放大 N 倍查询，间歇慢常见根因；③UDP 53 丢包在 conntrack 满时
+    会伪装成 DNS 问题（关联 conntrack-full）。
+- sim：死 server / 慢 server / resolved 缓存 三场景。
+
+## G-3 host.storage.smart-failing —— 磁盘 SMART 预警（Diagnostic + human_only 处置）
+- 症状："dmesg 有 I/O error/监控报 SMART 告警/怀疑盘要坏"。
+- 树骨架：
+  - e1 check 盘清单与 SMART 总判：`smartctl --scan | awk '{print $1}'`+逐盘 `smartctl -H <dev>`
+    → parser `smart/health-v1`（rows: [{dev, passed}]，scalars: failed_count）
+    - when `failed_count >= 1` → e2
+    - when `failed_count == 0` → e2（PASSED 不代表健康！关键属性仍要看——这是本 Skill
+      的核心领域知识，caution 必写）
+  - e2 check 关键属性：`smartctl -A <dev>`（对 e1 中可疑盘）
+    → parser `smart/attrs-v1`（scalars: reallocated, pending, uncorrectable, crc_errors）
+    - when `pending > 0 or uncorrectable > 0` → act_backup_first（危：先备份，盘随时死）
+    - when `reallocated > 50` → done_plan_replace（重映射扇区多：计划性换盘）
+    - when `crc_errors > 100` → done_check_cable（CRC 错误是线/接口问题，不是盘！
+      换盘白花钱——高价值判断）
+    - otherwise → done_healthy
+  - act_backup_first 为 **human_only action**（R1：备份/换盘不可由 Agent 代执行）：
+    preflight 简报给"影响面=该盘全部数据；先 rsync 到安全位置；何时中止=源盘 IO error
+    激增"；rollback.advisory=true（备份动作本身无需回滚）。
+  - cautions：①NVMe 用 `smartctl -A` 字段不同（percentage_used/media_errors），解析器
+    两种都要认；②RAID 卡后面的盘要 `-d megaraid,N`，直接扫扫不到；③SMART PASSED+
+    pending>0 =典型将死盘。
+- sim：将死盘（pending>0）/ 线缆问题（crc 高）/ 健康 三场景。
+
+## G-4 middleware.mysql.connections-exhausted —— 连接数打满（Hybrid，带回滚 action）
+- 症状："Too many connections/应用报连接池获取超时/1040"。
+- 树骨架：
+  - e1 check 现状与配额：`mysql -e "SHOW STATUS LIKE 'Threads_connected'; SHOW VARIABLES LIKE 'max_connections';"`
+    → parser `mysql/conn-v1`（scalars: threads_connected, max_connections, 派生 conn_ratio）
+    - when `conn_ratio >= 0.9` → e2
+    - when `conn_ratio < 0.9` → done_not_exhausted（当前没满：若报错在历史时段，建议
+      查 Connection_errors_max_connections 累计计数）
+  - e2 check 谁占的：`mysql -e "SELECT user,host,command,COUNT(*) c, SUM(command='Sleep') s FROM information_schema.processlist GROUP BY user,host,command ORDER BY c DESC LIMIT 15;"`
+    → parser `mysql/processlist-agg-v1`（rows；派生 scalars: sleep_count, top_user）
+    - when `sleep_count > threads_connected * 0.5`（解析器派生 sleep_ratio>=0.5）→ ask_kill_sleep
+    - otherwise → act_raise_max（活跃连接真多：临时上调）
+  - ask_kill_sleep（ask）："空闲连接占大头，多为应用连接池泄漏。杀空闲(>300s)连接？
+    应用会重连，瞬时可能报错" → 可以→act_kill_sleep / 不行→act_raise_max
+  - act_kill_sleep（action, risk: medium）：
+    run: `mysql -e "SELECT GROUP_CONCAT(CONCAT('KILL ',id,';') SEPARATOR ' ') FROM information_schema.processlist WHERE command='Sleep' AND time>300"` 输出后人工确认执行
+    ——**注意：生成 KILL 清单给人看+人执行，Agent 不直接 KILL**（导航档语义）
+    rollback: type=advisory（被杀连接由应用池自动重建；rollback 说明写清"无状态可回滚，
+    风险在瞬时报错，中止条件=应用错误率>1%"）
+    verify: 复查 conn_ratio < 0.8
+  - act_raise_max（action, risk: medium）：
+    run: `mysql -e "SET GLOBAL max_connections = <当前*1.5>"`
+    rollback: type=inverse，`SET GLOBAL max_connections = <原值>`（原值来自 e1 快照
+    `max_connections_before`——引擎快照机制，R-5/docs/03 §7.6b 的 *_before 契约）
+    preflight.abort_if：内存水位>90%（每连接吃内存，盲目上调会 OOM——caution 必写
+    经验公式：每连接 ~256KB-16MB 取决于 buffer 配置）
+    verify: `Connection_errors_max_connections` 不再增长
+  - cautions：①`SET GLOBAL` 重启失效，永久化要写配置文件并提示；②5.7/8.0 的
+    processlist 表位置不同（information_schema vs performance_schema，8.0 用后者省锁）；
+    ③max_connections 上调前先看 `ulimit -n`（文件句柄不够时 MySQL 静默 clamp）。
+- sim：泄漏型(sleep 多) / 真高并发 / 未满 三场景 + act_raise_max 的回滚往返
+  （SET GLOBAL 在 sim 里用 mock 回放，参照 k8s rollout undo 的录制-回放模式）。
+
+## G-5 aicomp.gpu.driver-mismatch —— 驱动/CUDA 不匹配（Diagnostic，引爆点域高频）
+- 症状："Failed to initialize NVML: Driver/library version mismatch / CUDA driver
+  version is insufficient / 升级后 nvidia-smi 报错"。
+- 树骨架：
+  - e1 check NVML 是否通：`nvidia-smi 2>&1 | head -3`
+    → parser `gpu/nvml-v1`（scalars: nvml_ok, mismatch_hint(输出含 mismatch 字样)）
+    - when `nvml_ok` → e3（NVML 通，查 CUDA 运行时侧）
+    - when `mismatch_hint` → e2（经典：内核模块与用户态库版本漂移）
+    - otherwise → escalate
+  - e2 check 两侧版本：`cat /proc/driver/nvidia/version | head -1; dpkg -l 'nvidia-driver*' 2>/dev/null | grep ^ii || rpm -qa 'nvidia-driver*'`
+    → parser `gpu/driver-versions-v1`（scalars: kernel_mod_ver, userland_ver, same_ver）
+    - when `not same_ver` → done_reload_or_reboot（结论分两档：能重载 =
+      `rmmod nvidia_uvm nvidia_drm nvidia_modeset nvidia && modprobe nvidia`（需先停 GPU 进程，
+      caution：跑着训练任务绝不可 rmmod）；不能=重启。**只出指导不代执行**）
+    - otherwise → escalate
+  - e3 check CUDA 侧：`nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1; nvcc --version 2>/dev/null | tail -1`
+    → parser `gpu/cuda-compat-v1`（scalars: driver_ver, cuda_ver, compat_ok——解析器内置
+    CUDA↔最低驱动对照表：12.4→550.54, 12.2→535.54, 11.8→450.80…此表是本 Skill 的
+    核心领域资产，Fable 已核对，照抄勿改）
+    - when `not compat_ok` → done_cuda_too_new（容器 CUDA 比宿主驱动新：换镜像或升驱动，
+      给出最低驱动版本号）
+    - when `compat_ok` → escalate
+  - cautions：①mismatch 最常见诱因=unattended-upgrades 自动升了驱动包但没重启——
+    结论里建议 hold 驱动包；②容器场景 nvidia-container-toolkit 的 libnvidia-ml 注入
+    版本以宿主为准，容器内 dpkg 查不到是正常的；③rmmod 前 `fuser -v /dev/nvidia*` 确认无进程。
+- sim：mismatch（可 reload）/ CUDA 过新 / 正常 三场景。
+
+## G-6 发布流程实战演练（发起人要亲自看 PR 机制）
+> 目标：模拟"装了客户端的社区用户"完整走一遍：验证 → 签名 → 打包 → PR → CI → 合入
+> → 上架。产出一份带真实终端输出的走查文档，发起人据此评估 PR 机制。
+- 前置（硬部分 Fable 已设计）：把散落的 paramiko 推送器落成正式工具
+  `tools/gitpush.py <local_repo> <remote_url> [refspec]`（从 HANDOFF/git log 里的
+  内联版本提炼，密钥 ~/.ssh/id_ed25519 已在 GitHub 有权限）。
+- 演练脚本（每步截真实输出进 docs/11-publish-walkthrough.md）：
+  1. **模拟新用户**：`OPSAXIOM_HOME=/tmp/fresh-user opsaxiom hub pull <某已有id>`
+     ——验证零配置自动接入官方社区 + 三道安全门输出。
+  2. **验证新 Skill**：选 G-1~G-5 中已晋级 sim_verified 的一个，
+     `opsaxiom run <id> --answers demos/<演示>.yaml` 跑通 → `opsaxiom-attest` 生成
+     签名 attestation（模拟实地验证，outcome=resolved）。
+  3. **打包**：`opsaxiom hub push <id>` → bundle。
+  4. **提交 PR**（设计裁决：分支推送自动化，PR 创建留给网页——发起人正好要看
+     GitHub 的 PR 界面）：clone/复用 registry 工作树 → 新分支 `submit/<skill-id>` →
+     解包 bundle 到 `skills/<id>/<version>/` → `gitpush.py` 推分支 →
+     **提醒发起人**：GitHub 会在 registry 首页横幅提示 "Compare & pull request"，
+     点开即见 PR 表单（这就是网页发布入口）。
+  5. **CI 质检**：PR 上 validate + draft 拒收自动跑；把 Actions 结果链接写进走查文档。
+  6. **合入与上架**（发起人操作 merge）：合入后验证 ①CI rebuild-index 机器人提交
+     ②`OPSAXIOM_HOME=/tmp/fresh-user opsaxiom hub sync && hub search <新id>` 能看到
+     ③重建网站推送（hubsite build + gitpush）新 Skill 出现在网页。
+- 边界（诚实性）：PR 的创建与合并是发起人在网页上做的（API 建 PR 需要 token，
+  且发起人本来就要体验网页流程）——文档里写清哪步是人、哪步是自动。
+
+## G-7 收尾
+- docs/04 §5 回填 G-1~G-5 新叶子（含入口症状口语描述）；新解析器全部进
+  parser_fields.yaml 字段契约；全量回归三绿。
+- HANDOFF 更新，**提醒发起人：G-6 第 4 步后去 GitHub 点 PR，第 6 步 merge**；
+  交接 Fable 评审（重点：5 个新 Skill 的领域正确性抽查——尤其 G-3 的"CRC≠坏盘"、
+  G-4 的内存水位 abort、G-5 的 CUDA 对照表；PR 走查文档是否够发起人做机制评估）。
+
+进度勾选区（Opus 更新）：
+- [ ] G-1  - [ ] G-2  - [ ] G-3  - [ ] G-4  - [ ] G-5  - [ ] G-6  - [ ] G-7
+
+---
+
 # 第十轮（Fable 布置，2026-07-12 发起人裁决后）——交互模型 v2：取证式诊断
 
 > **设计依据：docs/09-interaction-v2.md（必读，本轮宪法级输入）。**

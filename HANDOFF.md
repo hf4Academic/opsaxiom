@@ -126,7 +126,14 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
     发布通道：pi /publish(上下键选)→bundle→fork+PR，CI 质检(validate+draft 拒收)+合入重建索引
   - 推送基建：本机无 ssh 客户端，用 paramiko+dulwich 纯 python 推送（密钥 ~/.ssh/id_ed25519，
     公钥已加发起人 GitHub 账号，不需要时可在 GitHub 侧吊销）
-- **交接给**：**Fable 5 —— 十轮评审（含 M/N 追加与社区上线）**
+- **第十二轮任务书已发（2026-07-13，G 系列）**：Skill 扩容 5 个（host.cpu.throttled /
+  host.network-stack.dns-flaky / host.storage.smart-failing /
+  middleware.mysql.connections-exhausted / aicomp.gpu.driver-mismatch，树骨架/判据/
+  解析器契约/回滚设计 Fable 已给全）+ G-6 社区发布流程实战演练（模拟用户→验证→签名
+  →bundle→分支→GitHub PR→CI→合入→上架，走查文档供发起人评估 PR 机制）。
+  注意：G-6 第4步推完分支要提醒发起人去 GitHub 网页点 PR、第6步由发起人 merge。
+- **交接给**：**Opus 4.8 —— 从 TODO-opus.md 第十二轮 G-1 开始**（十轮评审由 Fable
+  在 G 轮结束后一并做）
 
 ---
 
