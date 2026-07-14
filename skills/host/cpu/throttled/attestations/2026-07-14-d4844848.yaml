@@ -1,0 +1,13 @@
+skill: host.cpu.throttled
+skill_version: 0.1.0
+outcome: resolved
+mode: navigator
+env_fingerprint:
+  os:
+    family: debian
+    version_bucket: unknown
+  scale_bucket: 10-100 hosts
+deviations: []
+rollback_exercised: false
+attestor: gh:hf4Academic
+signature: ed25519:mYYiRtZRse24A2khcWHZACp9oyKGRD/pz49ntlzbUNU=:yoCyH3Mm6VLu5ePvPkAD8ow48oO9uBb/PSEk/H0zK0bC5ESzfYe+7WxaxRhPaXo1SrhMHWK0hZm6PT6/8SdtDQ==

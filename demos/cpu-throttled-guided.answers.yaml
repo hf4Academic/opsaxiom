@@ -1,0 +1,8 @@
+mode: guided
+params: {}
+answers:
+  read_throttle: |
+    nr_periods 10000
+    nr_throttled 4200
+    throttled_usec 890000000
+  check_quota: "150000 100000"
