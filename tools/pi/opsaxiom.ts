@@ -603,22 +603,39 @@ export default function (pi: ExtensionAPI) {
   // ---------- 命令：/pull（/install 同义）从社区下载并自动校验 ----------
   // 零配置：未配置 registry 时 CLI 侧自动接入官方社区。
   // 无参 = 搜索→上下键选→拉取，一条命令走完（发起人验收：别让人记 id）。
+  const parseSearch = (text: string) =>
+    text.split("\n")
+      .map((l) => l.match(/\[([^\]]+)\]\s+(\S+)\s+——\s+(.+)/))
+      .filter(Boolean)
+      .map((mm: any) => ({ id: mm[2], label: `${mm[1]} ${mm[2]} — ${mm[3]}` }));
+
   const doPull = async (args: string, ctx: any) => {
       let q = (args || "").trim();
       if (!q && ctx.hasUI) {
-        const kw = (await ctx.ui.input("想找什么 Skill？（关键词，如 磁盘 / xid / kafka）:", "")) || "";
-        if (!kw) return;
-        const searched = await runCli(["hub", "search", kw], 120000).catch(() => "");
-        // 解析搜索行 "[徽章] id —— 名称"，供上下键选择
-        const items = searched.split("\n")
-          .map((l) => l.match(/\[([^\]]+)\]\s+(\S+)\s+——\s+(.+)/))
-          .filter(Boolean)
-          .map((mm: any) => ({ id: mm[2], label: `${mm[1]} ${mm[2]} — ${mm[3]}` }));
-        if (!items.length) {
-          ctx.ui.notify("没搜到。换个关键词试试。", "warning");
+        const kw = (await ctx.ui.input(
+          "想找什么 Skill？（关键词，如 磁盘 / xid / kafka；回车=浏览全部）:", "")) || "";
+        // 搜索失败要报真实原因（网络/registry），不许吞成"没搜到"（发起人踩过）
+        let searched = "";
+        try {
+          searched = await runCli(["hub", "search", kw], 180000);
+        } catch (e) {
+          ctx.ui.notify(`社区连接失败：${String(e).slice(0, 220)}`, "error");
           return;
         }
-        const picked = await ctx.ui.select("拉取哪个？（↑↓ 选择）", items.map((i) => i.label));
+        let items = parseSearch(searched);
+        if (!items.length && kw) {
+          // 关键词没命中 → 退到全列表浏览，不做死胡同
+          ctx.ui.notify(`「${kw}」没命中，给你全部列表挑：`, "info");
+          try {
+            items = parseSearch(await runCli(["hub", "search", ""], 180000));
+          } catch { /* 上面已报过错 */ }
+        }
+        if (!items.length) {
+          ctx.ui.notify("社区目前没有可拉取的 Skill。", "warning");
+          return;
+        }
+        const picked = await ctx.ui.select(
+          `拉取哪个？（↑↓ 选择，共 ${items.length} 个）`, items.map((i) => i.label));
         if (picked == null) return;
         q = items[items.map((i) => i.label).indexOf(picked)].id;
       }

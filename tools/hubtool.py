@@ -106,15 +106,21 @@ DEFAULT_REGISTRY = "https://github.com/hf4Academic/opsaxiom-registry.git"
 
 def _registry():
     cfg = _load_cfg()
-    if not cfg.get("registry"):
+    reg = cfg.get("registry")
+    if reg:
+        p = pathlib.Path(reg)
+        if (p / "index.json").exists():
+            return p
+        # 自愈：配置还在但 registry 没了（典型：曾 init 到 /tmp 被清）——重接官方社区
+        print(f"（配置的 registry 已失效：{reg}，自动重新接入官方社区）")
+    else:
         print(f"（首次使用：自动接入官方社区 {DEFAULT_REGISTRY}，可用 hub init 换）")
-        try:
-            return hub_init(DEFAULT_REGISTRY)
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError(
-                f"接入官方社区失败（网络到 github 不通？）。可稍后重试，"
-                f"或 hub init <内网镜像/本地目录>。原因：git clone 退出码 {e.returncode}") from e
-    return pathlib.Path(cfg["registry"])
+    try:
+        return hub_init(DEFAULT_REGISTRY)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(
+            f"接入官方社区失败（网络到 github 不通？）。可稍后重试，"
+            f"或 hub init <内网镜像/本地目录>。原因：git clone 退出码 {e.returncode}") from e
 
 
 def _index():
