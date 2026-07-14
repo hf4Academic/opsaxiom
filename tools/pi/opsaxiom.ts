@@ -488,29 +488,56 @@ export default function (pi: ExtensionAPI) {
         if (ctx.hasUI) ctx.ui.setWidget("axiom-skill", out.trim().split("\n").slice(0, 10));
         ctx.ui.notify("草稿已生成。补全后 /skill 选③检查缺口，晋级后 /publish 发布。", "info");
       } else if (choice.startsWith("②")) {
-        // 向导直接在 TUI 里多轮对话（发起人验收：不用跑出去执行指令）
-        const name = (await ctx.ui.input("① 这个问题叫什么（一句话症状）？", "")) || "";
-        if (!name) return;
-        const tax = (await ctx.ui.input("② 归到哪个分类（如 host/process/zombie）？", "")) || "";
-        if (!tax) return;
-        const cmd = (await ctx.ui.input("③ 第一步查什么命令（只读）？", "")) || "";
-        if (!cmd) return;
-        const caution = (await ctx.ui.input("④ 这一步有什么坑要提醒？（回车跳过）", "")) || "";
-        const cases: Array<{ when: string; conclusion: string }> = [];
-        for (let i = 1; i <= 5; i++) {
+        // 向导直接在 TUI 里多轮对话；上方常驻"全览"面板实时刷新已写内容
+        //（发起人验收：写到后面的分支时，前面写了什么要一目了然）
+        const spec: any = { name: "", taxonomy: "", cmd: "", caution: "", cases: [] };
+        const overview = () => {
+          const L = [
+            "┌─ 新 Skill 全览（边写边更新）─────────────",
+            `│ 症状: ${spec.name || "…"}`,
+            `│ 分类: ${spec.taxonomy || "…"}`,
+            `│ 首查: ${spec.cmd ? "$ " + spec.cmd : "…"}`,
+            `│ 提醒: ${spec.caution || "（无）"}`,
+          ];
+          spec.cases.forEach((c: any, i: number) => {
+            L.push(`│ 情况${i + 1}: 当 ${c.when}`);
+            L.push(`│        → ${c.conclusion || "（待写结论）"}`);
+          });
+          L.push(`│ 兜底: 都不符合 → 升级人工（自动生成）`);
+          L.push("└──────────────────────────────────────");
+          ctx.ui.setWidget("axiom-wizard", L);
+        };
+        const done = (msg?: string) => {
+          ctx.ui.setWidget("axiom-wizard", undefined);   // 收尾清掉面板
+          if (msg) ctx.ui.notify(msg, "warning");
+        };
+        overview();
+        spec.name = (await ctx.ui.input("① 这个问题叫什么（一句话症状）？", "")) || "";
+        if (!spec.name) return done();
+        overview();
+        spec.taxonomy = (await ctx.ui.input("② 归到哪个分类（如 host/process/zombie）？", "")) || "";
+        if (!spec.taxonomy) return done();
+        overview();
+        spec.cmd = (await ctx.ui.input("③ 第一步查什么命令（只读）？", "")) || "";
+        if (!spec.cmd) return done();
+        overview();
+        spec.caution = (await ctx.ui.input("④ 这一步有什么坑要提醒？（回车跳过）", "")) || "";
+        overview();
+        // 分支不限数量：想结束随时回车（发起人验收：几个分支由用户自己定）
+        for (let i = 1; ; i++) {
           const when = (await ctx.ui.input(
-            `⑤ 情况${i}的判据表达式（如 count(rows)>0；回车=不再加）`, "")) || "";
+            `⑤ 情况${i}的判据表达式（如 count(rows)>0）；回车=写完了`, "")) || "";
           if (!when) break;
-          const conclusion = (await ctx.ui.input(`   情况${i}成立时的结论/处置方向？`, "")) || "";
-          cases.push({ when, conclusion });
+          spec.cases.push({ when, conclusion: "" });
+          overview();
+          spec.cases[spec.cases.length - 1].conclusion =
+            (await ctx.ui.input(`   情况${i}成立时的结论/处置方向？`, "")) || "";
+          overview();
         }
-        if (!cases.length) {
-          ctx.ui.notify("至少要有一种情况的判据。", "warning");
-          return;
-        }
-        const spec = JSON.stringify({ name, taxonomy: tax, cmd, caution, cases });
-        const out = await runCli(["skill", "new", "--spec-json"], 60000, spec)
-          .catch((e) => String(e));
+        if (!spec.cases.length) return done("至少要有一种情况的判据。");
+        const out = await runCli(["skill", "new", "--spec-json"], 60000,
+                                 JSON.stringify(spec)).catch((e) => String(e));
+        done();
         if (ctx.hasUI) ctx.ui.setWidget("axiom-skill", out.trim().split("\n").slice(0, 8));
         ctx.ui.notify("草稿已生成。/skill 选③检查缺口。", "info");
       } else {
