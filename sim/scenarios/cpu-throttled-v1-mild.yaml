@@ -1,0 +1,6 @@
+skill: skills/host/cpu/throttled/skill.yaml
+scenario: cgroup v1 轻度限流（占比 8%）
+expect_path: [read_throttle, done_mild]
+node_ctx:
+  read_throttle:
+    output: {nr_periods: 20000, nr_throttled: 1600, throttled_usec: 120000000, throttle_ratio: 0.08}

@@ -89,3 +89,5 @@ parsers:
   train/step-time-v1: {scalars: [max_step_ms, median_step_ms]}
   train/node-metrics-v1: {scalars: [gpu_clock_throttled, ib_rate_degraded, data_wait_ms, median_step_ms]}
   train/gpu-trace-v1: {scalars: [comm_time_pct, small_kernel_pct]}
+  cgroup/cpu-stat-v1: {scalars: [nr_periods, nr_throttled, throttled_usec, throttle_ratio]}
+  cgroup/cpu-max-v1: {scalars: [quota_cores]}

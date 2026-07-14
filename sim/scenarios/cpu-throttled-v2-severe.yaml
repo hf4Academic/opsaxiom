@@ -1,0 +1,8 @@
+skill: skills/host/cpu/throttled/skill.yaml
+scenario: cgroup v2 严重限流（占比 42%）
+expect_path: [read_throttle, check_quota, done_severe]
+node_ctx:
+  read_throttle:
+    output: {nr_periods: 10000, nr_throttled: 4200, throttled_usec: 890000000, throttle_ratio: 0.42}
+  check_quota:
+    output: {quota_cores: 1.5}

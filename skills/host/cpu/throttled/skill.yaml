@@ -1,0 +1,73 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.cpu.throttled
+  name: 容器/cgroup CPU 限流排查
+  taxonomy: host/cpu/throttled
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - {os: linux}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8, reviewed_by: [claude-fable-5]}
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors: [ssh]
+  facts: [os.family]
+discovery:
+- id: read_stat
+  run: {linux: "cat /sys/fs/cgroup/cpu.stat 2>/dev/null || cat /sys/fs/cgroup/cpu/cpu.stat"}
+  parser: cgroup/cpu-stat-v1
+tree:
+  entry: read_throttle
+  nodes:
+  - id: read_throttle
+    type: check
+    title: 确认是否发生 CPU 限流及其强度
+    run: {linux: "cat /sys/fs/cgroup/cpu.stat 2>/dev/null || cat /sys/fs/cgroup/cpu/cpu.stat"}
+    parser: cgroup/cpu-stat-v1
+    branch:
+    - {when: "output.nr_throttled == 0", goto: done_not_throttled}
+    - {when: "output.throttle_ratio >= 0.25", goto: check_quota}
+    - {when: "output.throttle_ratio < 0.25", goto: done_mild}
+    otherwise: check_quota
+    cautions:
+    - "cgroup v1/v2 文件路径不同：v2 是 /sys/fs/cgroup/cpu.stat，v1 是 /sys/fs/cgroup/cpu/cpu.stat，两条命令都给"
+    - "throttled_usec 高但 throttle_ratio 低，是长尾尖刺型限流——看 P99 延迟而非均值，别被平均数骗过"
+    - "nr_throttled==0 只说明这个 cgroup 没被限流，卡顿另有其因（转查 steal/负载/单核饱和）"
+  - id: done_not_throttled
+    type: done
+    summary: "未发生 CPU 限流（nr_throttled=0）。卡顿/延迟另有根因，建议转查 CPU steal、系统负载或单核饱和。"
+  - id: done_mild
+    type: done
+    summary: "轻度限流（限流周期占比 {{output.throttle_ratio}}，<25%）。多为突发流量下的偶发尖刺，通常无需调整；若延迟 P99 敏感，可考虑开启 CFS burst 缓冲短时突发。"
+  - id: check_quota
+    type: check
+    title: 读取 CPU 配额以量化缺口
+    run: {linux: "cat /sys/fs/cgroup/cpu.max 2>/dev/null || echo \"$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us) $(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us)\""}
+    parser: cgroup/cpu-max-v1
+    branch:
+    - {when: "output.quota_cores > 0", goto: done_severe}
+    - {when: "output.quota_cores == -1", goto: escalate}
+    otherwise: escalate
+    cautions:
+    - "quota_cores=-1 表示无限制——若无限制却在限流，说明读错了 cgroup 层级（进程实际受更上层父 cgroup 约束），升级人工核对层级"
+  - id: done_severe
+    type: done
+    summary: >-
+      严重限流（限流周期占比高）。当前配额约 {{output.quota_cores}} 核，明显不足。处置：K8s 下调大
+      Deployment 的 resources.limits.cpu（**不要直接改 cgroup 文件——kubelet 会覆写**）；
+      裸容器调 docker/systemd 的 CPUQuota。上调前评估宿主总核数，避免超卖。
+  - id: escalate
+    type: escalate
+    summary: "打包升级：cpu.stat 全量（nr_periods/nr_throttled/throttled_usec）、cpu.max 配额、cgroup 版本与层级路径。"
+tests:
+- scenario: cpu-throttled-v2-severe
+  expect_path: [read_throttle, check_quota, done_severe]
+- scenario: cpu-throttled-v1-mild
+  expect_path: [read_throttle, done_mild]
+- scenario: cpu-throttled-none
+  expect_path: [read_throttle, done_not_throttled]
+feedback: {ask: CPU 限流问题定位了吗？}

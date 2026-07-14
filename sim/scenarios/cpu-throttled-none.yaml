@@ -1,0 +1,6 @@
+skill: skills/host/cpu/throttled/skill.yaml
+scenario: 未发生限流
+expect_path: [read_throttle, done_not_throttled]
+node_ctx:
+  read_throttle:
+    output: {nr_periods: 50000, nr_throttled: 0, throttled_usec: 0, throttle_ratio: 0.0}

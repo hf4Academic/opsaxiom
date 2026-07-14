@@ -58,8 +58,10 @@ from . import health  # noqa: E402
 from . import mw      # noqa: E402
 from . import train   # noqa: E402
 from . import obssec  # noqa: E402
+from . import cgroup  # noqa: E402
 table.install(register)
 health.install(register)
 mw.install(register)
 train.install(register)
 obssec.install(register)
+cgroup.install(register)

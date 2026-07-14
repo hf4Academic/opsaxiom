@@ -1,0 +1,29 @@
+{
+  "skill": "host.cpu.throttled",
+  "action": "promote",
+  "from": "draft",
+  "to": "sim_verified",
+  "at": "2026-07-14T07:51:06",
+  "validator": "0 ERROR",
+  "evidence": "context_walk",
+  "scenarios": [
+    {
+      "scenario": "cpu-throttled-none.yaml",
+      "mode": "context_walk",
+      "path_ok": true,
+      "rollback_ok": null
+    },
+    {
+      "scenario": "cpu-throttled-v1-mild.yaml",
+      "mode": "context_walk",
+      "path_ok": true,
+      "rollback_ok": null
+    },
+    {
+      "scenario": "cpu-throttled-v2-severe.yaml",
+      "mode": "context_walk",
+      "path_ok": true,
+      "rollback_ok": null
+    }
+  ]
+}
