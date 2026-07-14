@@ -1,0 +1,8 @@
+skill: skills/host/network-stack/dns-flaky/skill.yaml
+scenario: 一个 nameserver 死掉，串行超时导致间歇 5s 慢
+expect_path: [read_resolv, probe_servers, done_dead_ns]
+node_ctx:
+  read_resolv:
+    output: {nameserver_count: 2, has_timeout_opt: 0, has_rotate: 0, first_ns: "10.0.0.1"}
+  probe_servers:
+    output: {dead_ns_count: 1, slow_ns_count: 0, probed: 2}

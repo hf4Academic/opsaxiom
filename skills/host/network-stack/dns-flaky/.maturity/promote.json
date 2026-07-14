@@ -1,0 +1,29 @@
+{
+  "skill": "host.network-stack.dns-flaky",
+  "action": "promote",
+  "from": "draft",
+  "to": "sim_verified",
+  "at": "2026-07-14T07:53:25",
+  "validator": "0 ERROR",
+  "evidence": "context_walk",
+  "scenarios": [
+    {
+      "scenario": "dns-flaky-dead-ns.yaml",
+      "mode": "context_walk",
+      "path_ok": true,
+      "rollback_ok": null
+    },
+    {
+      "scenario": "dns-flaky-resolved.yaml",
+      "mode": "context_walk",
+      "path_ok": true,
+      "rollback_ok": null
+    },
+    {
+      "scenario": "dns-flaky-slow-ns.yaml",
+      "mode": "context_walk",
+      "path_ok": true,
+      "rollback_ok": null
+    }
+  ]
+}

@@ -1,0 +1,83 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.network-stack.dns-flaky
+  name: DNS 间歇性慢/失败排查
+  taxonomy: host/network-stack/dns-flaky
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - {os: linux}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  provenance: {generated_by: claude-opus-4-8, reviewed_by: [claude-fable-5]}
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors: [ssh]
+  facts: [os.family]
+discovery:
+- id: resolv
+  run: {linux: "cat /etc/resolv.conf"}
+  parser: dns/resolv-v1
+tree:
+  entry: read_resolv
+  nodes:
+  - id: read_resolv
+    type: check
+    title: 检查 resolv.conf 配置形态
+    run: {linux: "cat /etc/resolv.conf"}
+    parser: dns/resolv-v1
+    branch:
+    - {when: "output.nameserver_count == 0", goto: escalate}
+    - {when: "output.nameserver_count >= 1", goto: probe_servers}
+    otherwise: probe_servers
+    cautions:
+    - "多 nameserver 且 options 无 timeout 时，默认每台 5s 超时后才轮到下一台——这是'间歇性 5 秒慢'的头号元凶"
+    - "容器里 resolv.conf 是挂载进来的，改宿主机无效；K8s 默认 ndots:5 叠加多 search 域会把每次解析放大成 N 次查询"
+  - id: probe_servers
+    type: check
+    title: 逐个 nameserver 探测连通与耗时
+    run: {linux: "for ns in $(grep ^nameserver /etc/resolv.conf | awk '{print $2}'); do r=$(dig @$ns example.com +tries=1 +time=2 +stats 2>/dev/null | awk '/Query time/{print $4}'); echo \"$ns ${r:+ok $r}${r:-fail}\"; done"}
+    parser: dns/dig-multi-v1
+    branch:
+    - {when: "output.dead_ns_count >= 1", goto: done_dead_ns}
+    - {when: "output.slow_ns_count >= 1", goto: done_slow_ns}
+    - {when: "output.dead_ns_count == 0 and output.slow_ns_count == 0", goto: check_resolved}
+    otherwise: check_resolved
+    cautions:
+    - "conntrack 表满时 UDP 53 丢包会伪装成 DNS 问题——若本机 conntrack 使用率高，先排查 conntrack-full"
+  - id: done_dead_ns
+    type: done
+    summary: >-
+      有 {{output.dead_ns_count}} 个 nameserver 不可达。由于默认串行轮询，每次解析都要先等死掉的
+      server 超时（默认 5s）才 fallback，表现为间歇性 5 秒慢。处置：把死的 server 从 resolv.conf
+      移除或修复；临时缓解可加 options timeout:1 attempts:2 缩短等待。
+  - id: done_slow_ns
+    type: done
+    summary: "有 {{output.slow_ns_count}} 个 nameserver 响应慢（>500ms）。多为上游 DNS 负载高或网络抖动，建议换更近的解析器或加本地缓存（dnsmasq/systemd-resolved）。"
+  - id: check_resolved
+    type: check
+    title: 检查本地 DNS 缓存/systemd-resolved
+    run: {linux: "systemctl is-active systemd-resolved"}
+    parser: text/systemctl-active-v1
+    branch:
+    - {when: "service_active", goto: done_check_resolved}
+    - {when: "not service_active", goto: escalate}
+    otherwise: escalate
+    cautions:
+    - "所有 server 都健康却仍间歇慢，问题多在本地缓存层或应用侧连接复用——看 resolvectl statistics 的 cache miss 与 DNSSEC 失败计数"
+  - id: done_check_resolved
+    type: done
+    summary: "各 nameserver 均健康，systemd-resolved 在运行。间歇慢多在本地缓存/DNSSEC——检查 `resolvectl statistics` 的 cache miss 率与 DNSSEC 验证失败计数；应用侧确认是否每次新建连接而非复用。"
+  - id: escalate
+    type: escalate
+    summary: "打包升级：resolv.conf 全文、各 nameserver 探测耗时、systemd-resolved 状态与 conntrack 使用率。"
+tests:
+- scenario: dns-flaky-dead-ns
+  expect_path: [read_resolv, probe_servers, done_dead_ns]
+- scenario: dns-flaky-slow-ns
+  expect_path: [read_resolv, probe_servers, done_slow_ns]
+- scenario: dns-flaky-resolved
+  expect_path: [read_resolv, probe_servers, check_resolved, done_check_resolved]
+feedback: {ask: DNS 间歇问题定位了吗？}
