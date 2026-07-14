@@ -1,0 +1,11 @@
+skill: skills/middleware/mysql/connections-exhausted/skill.yaml
+scenario: 真高并发（活跃连接多）→ 上调 max 并验证回滚往返
+expect_path: [check_conn, who_holds, act_raise_max, done_raised]
+real_action: act_raise_max
+real_action_kind: mysqlvar
+base_ctx: {max_connections_before: 500}
+node_ctx:
+  check_conn:
+    output: {threads_connected: 490, max_connections: 500, conn_ratio: 0.98}
+  who_holds:
+    output: {conn_total: 490, sleep_count: 60, sleep_ratio: 0.122, top_user: "app"}

@@ -1,0 +1,29 @@
+{
+  "skill": "middleware.mysql.connections-exhausted",
+  "action": "promote",
+  "from": "draft",
+  "to": "sim_verified",
+  "at": "2026-07-14T13:41:32",
+  "validator": "0 ERROR",
+  "evidence": "context_walk",
+  "scenarios": [
+    {
+      "scenario": "mysql-conn-high-concurrency.yaml",
+      "mode": "context_walk",
+      "path_ok": true,
+      "rollback_ok": true
+    },
+    {
+      "scenario": "mysql-conn-leak.yaml",
+      "mode": "context_walk",
+      "path_ok": true,
+      "rollback_ok": null
+    },
+    {
+      "scenario": "mysql-conn-not-exhausted.yaml",
+      "mode": "context_walk",
+      "path_ok": true,
+      "rollback_ok": null
+    }
+  ]
+}

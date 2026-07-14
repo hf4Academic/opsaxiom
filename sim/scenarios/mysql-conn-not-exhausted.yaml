@@ -1,0 +1,6 @@
+skill: skills/middleware/mysql/connections-exhausted/skill.yaml
+scenario: 未打满
+expect_path: [check_conn, done_not_exhausted]
+node_ctx:
+  check_conn:
+    output: {threads_connected: 120, max_connections: 500, conn_ratio: 0.24}

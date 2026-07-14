@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+"""
+opsaxiom-mysqlvar —— 可逆运行时变量设置的 mock（G-4 依赖）。
+
+SET GLOBAL 这类"改运行时变量"是可逆写操作：改之前记下旧值，回滚就是设回旧值
+（inverse 回滚 + *_before 快照，docs/03 §7.6b）。真机上作用于 MySQL，sim 里作用于
+一个受 OPSAXIOM_MYSQLVAR_ROOT 约束的 mock 存储，从而无需真数据库就能验证"回滚精确还原"。
+
+子命令（对齐 quarantine/deploy 的可测品质）：
+  set <var> <value>   记录旧值到 <var>.before，写入新值
+  restore <var>       从 <var>.before 还原，删除 before（幂等）
+  get <var>           打印当前值（无则打印初值 OPSAXIOM_MYSQLVAR_INIT，默认 151）
+"""
+import os
+import pathlib
+import sys
+
+ROOT = pathlib.Path(os.environ.get("OPSAXIOM_MYSQLVAR_ROOT", "/tmp/opsaxiom-mysqlvar"))
+INIT = os.environ.get("OPSAXIOM_MYSQLVAR_INIT", "151")
+
+
+def _cur(var):
+    f = ROOT / f"{var}.cur"
+    return f.read_text().strip() if f.exists() else INIT
+
+
+def main(argv):
+    if not argv:
+        print("用法：opsaxiom-mysqlvar set|restore|get <var> [value]", file=sys.stderr)
+        return 2
+    ROOT.mkdir(parents=True, exist_ok=True)
+    cmd = argv[0]
+    var = argv[1] if len(argv) > 1 else "max_connections"
+    cur_f, before_f = ROOT / f"{var}.cur", ROOT / f"{var}.before"
+    if cmd == "set":
+        before_f.write_text(_cur(var))          # 快照旧值（*_before）
+        cur_f.write_text(argv[2])
+        print(f"SET GLOBAL {var} = {argv[2]}（旧值 {before_f.read_text()} 已快照）")
+        return 0
+    if cmd == "restore":
+        if before_f.exists():
+            cur_f.write_text(before_f.read_text())
+            before_f.unlink()
+            print(f"ROLLBACK：{var} 已还原为 {cur_f.read_text()}")
+        else:
+            print(f"无 before 快照，{var} 保持 {_cur(var)}")
+        return 0
+    if cmd == "get":
+        print(_cur(var))
+        return 0
+    print(f"未知子命令：{cmd}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

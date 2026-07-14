@@ -1,0 +1,105 @@
+apiVersion: skill/v0.1
+kind: Hybrid
+metadata:
+  id: middleware.mysql.connections-exhausted
+  name: MySQL 连接数打满排查与处置
+  taxonomy: middleware/mysql/connections-exhausted
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - {os: linux, family: [debian, rhel]}
+  authors: [opsagent-core]
+  license: Apache-2.0
+  params:
+  - {name: max_connections_before, source: derived, desc: 上调前的 max_connections（引擎快照，供回滚）}
+  provenance: {generated_by: claude-opus-4-8, reviewed_by: [claude-fable-5]}
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: high_risk_write
+  connectors: [mysql]
+  facts: [os.family]
+discovery:
+- id: conn_status
+  run: {mysql: "SHOW STATUS LIKE 'Threads_connected'; SHOW VARIABLES LIKE 'max_connections';"}
+  parser: mysql/conn-v1
+tree:
+  entry: check_conn
+  nodes:
+  - id: check_conn
+    type: check
+    title: 确认连接使用率
+    run: {mysql: "SHOW STATUS LIKE 'Threads_connected'; SHOW VARIABLES LIKE 'max_connections';"}
+    parser: mysql/conn-v1
+    branch:
+    - {when: "output.conn_ratio >= 0.9", goto: who_holds}
+    - {when: "output.conn_ratio < 0.9", goto: done_not_exhausted}
+    otherwise: who_holds
+    cautions:
+    - "当前未满不代表没问题：若报错发生在历史时段，看 Connection_errors_max_connections 累计计数是否增长"
+    - "上调 max_connections 前先看 `ulimit -n`：文件句柄不够时 MySQL 会静默 clamp 实际连接上限"
+  - id: done_not_exhausted
+    type: done
+    summary: "当前连接使用率 {{output.conn_ratio}}，未打满。若确有 Too many connections 报错，多为历史峰值瞬时——建议观察 Connection_errors_max_connections 计数并配置连接数预警。"
+  - id: who_holds
+    type: check
+    title: 定位连接被谁占用
+    run: {mysql: "SELECT user,host,command,COUNT(*) c, SUM(command='Sleep') s FROM information_schema.processlist GROUP BY user,host,command ORDER BY c DESC LIMIT 15;"}
+    parser: mysql/processlist-agg-v1
+    branch:
+    - {when: "output.sleep_ratio >= 0.5", goto: done_kill_idle}
+    - {when: "output.sleep_ratio < 0.5 and output.conn_total > 0", goto: act_raise_max}
+    otherwise: escalate
+    cautions:
+    - "5.7 与 8.0 的 processlist 表位置不同：8.0 用 performance_schema.processlist（省全局锁），5.7 用 information_schema.processlist"
+  - id: done_kill_idle
+    type: done
+    summary: >-
+      空闲(Sleep)连接占大头（{{output.sleep_ratio}}），典型的应用连接池泄漏——连接借出不还。
+      **治本是修应用连接池配置（maxIdle/idleTimeout）**。临时缓解：生成 KILL 清单人工执行——
+      `SELECT GROUP_CONCAT(CONCAT('KILL ',id,';') SEPARATOR ' ') FROM information_schema.processlist
+      WHERE command='Sleep' AND time>300;`（Agent 只出清单，KILL 由你亲自执行）。杀空闲连接后
+      应用会重连，瞬时可能报错，盯应用错误率。
+  - id: act_raise_max
+    type: action
+    title: 临时上调 max_connections（活跃连接确实高）
+    risk: medium
+    preflight:
+      blast_radius: "全局参数，即时生效；每个连接占内存，上调过猛可能推高内存水位"
+      watch:
+      - {run: {mysql: "SHOW STATUS LIKE 'Threads_connected';"}, expect: "连接不再被拒", interval: 5s}
+      - {run: {linux: "free -m | awk '/Mem:/{print int($3/$2*100)}'"}, expect: "内存水位不超 90%"}
+      abort_if:
+      - "内存使用率超过 90%（每连接吃 256KB–16MB 视 buffer 配置而定，盲目上调会 OOM）"
+      est_downtime: "0（在线生效）"
+      approval: required
+    dryrun:
+      run: {mysql: "SHOW VARIABLES LIKE 'max_connections';"}
+      interpret: "记下当前值作为回滚基准（max_connections_before）"
+    run: {mysql: "SET GLOBAL max_connections = 512"}
+    rollback:
+      type: inverse
+      run: {mysql: "SET GLOBAL max_connections = {{max_connections_before}}"}
+    verify:
+      run: {mysql: "SHOW VARIABLES LIKE 'max_connections'; SHOW STATUS LIKE 'Threads_connected';"}
+      parser: mysql/conn-v1
+      assert: "max_connections > max_connections_before"
+      note: "max_connections 已上调且高于回滚基准"
+      on_fail: rollback
+    cautions:
+    - "SET GLOBAL 重启后失效——永久生效需写 my.cnf 的 [mysqld] max_connections 并提示，否则重启打回原形"
+    goto: done_raised
+  - id: done_raised
+    type: done
+    summary: "已临时上调 max_connections 至 512（回滚基准 {{max_connections_before}}）。这是止血不是治本——同时排查为何活跃连接这么高（慢查询堆积/连接池过大/突发流量），并把新值写入 my.cnf 永久化。"
+  - id: escalate
+    type: escalate
+    summary: "打包升级：Threads_connected/max_connections、按 user·host·command 聚合的连接分布、Connection_errors_max_connections、内存水位与 ulimit -n。"
+tests:
+- scenario: mysql-conn-leak
+  expect_path: [check_conn, who_holds, done_kill_idle]
+- scenario: mysql-conn-high-concurrency
+  expect_path: [check_conn, who_holds, act_raise_max, done_raised]
+  rollback_assert: true
+- scenario: mysql-conn-not-exhausted
+  expect_path: [check_conn, done_not_exhausted]
+feedback: {ask: MySQL 连接数问题处置了吗？}

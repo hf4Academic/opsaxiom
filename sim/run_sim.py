@@ -29,6 +29,7 @@ import exprlang  # noqa: E402
 
 QUARANTINE_BIN = ROOT / "tools" / "bin" / "opsaxiom-quarantine"
 DEPLOY_BIN = ROOT / "tools" / "bin" / "opsaxiom-deploy"
+MYSQLVAR_BIN = ROOT / "tools" / "bin" / "opsaxiom-mysqlvar"
 
 
 class SimError(Exception):
@@ -182,7 +183,25 @@ def _real_deploy_roundtrip(notes):
         return True
 
 
-_ROUNDTRIP = {"quarantine": _real_quarantine_roundtrip, "deploy": _real_deploy_roundtrip}
+def _real_mysqlvar_roundtrip(notes):
+    """真实执行 SET GLOBAL 的 mock set→restore，验证 inverse 回滚精确还原旧值。"""
+    with tempfile.TemporaryDirectory() as td:
+        env = dict(os.environ, OPSAXIOM_MYSQLVAR_ROOT=td, OPSAXIOM_MYSQLVAR_INIT="151")
+        def run(*a):
+            return subprocess.run([sys.executable, str(MYSQLVAR_BIN), *a],
+                                  env=env, capture_output=True, text=True)
+        run("set", "max_connections", "300")            # 上调（记 before=151）
+        if run("get", "max_connections").stdout.strip() != "300":
+            notes.append("回滚测试失败：set 未生效"); return False
+        run("restore", "max_connections")               # 回滚
+        if run("get", "max_connections").stdout.strip() != "151":
+            notes.append("回滚测试失败：restore 未还原旧值 151"); return False
+        notes.append("回滚往返成功：SET GLOBAL 300→restore 精确还原 151")
+        return True
+
+
+_ROUNDTRIP = {"quarantine": _real_quarantine_roundtrip, "deploy": _real_deploy_roundtrip,
+              "mysqlvar": _real_mysqlvar_roundtrip}
 
 
 def run(skill_path, scenario_path):
