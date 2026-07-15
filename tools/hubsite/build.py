@@ -22,8 +22,13 @@ import yaml            # noqa: E402
 
 DEFAULT_REPO = "https://github.com/hf4Academic/opsaxiom-registry"
 
-BADGE = {"draft": ("⚪", "#9ca3af"), "sim_verified": ("🔵", "#3b82f6"),
-         "field_verified": ("🟢", "#22c55e"), "certified": ("🟡", "#eab308")}
+# 徽章：图标 + 中文名 + 一句白话含义（递进：草稿→仿真→实地→认证）。
+BADGE = {
+    "draft":          ("✏️", "#94a3b8", "草稿",   "刚写好、还没验证过——先别照着在生产上做"),
+    "sim_verified":   ("🧪", "#3b82f6", "仿真验证", "在模拟环境里跑通了整套判断逻辑"),
+    "field_verified": ("🛡️", "#16a34a", "实地验证", "已有 3 位以上的人在真实机器上用过并签名背书"),
+    "certified":      ("🏅", "#d97706", "官方认证", "领域评审人正式签署认可，最高可信度"),
+}
 
 # 浅色主题（发起人验收：浅色更好看）
 CSS = """
@@ -49,6 +54,12 @@ table{width:100%;border-collapse:collapse;margin-top:8px}td,th{text-align:left;p
 .btn{display:inline-block;padding:8px 14px;border-radius:10px;border:1px solid var(--line);background:#fff;font-size:14px}
 .btn:hover{border-color:var(--acc);text-decoration:none}
 .btn.warn{color:#b91c1c;border-color:#fecaca}.btn.warn:hover{border-color:#b91c1c}
+.badge{display:inline-flex;align-items:center;gap:4px;line-height:1.4}
+.legend{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:0 0 20px}
+.legend-title{font-size:13px;color:var(--mut);margin-bottom:10px}
+.legend-item{display:flex;align-items:center;gap:10px;padding:5px 0}
+.legend-txt{font-size:13px;color:var(--fg)}
+@media(min-width:640px){.legend{display:grid;grid-template-columns:1fr 1fr;gap:6px 24px}.legend-title{grid-column:1/-1}}
 .step{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:12px 0}
 .step h3{margin:0 0 6px;font-size:15px}
 code,pre{background:#f1f5f9;border-radius:6px;padding:1px 6px;font-size:13px}
@@ -61,8 +72,22 @@ def _esc(s):
 
 
 def _badge_html(m):
-    icon, color = BADGE.get(m, ("?", "#888"))
-    return f'<span class="badge" style="background:{color}">{icon} {_esc(m)}</span>'
+    icon, color, label, _meaning = BADGE.get(m, ("?", "#888", m, ""))
+    return (f'<span class="badge" style="background:{color}" title="{_esc(_meaning)}">'
+            f'{icon} {_esc(label)}</span>')
+
+
+def _legend_html():
+    """首页徽章图例：图标 + 名称 + 白话含义，按可信度从低到高排。"""
+    order = ["draft", "sim_verified", "field_verified", "certified"]
+    cells = []
+    for m in order:
+        icon, color, label, meaning = BADGE[m]
+        cells.append(
+            f'<div class="legend-item"><span class="badge" style="background:{color}">'
+            f'{icon} {_esc(label)}</span><span class="legend-txt">{_esc(meaning)}</span></div>')
+    return ('<div class="legend"><div class="legend-title">徽章含义'
+            '（可信度从低到高）</div>' + "".join(cells) + '</div>')
 
 
 def _nav(depth, on, repo):
@@ -219,7 +244,8 @@ def build_site(registry_dir, out_dir, repo=DEFAULT_REPO):
             f'<header><h1>OpsAxiom Skills Hub</h1>'
             f'<div class="sub">{len(index)} 个可信运维 Skill · 徽章表示成熟度 · 点开看决策树与实地验证 · '
             f'终端接入：<code>opsaxiom hub pull &lt;id&gt;</code>（首次自动指向本社区）</div></header>'
-            f'<div class="wrap"><input id="q" placeholder="搜索症状 / id / 域…（如 磁盘、xid、暴破）">'
+            f'<div class="wrap">{_legend_html()}'
+            f'<input id="q" placeholder="搜索症状 / id / 域…（如 磁盘、xid、暴破）">'
             f'{"".join(cards)}</div>{js}')
     (out / "index.html").write_text(_page("OpsAxiom Skills Hub", body), encoding="utf-8")
 
