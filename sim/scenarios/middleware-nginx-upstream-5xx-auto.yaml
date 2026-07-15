@@ -1,0 +1,17 @@
+skill: skills/middleware/upstream-5xx/skill.yaml
+scenario: middleware.nginx.upstream-5xx 自动求解走查
+expect_path:
+- check_errlog
+- classify
+- done_timeout
+node_ctx:
+  check_errlog:
+    output:
+      value: 1
+    rows:
+    - {}
+  classify:
+    output:
+      value: 1
+    rows:
+    - {}

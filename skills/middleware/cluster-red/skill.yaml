@@ -1,0 +1,74 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.es.cluster-red
+  name: Elasticsearch 集群 Red/Yellow 排查
+  taxonomy: middleware/es/cluster-red
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_health
+  nodes:
+  - id: check_health
+    type: check
+    title: 查集群健康与未分配分片
+    run:
+      linux: curl -s localhost:9200/_cluster/health 2>/dev/null | grep -oE '"unassigned_shards":[0-9]+'
+        | grep -oE '[0-9]+'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_reason
+    - when: output.value == 0
+      goto: done_healthy
+    otherwise: check_reason
+    cautions:
+    - Red=有主分片未分配(该索引部分数据不可读写)；Yellow=副本分片未分配(数据在但冗余不足)。Red 比 Yellow 严重得多，先救 Red
+  - id: check_reason
+    type: check
+    title: 查分片未分配原因
+    run:
+      linux: curl -s 'localhost:9200/_cluster/allocation/explain' 2>/dev/null | grep
+        -ic 'disk\|watermark\|NODE_LEFT\|allocation'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_reason_found
+    - when: output.value == 0
+      goto: escalate
+    otherwise: escalate
+    cautions:
+    - 最常见未分配原因：磁盘超 watermark(默认 85%/90% 停止分配)、节点掉线、分片数超节点限制。allocation/explain 会直接告诉你原因，别瞎猜
+  - id: done_healthy
+    type: done
+    summary: 无未分配分片，集群 Green。写入失败另查(mapping/线程池/限流)。
+  - id: done_reason_found
+    type: done
+    summary: allocation/explain 已给出未分配原因。磁盘 watermark 满则清理/扩盘、节点掉线则恢复节点、分片超限则调 total_shards_per_node；对症处理后分片会自动分配。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: middleware-es-cluster-red-auto
+  expect_path:
+  - check_health
+  - check_reason
+  - done_reason_found
+feedback:
+  ask: Elasticsearch 集群 Red/Yellow 排查定位了吗？

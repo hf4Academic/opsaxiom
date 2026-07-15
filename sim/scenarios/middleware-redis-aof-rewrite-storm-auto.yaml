@@ -1,0 +1,17 @@
+skill: skills/middleware/aof-rewrite-storm/skill.yaml
+scenario: middleware.redis.aof-rewrite-storm 自动求解走查
+expect_path:
+- check_fork
+- check_mem
+- done_large_instance
+node_ctx:
+  check_fork:
+    output:
+      fork_usec: 100001
+    rows:
+    - {}
+  check_mem:
+    output:
+      used: 10000000001
+    rows:
+    - {}

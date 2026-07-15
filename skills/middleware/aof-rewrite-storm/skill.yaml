@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.redis.aof-rewrite-storm
+  name: Redis AOF 重写风暴/fork 延迟排查
+  taxonomy: middleware/redis/aof-rewrite-storm
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_fork
+  nodes:
+  - id: check_fork
+    type: check
+    title: 查最近一次 fork 耗时
+    run:
+      linux: 'redis-cli info stats 2>/dev/null | awk -F: ''/latest_fork_usec/{print
+        "fork_usec", $2}'''
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.fork_usec > 100000
+      goto: check_mem
+    - when: output.fork_usec <= 100000
+      goto: done_fork_ok
+    otherwise: check_mem
+    cautions:
+    - fork 耗时随内存增大而增大(要复制页表)——大实例(几十 GB)fork 就可能几百毫秒，期间 Redis 阻塞。这是 AOF/RDB 重写卡顿的物理根因
+  - id: check_mem
+    type: check
+    title: 查实例内存规模与 THP
+    run:
+      linux: 'redis-cli info memory 2>/dev/null | awk -F: ''/used_memory:/{print "used",
+        $2}'''
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.used > 10000000000
+      goto: done_large_instance
+    - when: output.used <= 10000000000
+      goto: done_thp_suspect
+    otherwise: escalate
+    cautions:
+    - THP=always 会让 fork 后的写时复制放大(2M 大页粒度)，Redis 官方明确建议关 THP；另外 fork 期间的延迟尖刺常被误判为'网络问题'
+  - id: done_fork_ok
+    type: done
+    summary: fork 耗时不高。周期性卡顿另查(慢命令/大 key/网络)。
+  - id: done_large_instance
+    type: done
+    summary: 大实例 fork 慢是物理必然。缓解：拆分实例减小单实例内存、AOF 改用 everysec 且错峰重写、关 THP；根治靠减小单实例规模。
+  - id: done_thp_suspect
+    type: done
+    summary: 实例不算大但 fork 慢，重点查 THP 是否 always(关闭它)、宿主是否内存紧张导致 fork 时缺页慢。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: middleware-redis-aof-rewrite-storm-auto
+  expect_path:
+  - check_fork
+  - check_mem
+  - done_large_instance
+feedback:
+  ask: Redis AOF 重写风暴/fork 延迟排查定位了吗？

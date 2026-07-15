@@ -281,6 +281,9 @@
 - `aicomp/scheduling/gpu-fragmentation` — "GPU 碎片化/整机分配不出来"
 
 ### 5.5 middleware
+- `middleware/redis/aof-rewrite-storm` — "Redis 周期性卡顿/AOF 重写延迟尖刺/fork 慢"
+- `middleware/redis/slowlog-high` — "Redis 响应慢/有慢命令/延迟高"
+- `middleware/kafka/isr-shrink` — "Kafka ISR 收缩/副本不同步/under-replicated"
 **middleware/mysql**
 - `middleware/mysql/slow-query` — "MySQL 慢/慢查询多/CPU 高"
 - `middleware/mysql/replication-lag` — "主从延迟大/从库落后"

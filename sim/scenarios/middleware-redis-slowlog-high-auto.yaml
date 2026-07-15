@@ -1,0 +1,17 @@
+skill: skills/middleware/slowlog-high/skill.yaml
+scenario: middleware.redis.slowlog-high 自动求解走查
+expect_path:
+- check_slowlog
+- check_bigkey
+- done_bigkey
+node_ctx:
+  check_slowlog:
+    output:
+      value: 1
+    rows:
+    - {}
+  check_bigkey:
+    output:
+      value: 1
+    rows:
+    - {}

@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.nginx.upstream-5xx
+  name: Nginx 上游 502/504 排查
+  taxonomy: middleware/nginx/upstream-5xx
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_errlog
+  nodes:
+  - id: check_errlog
+    type: check
+    title: 查 error log 的上游错误
+    run:
+      linux: tail -500 /var/log/nginx/error.log 2>/dev/null | grep -icE 'upstream|502|504|connect()
+        failed|timed out'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: classify
+    - when: output.value == 0
+      goto: done_no_upstream_err
+    otherwise: classify
+    cautions:
+    - Nginx 的 502/504 几乎都记在 error.log 且带明确原因(connection refused/timed out)——先看日志，别从
+      access.log 的状态码倒推
+  - id: classify
+    type: check
+    title: 区分连接被拒还是超时
+    run:
+      linux: tail -500 /var/log/nginx/error.log 2>/dev/null | grep -icE 'timed out|timeout'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_timeout
+    - when: output.value == 0
+      goto: done_refused
+    otherwise: escalate
+    cautions:
+    - timed out=后端处理慢或没响应(504)；connection refused=后端没在监听/端口错(502)。两者处置完全不同
+  - id: done_no_upstream_err
+    type: done
+    summary: 近期无上游错误。5xx 另查(Nginx 自身配置/限流/客户端)。
+  - id: done_timeout
+    type: done
+    summary: 上游超时(504)。查后端是否处理慢(扩容/优化)、或调大 proxy_read_timeout/proxy_connect_timeout(治标)。
+  - id: done_refused
+    type: done
+    summary: 上游连接被拒(502)。后端服务没起/端口不对/被防火墙挡——确认 upstream 配的地址端口与后端实际监听一致，后端进程健康。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: middleware-nginx-upstream-5xx-auto
+  expect_path:
+  - check_errlog
+  - classify
+  - done_timeout
+feedback:
+  ask: Nginx 上游 502/504 排查定位了吗？

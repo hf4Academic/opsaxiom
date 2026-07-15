@@ -1,0 +1,76 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.kafka.isr-shrink
+  name: Kafka ISR 收缩/副本不同步排查
+  taxonomy: middleware/kafka/isr-shrink
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_urp
+  nodes:
+  - id: check_urp
+    type: check
+    title: 查 under-replicated 分区数
+    run:
+      linux: kafka-topics.sh --bootstrap-server localhost:9092 --describe --under-replicated-partitions
+        2>/dev/null | grep -c Topic
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_broker
+    - when: output.value == 0
+      goto: done_no_urp
+    otherwise: check_broker
+    cautions:
+    - under-replicated 说明有副本掉出 ISR——数据冗余降级，此时再挂一个 broker 就可能丢数据，属高优先级问题
+  - id: check_broker
+    type: check
+    title: 查 broker 是否有掉线/负载高
+    run:
+      linux: kafka-broker-api-versions.sh --bootstrap-server localhost:9092 2>/dev/null
+        | grep -c 'id:'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_broker_lag
+    - when: output.value == 0
+      goto: escalate
+    otherwise: escalate
+    cautions:
+    - ISR 收缩三大因：follower 拉取跟不上(磁盘/网络慢)、broker GC 长停顿、replica.lag.time.max.ms 配太小误判。别只重启
+      broker 了事
+  - id: done_no_urp
+    type: done
+    summary: 无 under-replicated 分区，副本健康。消费/生产问题另查。
+  - id: done_broker_lag
+    type: done
+    summary: 有副本不同步。定位掉出 ISR 的 follower 所在 broker，查其磁盘 IO/网络/GC；若是瞬时抖动可自愈，持续则扩容或优化该
+      broker。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: middleware-kafka-isr-shrink-auto
+  expect_path:
+  - check_urp
+  - check_broker
+  - done_broker_lag
+feedback:
+  ask: Kafka ISR 收缩/副本不同步排查定位了吗？

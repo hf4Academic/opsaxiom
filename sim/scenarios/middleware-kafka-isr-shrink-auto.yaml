@@ -1,0 +1,17 @@
+skill: skills/middleware/isr-shrink/skill.yaml
+scenario: middleware.kafka.isr-shrink 自动求解走查
+expect_path:
+- check_urp
+- check_broker
+- done_broker_lag
+node_ctx:
+  check_urp:
+    output:
+      value: 1
+    rows:
+    - {}
+  check_broker:
+    output:
+      value: 1
+    rows:
+    - {}

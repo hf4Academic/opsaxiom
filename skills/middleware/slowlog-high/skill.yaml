@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.redis.slowlog-high
+  name: Redis 慢命令排查
+  taxonomy: middleware/redis/slowlog-high
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_slowlog
+  nodes:
+  - id: check_slowlog
+    type: check
+    title: 查慢日志条数
+    run:
+      linux: redis-cli slowlog len 2>/dev/null
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_bigkey
+    - when: output.value == 0
+      goto: done_no_slow
+    otherwise: check_bigkey
+    cautions:
+    - slowlog 只记超过 slowlog-log-slower-than(默认 10ms)的命令；有条目说明确有慢命令，但阈值配太大可能漏记
+  - id: check_bigkey
+    type: check
+    title: 看是否存在大 key(慢命令常因)
+    run:
+      linux: redis-cli --bigkeys 2>/dev/null | grep -icE 'Biggest.*found|[0-9]{5,}
+        '
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_bigkey
+    - when: output.value == 0
+      goto: done_slow_cmd
+    otherwise: escalate
+    cautions:
+    - O(N) 命令(KEYS/HGETALL/SMEMBERS 大集合)是慢命令首因——尤其 KEYS 会阻塞整个实例。禁用 KEYS、用 SCAN 替代
+  - id: done_no_slow
+    type: done
+    summary: 无慢日志。延迟高另查(网络/fork/内存换页)。
+  - id: done_bigkey
+    type: done
+    summary: 存在大 key，是慢命令的根源。拆分大 key(大 hash/set 分片)、避免对大 key 用 O(N) 命令；删除大 key 用 UNLINK(异步)而非
+      DEL。
+  - id: done_slow_cmd
+    type: done
+    summary: 有慢命令但非大 key 主导。slowlog get 看具体命令，禁用 KEYS 等 O(N) 命令、优化 Lua 脚本、避免大范围 ZRANGE。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: middleware-redis-slowlog-high-auto
+  expect_path:
+  - check_slowlog
+  - check_bigkey
+  - done_bigkey
+feedback:
+  ask: Redis 慢命令排查定位了吗？
