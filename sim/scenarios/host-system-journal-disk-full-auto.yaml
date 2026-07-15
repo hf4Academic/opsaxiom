@@ -1,0 +1,17 @@
+skill: skills/host/journal-disk-full/skill.yaml
+scenario: host.system.journal-disk-full 自动求解走查
+expect_path:
+- check_usage
+- check_config
+- done_no_limit
+node_ctx:
+  check_usage:
+    output:
+      take: 1000000001
+    rows:
+    - {}
+  check_config:
+    output:
+      count: 0
+    rows:
+    - {}

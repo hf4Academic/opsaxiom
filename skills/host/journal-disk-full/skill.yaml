@@ -1,0 +1,76 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.system.journal-disk-full
+  name: journal 日志占满磁盘排查
+  taxonomy: host/system/journal-disk-full
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_usage
+  nodes:
+  - id: check_usage
+    type: check
+    title: 查看 journal 占用
+    run:
+      linux: journalctl --disk-usage
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.take > 1000000000
+      goto: check_config
+    - when: output.take <= 1000000000
+      goto: done_small
+    otherwise: check_config
+    cautions:
+    - journalctl --disk-usage 的输出单位是字节，别把 1.0G 当成 1
+  - id: check_config
+    type: check
+    title: 查看保留上限配置
+    run:
+      linux: grep -E 'SystemMaxUse|MaxRetentionSec' /etc/systemd/journald.conf
+    parser: generic/count-v1
+    branch:
+    - when: output.count == 0
+      goto: done_no_limit
+    - when: output.count > 0
+      goto: done_has_limit
+    otherwise: escalate
+    cautions:
+    - 没配 SystemMaxUse 时 journald 默认最多用 10% 分区，大盘上就是几十 GB
+  - id: done_small
+    type: done
+    summary: journal 占用不大（<1GB），空间问题另有元凶，转查 disk-full。
+  - id: done_no_limit
+    type: done
+    summary: 未配置 journal 上限，占用会持续增长。**立即缓解（人工执行，不可逆）：journalctl --vacuum-size=500M
+      清理旧日志；根治：在 journald.conf 配 SystemMaxUse=500M 后 systemctl restart systemd-journald。**
+  - id: done_has_limit
+    type: done
+    summary: 已配上限但仍占满，可能是配置未生效或值过大。核对 SystemMaxUse 实际值并重启 journald 使其生效。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-system-journal-disk-full-auto
+  expect_path:
+  - check_usage
+  - check_config
+  - done_no_limit
+feedback:
+  ask: journal 日志占满磁盘排查定位了吗？

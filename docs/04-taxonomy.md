@@ -128,6 +128,7 @@
 - `host/process/dstate-hang` — "进程卡 D 状态/kill 不掉/不可中断睡眠"
 
 **host/system**
+- `host/system/journal-disk-full` — "journal 撑满磁盘/journald 占很大"
 - `host/system/clock-drift` — "时间不对/时钟漂移/NTP 不同步"
 - `host/system/systemd-unit-failed` — "服务起不来/systemctl failed/开机某单元报错"
 - `host/system/kernel-param-misconfig` — "内核参数不对/sysctl 需要调优"
