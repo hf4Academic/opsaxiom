@@ -35,6 +35,17 @@
 - **B10 凭据/密钥永不在构建期产生或进入制品**（F-13：Dockerfile 构建期 keygen 把私钥
   烤进镜像，所有容器共享同一把——签名失去主体含义）。镜像/离线包/仓库里只能有公钥和
   keyring；私钥一律运行时首次需要时惰性生成。同理适用于 token/口令：R11 的制品版。
+- **B11 linux 命令保守主义（批量轮新增，H-0）**：linux 侧没有语法树校验兜底，
+  批量生成时只用 coreutils/procps/iproute2 的常见形态；任何非常见 flag 或版本特有
+  flag 必须附 caution 声明依赖并给降级命令。宁可两条朴素命令，不写一条炫技命令。
+- **B12 解析器选择顺序（H-0）**：专用解析器 > generic 族 > 无解析器默认。用 generic
+  时分支表达式只许引用该形态定义上必然产出的字段（kv-num→output.<归一键>；
+  count→output.count/value；table→rows[].<归一列名>/output.row_count），归一键规则
+  见 tools/parsers/generic.py。generic 无字段声明、FIELD 检查跳过——所以判据字段名
+  必须与样例输出逐个核对（B7 的 generic 版）。
+- **B13 批量轮的 Hybrid 限制（H-0）**：批量生成的 Skill 默认 Diagnostic；要带 action
+  必须复用已验证的回滚模式之一（quarantine 隔离/deploy 卸载/mysqlvar 逆设置/
+  k8s transaction），否则做成强指导 done 节点（G-3 判断的推广）。新回滚模式=Fable 设计。
 - **B9 分支里的枚举清单必须与 caution 里的清单逐项一致**（F-10：xid-error 的 caution 写硬件类
   是 48/79/94/95，分支却多塞了 92——而 92 是可纠正错误率预警，误归会导致对好卡执行 drain+RMA）。
   错误码/状态码分组时，逐码对照官方文档，且 branch 与 caution 双向核对。

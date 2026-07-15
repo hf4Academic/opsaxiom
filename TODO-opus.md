@@ -1,5 +1,109 @@
 # Opus 4.8 任务书
 
+# 第十三轮（Fable 布置，2026-07-14）——H 系列：上线冲刺，Skill 突破 200
+
+> 发起人指令：上线前把 Skill 干到 200 个然后发布。现状 79（54 已验证 + 25 草稿，
+> 含 1 个脏数据），分类树空缺 64 叶。**到 200 = 抢救草稿 + 认领空缺 + 扩树新写。**
+> Fable 已交付规模杠杆与纪律（H-0）；Opus 按域分批执行，每批一个 commit 前缀 [H-n]。
+>
+> **质量红线（比数量优先，发布口径要经得起看）**：
+> - 每个 Skill 过 validate 0 ERROR + ≥1 个 context_walk 场景 + promote 到 sim_verified；
+> - 严守 docs/07 全部规则，特别是新增的 **B11（linux 命令保守）/ B12（解析器顺序）/
+>   B13（Hybrid 限制——批量轮默认 Diagnostic）**；
+> - 树规模下限：≥2 个 check、≥3 个终点（done/escalate），单 check 两分支的"伪 Skill"不收；
+> - cautions 必须是实战级的坑，写不出坑的叶子宁可不写（宁缺 5 个不注水 5 个）；
+> - 每批开工前先把该域新叶子回填 docs/04 §5（一行 id + 口语症状），再写 skill。
+
+## H-0（Fable 已完成，你直接用）
+- 通用解析器族 `generic/kv-num-v1`/`count-v1`/`table-v1`（tools/parsers/generic.py，
+  含金标准测试）——没有更准的专用解析器时的兜底，键名归一规则见该文件 docstring。
+- docs/07 新增 B11/B12/B13 批量纪律。
+- 本任务书的各域主题与难点设计。
+
+## H-1 清理与草稿抢救（先做，免得后面数不清）
+- 删除脏数据：skills-drafts 里 l1 为中文『智算』的向导测试残留（及其它明显测试残留）。
+- 盘点全部 draft（skills/ 与 skills-drafts/）：能救的补 context_walk 场景 → promote；
+  救不动的（如依赖真实回滚往返的 fs-readonly 类）留 draft 但要在 REVIEW-QUEUE 记明原因。
+  目标：draft 抢救 ≥12 个进 sim_verified。
+- 修正 `list --json` 域统计里的异常（脏数据清掉后自然消失，复查即可）。
+
+## H-2 host 域 23 → 45（+22）
+- 先认领现有 14 个空缺叶（load 类、memory 类、系统类都有现成症状描述），再扩 ~8 新叶。
+- 新叶主题（每叶一行症状回填 docs/04）：systemd 单元反复重启、journal 占满磁盘、
+  cron 没跑/重复跑、sudo/pam 登录变慢、ulimit 限制打满、tmpfs 占用内存、大页配置不当、
+  NFS 挂载 hang（D 状态关联）、XFS/ext4 日志错误、时区/locale 异常。
+- 难点预设计（Fable 定判据，照抄）：
+  - **journal-disk-full**：`journalctl --disk-usage` → generic/kv-num-v1（usage 字节）；
+    处置引导 `journalctl --vacuum-size=500M`（强指导 done，B13——vacuum 不可逆）。
+  - **nfs-mount-hang**：判据链 `mount | grep nfs`（table）→ `timeout 3 stat <挂载点>` 超时
+    与否（count 的 value 判 rc）——**caution：对 hang 的 NFS 路径 ls/df 会卡死 shell，
+    一切探测必须裹 timeout**（这条坑是本叶的核心价值）。
+
+## H-3 network 域 11 → 35（+24）
+- 认领 17 空缺 + 扩 ~7。主题：vlan 不通、trunk 允许列表、lacp/bond 降级、arp 风暴/表满、
+  dhcp 池耗尽/中继失败、vrrp 主备震荡、组播不通、端口安全违规锁定、光功率劣化趋势、
+  qos 队列丢弃、nat 会话表满、镜像口丢包。
+- 纪律：网络命令**必须过语法树**（cisco_ios/huawei_vrp/junos 三平台给全）；语法树没有
+  的前缀先扩 tools/syntax/*.yaml（commit message 附厂商文档依据——O 轮老规矩）。
+- 难点预设计：**arp-storm**：判据用 generic/kv-num-v1 读 `display arp statistics` 的
+  计数增量做不了（无两次采样）→ 改判"ARP 表项数接近上限 + 单接口 ARP 占比异常"，
+  两个 check 分开判（B6：别在一个表达式里跨集合）。
+
+## H-4 k8s 域 10 → 30（+20）
+- 认领 10 空缺 + 扩 ~10。主题：coredns 解析失败/慢、etcd 空间告警(alarm NOSPACE)、
+  apiserver 限流(429)、kubelet PLEG 不健康、节点 DiskPressure/PIDPressure、
+  pvc Pending/Terminating 卡住、ingress 502/504、cni IP 池耗尽、cronjob 不触发、
+  hpa 不扩容、镜像仓库限流、证书临期(kubeadm certs)、oom killed 容器定位。
+- 纪律：kubectl 只读白名单内的动词才可进 check（get/describe/logs/top）；exec 类
+  诊断必须带"容器可能没有该工具"caution（F-5 老坑）。
+- 难点预设计：**etcd-nospace**：`kubectl -n kube-system exec etcd-xxx -- etcdctl alarm list`
+  依赖 exec——改用 apiserver 侧信号：`kubectl get --raw /healthz/etcd`（count 判 ok）+
+  events 里的 NOSPACE（generic/count-v1 计数）；处置（compact+defrag）是强指导 done（B13）。
+
+## H-5 middleware 域 11 → 30（+19）
+- 认领 9 空缺 + 扩 ~10。主题：redis AOF 重写风暴/fork 延迟、redis 集群槽不均、
+  kafka ISR 收缩/副本不同步、kafka 消费组 rebalance 风暴、mysql binlog 撑盘、
+  mysql buffer pool 命中率低、nginx 502 上游排查、nginx worker 连接耗尽、
+  es 集群 red/yellow、es 磁盘水位锁写、pg 连接/膨胀（若语法树/解析代价大可缩减）、
+  rabbitmq 队列堆积。
+- 难点预设计：**kafka-rebalance-storm**：判据"消费组状态在 PreparingRebalance 持续 +
+  成员数震荡"需要两次采样对比——批量轮做不了状态对比，降级为单次判：
+  `kafka-consumer-groups --describe` 的 state 字段 + lag 总量（generic/table-v1），
+  caution 写明"确诊需连续两次观察，本 Skill 给单次快照判断"（诚实边界）。
+
+## H-6 aicomp/obs/sec/proc 域（+14/+10/+10/+3 = +37）
+- aicomp 11→25：认领 6 空缺 + 扩 ~8。主题：nvlink 计数错误、pcie 降速(x16→x4)、
+  gpu 时钟被锁(clocks locked)、MIG 配置漂移、dcgm 健康检查失败、cuda OOM 定位、
+  dataloader 瓶颈(GPU 饥饿)、checkpoint 写入慢、NCCL 环境变量误配、fabric manager 掉线。
+- obs 5→15：prometheus tsdb 撑盘、目标 scrape 超时、基数爆炸(cardinality)、
+  alertmanager 路由错配、静默泄漏(silence 忘删)、grafana 慢面板、exporter 假活、
+  远程写堆积、日志管道延迟、采样率误配。
+- sec 4→14：ssh 配置漂移(root 登录/密码开着)、防火墙规则审计、suid 文件扫描、
+  异常外连、计划任务后门排查、账号异常(空口令/新增 uid0)、审计日志断流、
+  fail2ban 失效、证书链不完整、内核参数安全基线。
+- proc 3→6：oncall 交接单生成、postmortem 骨架生成、变更冻结期检查（Cp 规则写法）。
+- 难点预设计：**pcie-downgrade**：`nvidia-smi --query-gpu=pcie.link.gen.current,pcie.link.width.current --format=csv`
+  → generic/table-v1；判据 width<16 或 gen<预期 → 结论必须提示"先排除节能降速
+  （空载时正常），负载中仍降速才是硬件/插槽问题"——这条 caution 是本叶核心价值。
+
+## H-7 发布工程收尾
+- 全量回归三绿（validate 200/200、pytest、sim 全场景）；
+- registry 重建（--no-draft）+ gitpush 推 GitHub → CI 绿；网站重建 + 推 Pages；
+- README 项目状态改发布口径（200 个 Skill、N 已验证、8 域），
+  欢迎语的库存数字联动检查（repl 是动态读的，复查即可）；
+- docs/04 全部新叶回填完成性核查（每个新 skill 的 taxonomy 都能在 §5 找到）；
+- HANDOFF 更新，**切回 Fable 终审**。
+
+## H-8（Fable 终审协议，Opus 不做但要配合留痕）
+- Fable 抽检：每域 10% + 全部带 action 的 + 全部用了 generic 解析器且分支 ≥3 的；
+- 抽检发现一处领域性错误 → 该批同主题全查；
+- 终审通过才对外宣布 200。
+
+进度勾选区（Opus 更新）：
+- [ ] H-1  - [ ] H-2  - [ ] H-3  - [ ] H-4  - [ ] H-5  - [ ] H-6  - [ ] H-7
+
+---
+
 # 第十二轮（Fable 布置，2026-07-13）——G 系列：Skill 扩容 + 社区发布流程实战
 
 > 发起人指示：设计几个有用的 Skill 交 Opus 实现；并模拟真实用户走通

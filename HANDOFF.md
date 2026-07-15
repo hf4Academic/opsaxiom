@@ -64,6 +64,13 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
   4. docs/11 走查文档能否支撑发起人评估 PR 机制。
 - **给发起人的行动项**：GitHub 上 opsaxiom-registry 有 `submit/host-cpu-throttled` 分支
   待开 PR（docs/11 §4 步骤）——开 PR → 看 CI → merge，走一遍社区投稿闭环。
+- **第十三轮任务书已发（2026-07-14，H 系列：上线冲刺 200 Skill）**：
+  发起人指令上线前突破 200。Fable 已交付规模杠杆：通用解析器族 generic/kv-num·count·
+  table（金标准实现+测试）+ docs/07 B11/B12/B13 批量纪律 + 各域主题与难点预设计
+  （journal vacuum 不可逆、NFS 探测必须裹 timeout、arp 双 check 分判、etcd 不走 exec、
+  kafka 单次快照诚实边界、pcie 降速先排除节能）。质量红线：全部 sim_verified、
+  树规模下限、cautions 实战级、每批先回填 docs/04。H-8 为 Fable 终审抽检协议。
+- **交接给**：**Opus 4.8 —— 从 TODO-opus.md 第十三轮 H-1（清理与草稿抢救）开始**
 
 ---
 

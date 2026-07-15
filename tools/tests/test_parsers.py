@@ -74,3 +74,42 @@ def test_field_refs_ignores_strings_and_funcs():
     assert "load1" in refs and "cores" in refs
     assert "count" not in refs        # 函数名不算字段
     assert "var" not in refs          # 字符串字面量内的词不算字段
+
+
+# ---------- H-0 通用解析器族（Fable 金标准） ----------
+def test_generic_kv_num():
+    import parsers
+    p = parsers.get_parser("generic/kv-num-v1")
+    out = p("Total Sessions: 1,234\nActive-Workers = 56\nname: foo\nusage 87%")
+    o = out["output"]
+    assert o["total_sessions"] == 1234
+    assert o["active_workers"] == 56
+    assert o["usage"] == 87
+    assert "name" not in o          # 非数值行忽略
+
+
+def test_generic_count():
+    import parsers
+    p = parsers.get_parser("generic/count-v1")
+    out = p("line-a\nline-b\n42 things\n")
+    assert out["output"]["count"] == 3
+    assert out["output"]["value"] == 42
+    assert parsers.get_parser("generic/count-v1")("")["output"]["count"] == 0
+
+
+def test_generic_table():
+    import parsers
+    p = parsers.get_parser("generic/table-v1")
+    out = p("NAME   CPU%  PATH\nweb-1  93    /var/lib/app data\ndb-2   7     /srv")
+    rows = out["rows"]
+    assert rows[0]["name"] == "web-1" and rows[0]["cpu"] == 93
+    assert rows[0]["path"] == "/var/lib/app data"   # 多余列并入末列
+    assert out["output"]["row_count"] == 2
+
+
+def test_generic_parsers_have_no_field_decl():
+    """定义上无字段声明 → FIELD 静态检查跳过（B12 的取舍，防误声明）。"""
+    import parsers
+    for name in ("generic/kv-num-v1", "generic/count-v1", "generic/table-v1"):
+        assert parsers.get_parser(name) is not None
+        assert parsers.get_fields(name) is None
