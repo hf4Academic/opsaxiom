@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.cpu.irq-storm
+  name: 中断风暴排查(软/硬中断打高 CPU)
+  taxonomy: host/cpu/irq-storm
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_softirq
+  nodes:
+  - id: check_softirq
+    type: check
+    title: 查软中断 CPU 占比
+    run:
+      linux: top -bn1 2>/dev/null | awk '/%Cpu/{gsub(/[^0-9. ]/,""); print "si", $NF}'
+        | head -1
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.si > 20
+      goto: check_irqbalance
+    - when: output.si <= 20
+      goto: done_si_ok
+    otherwise: check_irqbalance
+    cautions:
+    - 软中断(si)高常因网卡收发大量小包、单队列没做 RSS 多队列、或中断全落在一个核;现象常是'一个 CPU 核 100% 全在 si,其余核闲'——看是否中断没打散
+  - id: check_irqbalance
+    type: check
+    title: 看中断是否集中在单核(未均衡)
+    run:
+      linux: systemctl is-active irqbalance 2>/dev/null | grep -ic '^active'
+    parser: generic/count-v1
+    branch:
+    - when: output.value == 0
+      goto: done_no_irqbalance
+    - when: output.value > 0
+      goto: done_irq_tune
+    otherwise: escalate
+    cautions:
+    - irqbalance 没跑,中断容易全压在 CPU0;但高性能网卡场景反而要手动绑核(关 irqbalance+手工 affinity)——先看当前是哪种,别盲目开关
+  - id: done_si_ok
+    type: done
+    summary: 软中断占比不高。CPU 卡另查(us/sy 高/负载/steal/具体进程)。
+  - id: done_no_irqbalance
+    type: done
+    summary: irqbalance 未运行,中断可能集中单核。启用 irqbalance 打散中断,或针对网卡开 RSS 多队列并手工绑核;缓解单核 si
+      打满导致的丢包/卡顿。
+  - id: done_irq_tune
+    type: done
+    summary: irqbalance 在跑但 si 仍高,多为收包量大或单队列瓶颈。给网卡开多队列(RSS/RPS)、调大 ring buffer、开 GRO;高吞吐场景考虑手工中断绑核到多个
+      CPU。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-cpu-irq-storm-auto
+  expect_path:
+  - check_softirq
+  - check_irqbalance
+  - done_no_irqbalance
+feedback:
+  ask: 中断风暴排查(软/硬中断打高 CPU)定位了吗？

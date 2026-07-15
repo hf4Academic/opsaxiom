@@ -1,0 +1,17 @@
+skill: skills/host/ephemeral-port-exhausted/skill.yaml
+scenario: host.network-stack.ephemeral-port-exhausted 自动求解走查
+expect_path:
+- check_count
+- check_timewait
+- done_timewait_heavy
+node_ctx:
+  check_count:
+    output:
+      value: 25001
+    rows:
+    - {}
+  check_timewait:
+    output:
+      value: 10001
+    rows:
+    - {}

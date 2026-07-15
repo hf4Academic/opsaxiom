@@ -1,0 +1,17 @@
+skill: skills/host/entropy-low/skill.yaml
+scenario: host.system.entropy-low 自动求解走查
+expect_path:
+- check_entropy
+- check_rng
+- done_rng_running
+node_ctx:
+  check_entropy:
+    output:
+      entropy: 255
+    rows:
+    - {}
+  check_rng:
+    output:
+      value: 1
+    rows:
+    - {}

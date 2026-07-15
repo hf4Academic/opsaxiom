@@ -1,0 +1,17 @@
+skill: skills/host/numa-imbalance/skill.yaml
+scenario: host.memory.numa-imbalance 自动求解走查
+expect_path:
+- check_foreign
+- check_free
+- done_imbalanced
+node_ctx:
+  check_foreign:
+    output:
+      foreign: 1000001
+    rows:
+    - {}
+  check_free:
+    output:
+      value: 2
+    rows:
+    - {}

@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.cpu.cgroup-throttle
+  name: cgroup CPU 限流排查(容器算力上不去)
+  taxonomy: host/cpu/cgroup-throttle
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_throttled
+  nodes:
+  - id: check_throttled
+    type: check
+    title: 查 cgroup CFS 被限流次数
+    run:
+      linux: cat /sys/fs/cgroup/cpu.stat 2>/dev/null | awk '/nr_throttled/{print "throttled",
+        $2}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.throttled > 0
+      goto: check_periods
+    - when: output.throttled <= 0
+      goto: done_no_throttle
+    otherwise: check_periods
+    cautions:
+    - nr_throttled 增长=进程在 CFS 周期内用完配额被强制暂停到下周期,表现为周期性卡顿/毛刺,哪怕整机 CPU 还很闲——这是'限额'不是'没资源',别去查整机负载
+  - id: check_periods
+    type: check
+    title: 看被限流的时间占比是否高
+    run:
+      linux: cat /sys/fs/cgroup/cpu.stat 2>/dev/null | awk '/throttled_usec|throttled_time/{print
+        "tusec", $2}' | head -1
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.tusec > 1000000
+      goto: done_heavy_throttle
+    - when: output.tusec <= 1000000
+      goto: done_light_throttle
+    otherwise: escalate
+    cautions:
+    - 限流时间占比高说明 limit 设得对业务太紧;调大 cpu.max/limits.cpu 或放宽配额,多线程应用还要注意配额和线程数匹配(配额小但线程多,极易频繁触顶)
+  - id: done_no_throttle
+    type: done
+    summary: 无 CFS 限流。容器慢另查(整机负载/内存/IO/应用自身/其它 cgroup 控制器)。
+  - id: done_heavy_throttle
+    type: done
+    summary: 严重 CPU 限流,配额对业务太紧。调大容器 CPU limit/cpu.max,或减少并发线程数与配额匹配;整机有余量时适度放宽,消除周期性毛刺。
+  - id: done_light_throttle
+    type: done
+    summary: 轻度限流,偶发触顶。观察是否业务峰值短暂超配额;若毛刺可接受可不动,否则小幅上调配额留出余量,避免峰值被 CFS 掐。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-cpu-cgroup-throttle-auto
+  expect_path:
+  - check_throttled
+  - check_periods
+  - done_heavy_throttle
+feedback:
+  ask: cgroup CPU 限流排查(容器算力上不去)定位了吗？

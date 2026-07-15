@@ -1,0 +1,17 @@
+skill: skills/host/disk-io-error/skill.yaml
+scenario: host.storage.disk-io-error 自动求解走查
+expect_path:
+- check_dmesg
+- check_ro
+- done_fs_readonly
+node_ctx:
+  check_dmesg:
+    output:
+      value: 1
+    rows:
+    - {}
+  check_ro:
+    output:
+      value: 1
+    rows:
+    - {}

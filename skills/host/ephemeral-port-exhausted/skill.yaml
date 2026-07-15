@@ -1,0 +1,76 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.network-stack.ephemeral-port-exhausted
+  name: 临时端口耗尽排查(连不出去)
+  taxonomy: host/network-stack/ephemeral-port-exhausted
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_count
+  nodes:
+  - id: check_count
+    type: check
+    title: 查出方向连接占用的端口数
+    run:
+      linux: ss -tanH state established state time-wait 2>/dev/null | wc -l
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 25000
+      goto: check_timewait
+    - when: output.value <= 25000
+      goto: done_ports_ok
+    otherwise: check_timewait
+    cautions:
+    - 主动发起连接用的是临时端口(ip_local_port_range,默认约 2.8 万个);高并发短连接把它们占满(尤其大量 TIME_WAIT)就会
+      EADDRNOTAVAIL——连不出去不代表对端有问题
+  - id: check_timewait
+    type: check
+    title: 看是否大量 TIME_WAIT 占着端口
+    run:
+      linux: ss -tanH state time-wait 2>/dev/null | wc -l
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 10000
+      goto: done_timewait_heavy
+    - when: output.value <= 10000
+      goto: done_range_small
+    otherwise: escalate
+    cautions:
+    - TIME_WAIT 是主动关闭方留的 2MSL 状态,短连接风暴下堆积很快;可开 tw_reuse(客户端侧)、扩大 port_range、或改用长连接/连接池从根上减少端口消耗
+  - id: done_ports_ok
+    type: done
+    summary: 临时端口占用不高。连不出去另查(目标端口/防火墙/路由/DNS/对端拒绝)。
+  - id: done_timewait_heavy
+    type: done
+    summary: 大量 TIME_WAIT 占满临时端口。客户端开 net.ipv4.tcp_tw_reuse、扩大 ip_local_port_range;根治是改长连接/连接池,减少短连接创建销毁频率。
+  - id: done_range_small
+    type: done
+    summary: 端口紧张但 TIME_WAIT 不多,可能是并发连接确实多或 port_range 太窄。扩大 ip_local_port_range、复用连接;确认没有连接泄漏(建了不关)。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-network-stack-ephemeral-port-exhausted-auto
+  expect_path:
+  - check_count
+  - check_timewait
+  - done_timewait_heavy
+feedback:
+  ask: 临时端口耗尽排查(连不出去)定位了吗？

@@ -1,0 +1,17 @@
+skill: skills/host/irq-storm/skill.yaml
+scenario: host.cpu.irq-storm 自动求解走查
+expect_path:
+- check_softirq
+- check_irqbalance
+- done_no_irqbalance
+node_ctx:
+  check_softirq:
+    output:
+      si: 21
+    rows:
+    - {}
+  check_irqbalance:
+    output:
+      value: 0
+    rows:
+    - {}

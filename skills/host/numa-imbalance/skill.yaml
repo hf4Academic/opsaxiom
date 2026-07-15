@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.memory.numa-imbalance
+  name: NUMA 内存不均衡排查
+  taxonomy: host/memory/numa-imbalance
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_foreign
+  nodes:
+  - id: check_foreign
+    type: check
+    title: 查跨 NUMA 节点访问计数
+    run:
+      linux: numastat 2>/dev/null | awk '/numa_foreign/{s=0; for(i=2;i<=NF;i++)s+=$i;
+        print "foreign", s}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.foreign > 1000000
+      goto: check_free
+    - when: output.foreign <= 1000000
+      goto: done_numa_ok
+    otherwise: check_free
+    cautions:
+    - numa_foreign 高=进程在别的节点分了内存(本地节点不够),跨节点访问延迟高一截;大内存进程(DB/JVM)没做 NUMA 亲和时最容易踩
+  - id: check_free
+    type: check
+    title: 看各节点空闲内存是否悬殊
+    run:
+      linux: numactl -H 2>/dev/null | grep -c 'node [0-9]* free'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 1
+      goto: done_imbalanced
+    - when: output.value <= 1
+      goto: done_single_node
+    otherwise: escalate
+    cautions:
+    - 单节点内存被某进程吃满、另一节点空闲,会触发跨节点分配甚至该节点内的回收抖动;绑 NUMA(numactl --membind/--cpunodebind)或交给自动均衡要按业务权衡
+  - id: done_numa_ok
+    type: done
+    summary: 跨节点访问不高。内存慢另查(带宽/大页/交换/具体进程访存模式)。
+  - id: done_imbalanced
+    type: done
+    summary: NUMA 节点间不均衡致跨节点访问。给大内存进程做 NUMA 亲和(numactl 绑 CPU+内存到同节点)、或按节点均分负载;数据库/JVM
+      尤其受益于亲和绑定。
+  - id: done_single_node
+    type: done
+    summary: 疑似单节点或数据不足。确认机器是否真多 NUMA 节点;若是,核对进程内存策略(interleave vs bind),避免关键进程内存溢到远端节点。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-memory-numa-imbalance-auto
+  expect_path:
+  - check_foreign
+  - check_free
+  - done_imbalanced
+feedback:
+  ask: NUMA 内存不均衡排查定位了吗？

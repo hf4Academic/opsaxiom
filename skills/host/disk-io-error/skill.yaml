@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.storage.disk-io-error
+  name: 磁盘 I/O 错误排查(坏道/介质错误)
+  taxonomy: host/storage/disk-io-error
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_dmesg
+  nodes:
+  - id: check_dmesg
+    type: check
+    title: 查内核 I/O 错误日志
+    run:
+      linux: dmesg 2>/dev/null | grep -icE 'I/O error|Medium Error|critical medium|blk_update_request|EXT4-fs
+        error|XFS.*error'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_ro
+    - when: output.value == 0
+      goto: done_no_ioerr
+    otherwise: check_ro
+    cautions:
+    - 内核 I/O error/Medium Error 是硬盘物理层报上来的,基本坐实介质/坏道问题——别只重试,继续读写坏道可能扩大损坏,且文件系统可能已受损
+  - id: check_ro
+    type: check
+    title: 看文件系统是否已被踢成只读
+    run:
+      linux: mount 2>/dev/null | grep -c 'ro,\|(ro)\| ro '
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_fs_readonly
+    - when: output.value == 0
+      goto: done_io_error
+    otherwise: escalate
+    cautions:
+    - 文件系统检测到错误会自我保护重挂为只读(errors=remount-ro),此时业务写全失败;重挂读写前必须先 fsck 修复,盲目 remount
+      rw 可能加剧损坏
+  - id: done_no_ioerr
+    type: done
+    summary: 无内核 I/O 错误。读写报错另查(权限/空间/inode/挂载/上层应用)。
+  - id: done_fs_readonly
+    type: done
+    summary: 文件系统因 I/O 错误被踢成只读(自我保护)。先备份可读数据,卸载后 fsck 修复;结合 SMART 判断磁盘是否需更换,坏盘不要继续投产。
+  - id: done_io_error
+    type: done
+    summary: 有 I/O 错误但 FS 尚可写。尽快备份数据、查 SMART 确认磁盘健康(见 host.storage.smart-failing)、规划换盘;坏道会扩散,别拖到
+      FS 崩。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-storage-disk-io-error-auto
+  expect_path:
+  - check_dmesg
+  - check_ro
+  - done_fs_readonly
+feedback:
+  ask: 磁盘 I/O 错误排查(坏道/介质错误)定位了吗？

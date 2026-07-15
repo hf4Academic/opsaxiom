@@ -88,6 +88,14 @@
 > 已有金标准的叶子标 ⭐。归属存疑的场景见 `docs/_inbox.md`。
 
 ### 5.1 host
+**host（H-push 第四批）**
+- `host/cpu/irq-storm` — "软/硬中断打高 CPU/si 满一个核/收包丢包"
+- `host/cpu/cgroup-throttle` — "容器 CPU 被 CFS 限流/nr_throttled 涨/周期性卡顿"
+- `host/memory/numa-imbalance` — "NUMA 节点内存不均/跨节点访问慢"
+- `host/storage/disk-io-error` — "dmesg I/O error/坏道/FS 被踢只读"
+- `host/network-stack/ephemeral-port-exhausted` — "临时端口耗尽/EADDRNOTAVAIL/连不出去"
+- `host/system/entropy-low` — "熵池不足/启动或 TLS 握手卡/getrandom 阻塞"
+
 **host/cpu**
 - `host/cpu/load-high` — "机器很卡/负载飙到几十/uptime 一堆"
 - `host/cpu/steal-high` — "云主机 CPU 被偷/st 很高/性能忽高忽低"

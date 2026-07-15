@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.system.entropy-low
+  name: 熵池不足排查(加密/启动卡)
+  taxonomy: host/system/entropy-low
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_entropy
+  nodes:
+  - id: check_entropy
+    type: check
+    title: 查可用熵值
+    run:
+      linux: cat /proc/sys/kernel/random/entropy_avail 2>/dev/null | awk '{print "entropy",
+        $1}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.entropy < 256
+      goto: check_rng
+    - when: output.entropy >= 256
+      goto: done_entropy_ok
+    otherwise: check_rng
+    cautions:
+    - 熵池过低时,阻塞式随机源(老内核 /dev/random、getrandom 早期启动)会等到攒够熵才返回,表现为'启动/握手莫名卡几十秒';虚拟机/无硬件熵源的环境尤其常见
+  - id: check_rng
+    type: check
+    title: 看是否有熵补充服务
+    run:
+      linux: systemctl is-active rng-tools rngd haveged 2>/dev/null | grep -ic '^active'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_rng_running
+    - when: output.value == 0
+      goto: done_no_rng
+    otherwise: escalate
+    cautions:
+    - 现代内核(5.x+)的 CRNG 一旦初始化就不再阻塞,熵低多不再是问题;但老内核/特殊场景仍需haveged 或硬件 RNG(rng-tools 接
+      /dev/hwrng)补熵
+  - id: done_entropy_ok
+    type: done
+    summary: 可用熵充足。启动/握手卡另查(DNS 反解超时、依赖服务、磁盘 IO)。
+  - id: done_no_rng
+    type: done
+    summary: 熵低且无补熵服务。装并启用 haveged 或 rng-tools(有硬件 RNG 时接 /dev/hwrng);虚拟机可用 virtio-rng
+      透传宿主熵源,消除加密操作的阻塞。
+  - id: done_rng_running
+    type: done
+    summary: 已有补熵服务但熵仍低,确认它是否真在补(haveged 质量/rngd 数据源)、内核版本是否老到会阻塞;新内核基本无需担心,老环境则加强熵源。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-system-entropy-low-auto
+  expect_path:
+  - check_entropy
+  - check_rng
+  - done_rng_running
+feedback:
+  ask: 熵池不足排查(加密/启动卡)定位了吗？
