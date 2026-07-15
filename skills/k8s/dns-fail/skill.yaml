@@ -5,7 +5,7 @@ metadata:
   name: 集群内 DNS 解析失败排查（CoreDNS）
   taxonomy: k8s/networking/dns-fail
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms:
   - {platform: kubernetes}
   authors: [opsagent-core]

@@ -5,7 +5,7 @@ metadata:
   name: TLS 证书到期巡检
   taxonomy: host/system/cert-expiry
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms:
   - {os: linux}
   authors: [opsagent-core]

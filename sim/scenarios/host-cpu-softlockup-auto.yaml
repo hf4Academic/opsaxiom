@@ -1,0 +1,17 @@
+skill: skills/host/softlockup/skill.yaml
+scenario: host.cpu.softlockup 自动求解走查
+expect_path:
+- confirm_lockup
+- soft_lockup_analyze
+- lock_contention_exit
+node_ctx:
+  confirm_lockup:
+    rows:
+    - {}
+    lines:
+    - soft lockup
+  soft_lockup_analyze:
+    rows:
+    - {}
+    lines:
+    - spin_lock

@@ -1,0 +1,18 @@
+skill: skills/network/stp-loop/skill.yaml
+scenario: network.switching.stp-loop 自动求解走查
+expect_path:
+- check_symptoms
+- check_stp
+- stp_broken_exit
+node_ctx:
+  check_symptoms:
+    rows:
+    - {}
+    interfaces:
+    - broadcast_pps: 10001
+  check_stp:
+    output:
+      inconsistent_ports: 1
+    rows:
+    - {}
+    inconsistent_ports: 1

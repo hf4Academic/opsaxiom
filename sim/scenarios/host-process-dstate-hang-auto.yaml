@@ -1,0 +1,15 @@
+skill: skills/host/dstate-hang/skill.yaml
+scenario: host.process.dstate-hang 自动求解走查
+expect_path:
+- find_dstate
+- inspect_wchan
+- nfs_exit
+node_ctx:
+  find_dstate:
+    rows:
+    - {}
+  inspect_wchan:
+    rows:
+    - {}
+    lines:
+    - nfs

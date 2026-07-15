@@ -5,7 +5,7 @@ metadata:
   name: 光模块告警排查（光功率异常）
   taxonomy: network/physical/optic-fault
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms: [{device: cisco_ios}, {device: huawei_vrp}, {device: junos}]
   params:
     - {name: intf, source: alert, desc: 告警接口名}

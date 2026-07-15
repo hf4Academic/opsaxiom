@@ -1,0 +1,14 @@
+skill: skills/network/bgp-neighbor-down/skill.yaml
+scenario: network.routing.bgp.neighbor-down 自动求解走查
+expect_path:
+- peer_state
+- admin_shutdown_found
+node_ctx:
+  peer_state:
+    output:
+      state: Idle
+      admin_state: shutdown
+    rows:
+    - {}
+    state: Idle
+    admin_state: shutdown

@@ -1,0 +1,11 @@
+skill: skills/host/cert-expiry/skill.yaml
+scenario: host.system.cert-expiry 自动求解走查
+expect_path:
+- read_expiry
+- expired_exit
+node_ctx:
+  read_expiry:
+    rows:
+    - {}
+    lines:
+    - EXPIRED

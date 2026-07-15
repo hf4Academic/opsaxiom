@@ -1,0 +1,19 @@
+skill: skills/k8s/rollback/skill.yaml
+scenario: k8s.release.rollback 自动求解走查
+expect_path:
+- assess_current
+- identify_target
+- do_rollback
+- done_ok
+node_ctx:
+  assess_current:
+    output:
+      revision_count: 2
+    rows:
+    - {}
+    revision_count: 2
+  identify_target:
+    rows:
+    - {}
+    lines:
+    - Image

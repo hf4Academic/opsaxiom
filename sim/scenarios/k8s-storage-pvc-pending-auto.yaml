@@ -1,0 +1,11 @@
+skill: skills/k8s/pvc-pending/skill.yaml
+scenario: k8s.storage.pvc-pending 自动求解走查
+expect_path:
+- read_pvc_event
+- no_pv_exit
+node_ctx:
+  read_pvc_event:
+    rows:
+    - {}
+    lines:
+    - no persistent volumes available

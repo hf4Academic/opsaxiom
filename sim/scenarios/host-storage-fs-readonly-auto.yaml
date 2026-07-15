@@ -1,0 +1,10 @@
+skill: skills/host/fs-readonly/skill.yaml
+scenario: host.storage.fs-readonly 自动求解走查
+expect_path:
+- confirm_ro
+- not_ro
+node_ctx:
+  confirm_ro:
+    rows:
+    - {}
+    lines: []

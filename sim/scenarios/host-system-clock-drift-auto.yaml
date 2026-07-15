@@ -1,0 +1,17 @@
+skill: skills/host/clock-drift/skill.yaml
+scenario: host.system.clock-drift 自动求解走查
+expect_path:
+- check_sync
+- check_daemon
+- start_timesync
+- done_ok
+node_ctx:
+  check_sync:
+    rows:
+    - {}
+    lines:
+    - NTP=no
+  check_daemon:
+    rows:
+    - {}
+    lines: []

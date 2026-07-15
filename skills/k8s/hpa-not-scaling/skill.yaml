@@ -5,7 +5,7 @@ metadata:
   name: HPA 不扩容排查
   taxonomy: k8s/release/hpa-not-scaling
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms:
   - {platform: kubernetes}
   authors: [opsagent-core]

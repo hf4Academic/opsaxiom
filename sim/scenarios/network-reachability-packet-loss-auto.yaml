@@ -1,0 +1,12 @@
+skill: skills/network/packet-loss/skill.yaml
+scenario: network.reachability.packet-loss 自动求解走查
+expect_path:
+- quantify_loss
+- full_loss_exit
+node_ctx:
+  quantify_loss:
+    output:
+      loss_pct: 100
+    rows:
+    - {}
+    loss_pct: 100

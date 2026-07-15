@@ -1,0 +1,17 @@
+skill: skills/host/raid-degraded/skill.yaml
+scenario: host.storage.raid-degraded 自动求解走查
+expect_path:
+- detect_type
+- check_mdstat
+- rebuilding_exit
+node_ctx:
+  detect_type:
+    rows:
+    - {}
+    lines:
+    - SOFT_RAID
+  check_mdstat:
+    rows:
+    - {}
+    lines:
+    - recovery

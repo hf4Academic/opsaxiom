@@ -5,7 +5,7 @@ metadata:
   name: 丢包逐跳定位
   taxonomy: network/reachability/packet-loss
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms: [{device: cisco_ios}, {device: huawei_vrp}, {device: junos}]
   params:
     - {name: dst, source: alert, desc: 目标地址}

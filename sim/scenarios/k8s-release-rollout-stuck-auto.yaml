@@ -1,0 +1,18 @@
+skill: skills/k8s/rollout-stuck/skill.yaml
+scenario: k8s.release.rollout-stuck 自动求解走查
+expect_path:
+- locate_stuck
+- new_pods_not_starting
+- quota_exit
+node_ctx:
+  locate_stuck:
+    output:
+      updated_replicas: 0
+    rows:
+    - {}
+    updated_replicas: 0
+  new_pods_not_starting:
+    rows:
+    - {}
+    lines:
+    - quota

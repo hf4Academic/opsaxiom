@@ -1,0 +1,19 @@
+skill: skills/network/acl-block/skill.yaml
+scenario: network.security-policy.acl-block 自动求解走查
+expect_path:
+- find_applied_acl
+- check_hits
+- deny_hit_exit
+node_ctx:
+  find_applied_acl:
+    output:
+      applied_acls: true
+    rows:
+    - {}
+    applied_acls: true
+  check_hits:
+    output:
+      deny_hit_count: 1
+    rows:
+    - {}
+    deny_hit_count: 1

@@ -1,0 +1,14 @@
+skill: skills/network/interface-errors/skill.yaml
+scenario: network.physical.interface-errors 自动求解走查
+expect_path:
+- read_errors
+- stale_counters_exit
+node_ctx:
+  read_errors:
+    output:
+      input_errors: true
+      crc_errors: true
+    rows:
+    - {}
+    input_errors: true
+    crc_errors: true

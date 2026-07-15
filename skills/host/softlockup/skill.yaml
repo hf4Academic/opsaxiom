@@ -5,7 +5,7 @@ metadata:
   name: 内核 soft/hard lockup 排查
   taxonomy: host/cpu/softlockup
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms:
   - {os: linux}
   authors: [opsagent-core]

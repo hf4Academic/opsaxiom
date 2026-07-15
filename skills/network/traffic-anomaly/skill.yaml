@@ -5,7 +5,7 @@ metadata:
   name: 流量异常定位（带宽打满/突发）
   taxonomy: network/traffic/anomaly-detect
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms: [{device: cisco_ios}, {device: huawei_vrp}, {device: junos}]
   params:
     - {name: intf, source: alert, desc: 告警接口}

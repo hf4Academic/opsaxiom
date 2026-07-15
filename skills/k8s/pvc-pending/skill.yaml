@@ -5,7 +5,7 @@ metadata:
   name: PVC 一直 Pending / 绑不上 PV 排查
   taxonomy: k8s/storage/pvc-pending
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms:
   - {platform: kubernetes}
   authors: [opsagent-core]

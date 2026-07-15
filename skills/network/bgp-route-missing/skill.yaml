@@ -5,7 +5,7 @@ metadata:
   name: BGP 收不到路由排查
   taxonomy: network/routing/bgp-route-missing
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms: [{device: cisco_ios}, {device: huawei_vrp}, {device: junos}]
   params:
     - {name: peer_ip, source: alert, desc: BGP 邻居}

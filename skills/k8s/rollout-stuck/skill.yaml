@@ -5,7 +5,7 @@ metadata:
   name: 发布卡住 / rollout 不推进排查
   taxonomy: k8s/release/rollout-stuck
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms:
   - {platform: kubernetes}
   authors: [opsagent-core]

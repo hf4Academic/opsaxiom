@@ -1,0 +1,18 @@
+skill: skills/host/systemd-unit-failed/skill.yaml
+scenario: host.system.systemd-unit-failed 自动求解走查
+expect_path:
+- read_state
+- read_logs
+- perm_exit
+node_ctx:
+  read_state:
+    output:
+      result: true
+    rows:
+    - {}
+    result: true
+  read_logs:
+    rows:
+    - {}
+    lines:
+    - Permission denied

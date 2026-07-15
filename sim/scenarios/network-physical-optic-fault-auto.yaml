@@ -1,0 +1,12 @@
+skill: skills/network/optic-fault/skill.yaml
+scenario: network.physical.optic-fault 自动求解走查
+expect_path:
+- read_optics
+- no_light_exit
+node_ctx:
+  read_optics:
+    output:
+      rx_power_dbm: -31
+    rows:
+    - {}
+    rx_power_dbm: -31

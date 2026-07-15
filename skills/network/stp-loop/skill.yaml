@@ -5,7 +5,7 @@ metadata:
   name: 二层环路/广播风暴排查（STP）
   taxonomy: network/switching/stp-loop
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms: [{device: cisco_ios}, {device: huawei_vrp}, {device: junos}]
   params:
     - {name: vlan_id, source: user, desc: 疑似环路 VLAN}

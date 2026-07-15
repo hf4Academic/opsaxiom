@@ -1,0 +1,11 @@
+skill: skills/k8s/dns-fail/skill.yaml
+scenario: k8s.networking.dns-fail 自动求解走查
+expect_path:
+- scope_dns
+- coredns_unhealthy_exit
+node_ctx:
+  scope_dns:
+    rows:
+    - {}
+    lines:
+    - 'false'

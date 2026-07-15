@@ -1,0 +1,19 @@
+skill: skills/network/mtu-blackhole/skill.yaml
+scenario: network.reachability.mtu-blackhole 自动求解走查
+expect_path:
+- test_small
+- test_large
+- mtu_confirmed_exit
+node_ctx:
+  test_small:
+    output:
+      loss_pct: 0
+    rows:
+    - {}
+    loss_pct: 0
+  test_large:
+    output:
+      loss_pct: 100
+    rows:
+    - {}
+    loss_pct: 100

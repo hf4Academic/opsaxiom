@@ -5,7 +5,7 @@ metadata:
   name: ACL 拦截排查（诊断到边界，不改策略）
   taxonomy: network/security-policy/acl-block
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms: [{device: cisco_ios}, {device: huawei_vrp}, {device: junos}]
   params:
     - {name: intf, source: alert, desc: 涉及接口}

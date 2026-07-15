@@ -1,0 +1,12 @@
+skill: skills/network/bgp-route-missing/skill.yaml
+scenario: network.routing.bgp-route-missing 自动求解走查
+expect_path:
+- check_session
+- session_down_exit
+node_ctx:
+  check_session:
+    output:
+      state: true
+    rows:
+    - {}
+    state: true

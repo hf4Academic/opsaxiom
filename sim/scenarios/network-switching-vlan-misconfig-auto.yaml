@@ -1,0 +1,14 @@
+skill: skills/network/vlan-misconfig/skill.yaml
+scenario: network.switching.vlan-misconfig 自动求解走查
+expect_path:
+- vlan_exists
+- check_trunk
+- trunk_not_allowed_exit
+node_ctx:
+  vlan_exists:
+    rows:
+    - {}
+  check_trunk:
+    rows:
+    - {}
+    allowed_vlans: []

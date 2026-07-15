@@ -1,0 +1,16 @@
+skill: skills/network/traffic-anomaly/skill.yaml
+scenario: network.traffic.anomaly-detect 自动求解走查
+expect_path:
+- confirm_saturation
+- outbound_exit
+node_ctx:
+  confirm_saturation:
+    output:
+      util: 91
+      direction_out: true
+      direction_in: true
+    rows:
+    - {}
+    util: 91
+    direction_out: true
+    direction_in: true

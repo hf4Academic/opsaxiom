@@ -1,0 +1,12 @@
+skill: skills/network/ospf-adjacency-stuck/skill.yaml
+scenario: network.routing.ospf-adjacency-stuck 自动求解走查
+expect_path:
+- read_state
+- init_exit
+node_ctx:
+  read_state:
+    output:
+      state: Init
+    rows:
+    - {}
+    state: Init

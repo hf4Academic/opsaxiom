@@ -1,0 +1,16 @@
+skill: skills/host/timewait-flood/skill.yaml
+scenario: host.network-stack.timewait-flood 自动求解走查
+expect_path:
+- measure
+- locate_direction
+- outbound_exhaust_exit
+node_ctx:
+  measure:
+    output:
+      timewait: 28001
+    rows:
+    - {}
+    timewait: 28001
+  locate_direction:
+    rows:
+    - count: 20001
