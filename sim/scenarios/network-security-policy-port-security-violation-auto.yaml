@@ -1,0 +1,17 @@
+skill: skills/network/port-security-violation/skill.yaml
+scenario: network.security-policy.port-security-violation 自动求解走查
+expect_path:
+- check_viol
+- check_mode
+- done_shutdown
+node_ctx:
+  check_viol:
+    output:
+      value: 1
+    rows:
+    - {}
+  check_mode:
+    output:
+      value: 1
+    rows:
+    - {}

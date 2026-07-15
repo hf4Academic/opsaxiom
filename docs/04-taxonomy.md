@@ -169,11 +169,14 @@
 - `network/routing/bgp-route-missing` — "BGP 收不到路由/前缀没通告过来"
 - `network/routing/ospf-adjacency-stuck` — "OSPF 邻居卡 ExStart/Init/邻接建不起来"
 - `network/routing/route-leak` — "路由泄漏/学到不该有的路由/环路风险"
+- `network/routing/vrrp-flapping` — "VRRP 主备频繁切换/网关时通时断"
 - `network/routing/default-route-missing` — "出不了外网/默认路由没了" — "默认路由丢了/出不去外网"
 
 **network/switching**
 - `network/switching/vlan-misconfig` — "VLAN 不通/跨交换机同网段不通/trunk 没放行"
 - `network/switching/stp-loop` — "网络风暴/环路/STP 震荡/端口反复 up down"
+- `network/switching/lacp-bond-degraded` — "聚合口带宽减半/LACP 协商失败"
+- `network/switching/trunk-vlan-mismatch` — "跨交换机某 VLAN 不通/trunk 允许列表不一致"
 - `network/switching/mac-flapping` — "MAC 地址漂移/同 MAC 多端口学习"
 - `network/switching/port-err-disabled` — "端口 err-disabled/被自动关闭"
 
@@ -185,6 +188,8 @@
 **network/security-policy**
 - `network/security-policy/acl-block` — "被 ACL 拦了/策略不通/加白名单"
 - `network/security-policy/nat-issue` — "NAT 不对/映射不通/源地址不对"
+- `network/security-policy/dhcp-snooping-drop` — "客户端拿不到 IP/DHCP 被丢"
+- `network/security-policy/port-security-violation` — "端口安全违规/接入不通"
 - `network/security-policy/firewall-session` — "防火墙会话满/策略命中排查"
 
 **network/traffic**

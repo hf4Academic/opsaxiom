@@ -1,0 +1,79 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.security-policy.port-security-violation
+  name: 端口安全违规排查
+  taxonomy: network/security-policy/port-security-violation
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_viol
+  nodes:
+  - id: check_viol
+    type: check
+    title: 查端口安全违规计数
+    run:
+      cisco_ios: show port-security | include Violation|Shutdown|Secure
+      huawei_vrp: display port-security | include violation|protect
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_mode
+    - when: output.value == 0
+      goto: done_no_viol
+    otherwise: check_mode
+    cautions:
+    - 违规动作三种：protect(丢包不告警)、restrict(丢包+告警)、shutdown(关端口)。shutdown 模式下违规会让端口 err-disabled，接入设备彻底不通
+  - id: check_mode
+    type: check
+    title: 看违规是否触发关端口
+    run:
+      cisco_ios: show port-security | include Shutdown
+      huawei_vrp: display port-security | include error-down|shutdown
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_shutdown
+    - when: output.value == 0
+      goto: done_dropping
+    otherwise: escalate
+    cautions:
+    - MAC 数超限最常见于端口下接了小交换机/hub(多个 MAC)，或做了虚拟化(多 VM MAC)——确认是否合法需求，是则调大 maximum，否则查私接
+  - id: done_no_viol
+    type: done
+    summary: 无端口安全违规。接入不通另查(VLAN/物理/认证)。
+  - id: done_shutdown
+    type: done
+    summary: 违规触发了端口关闭(err-disabled)。先确认超限 MAC 是否合法需求，合法则调大 maximum 或改违规动作为 restrict，再恢复端口；非法则查私接设备。
+  - id: done_dropping
+    type: done
+    summary: 违规在丢包(protect/restrict)但端口未关。同样先判 MAC 是否合法，调整 maximum 或清理私接；restrict
+      模式有告警可辅助定位。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-security-policy-port-security-violation-auto
+  expect_path:
+  - check_viol
+  - check_mode
+  - done_shutdown
+feedback:
+  ask: 端口安全违规排查定位了吗？

@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.switching.lacp-bond-degraded
+  name: 链路聚合(LACP/Eth-Trunk)降级排查
+  taxonomy: network/switching/lacp-bond-degraded
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_members
+  nodes:
+  - id: check_members
+    type: check
+    title: 查聚合组成员状态
+    run:
+      cisco_ios: show etherchannel summary | include Po|P)
+      huawei_vrp: display eth-trunk | include Up|Down|Selected
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_down
+    - when: output.value == 0
+      goto: escalate
+    otherwise: check_down
+    cautions:
+    - cisco 里成员口标志：P=bundled(在用)，独立字母如 s/w/D 都不在转发；华为看 Selected/Unselected，Unselected
+      成员不承载流量
+  - id: check_down
+    type: check
+    title: 看有无未加入聚合的成员
+    run:
+      cisco_ios: show etherchannel summary | include down|s -|w -
+      huawei_vrp: display eth-trunk | include Unselect|Down
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_member_down
+    - when: output.value == 0
+      goto: done_all_up
+    otherwise: escalate
+    cautions:
+    - 成员没加入聚合最常见两因：两端 LACP 模式不匹配(active/passive 都 passive)、或成员口速率/双工不一致。别只看物理 up——LACP
+      没协商成也不承载流量
+  - id: done_all_up
+    type: done
+    summary: 聚合成员均在转发。带宽问题另有原因(哈希不均导致单成员打满)，看各成员流量分布是否均衡、哈希算法是否适配流量特征。
+  - id: done_member_down
+    type: done
+    summary: 有成员未加入聚合导致带宽降级。核对两端 LACP 模式(至少一端 active)、成员口速率双工一致、以及是否被 err-disabled；修复后成员会重新协商加入。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-switching-lacp-bond-degraded-auto
+  expect_path:
+  - check_members
+  - check_down
+  - done_member_down
+feedback:
+  ask: 链路聚合(LACP/Eth-Trunk)降级排查定位了吗？

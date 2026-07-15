@@ -30,3 +30,11 @@ prefixes:
   - show ip ospf neighbor
   - show ip arp
   - show interfaces status
+  # H-3 network batch2 扩展（Cisco IOS Command Reference，只读）
+  - show etherchannel
+  - show vrrp
+  - show standby
+  - show ip dhcp
+  - show port-security
+  - show interfaces trunk
+  - show ip dhcp snooping

@@ -25,3 +25,11 @@ prefixes:
   - display ip interface
   - display interface brief
   - display device
+  # H-3 network batch2 扩展（Huawei VRP Command Reference，只读）
+  - display eth-trunk
+  - display trunkmembership
+  - display vrrp
+  - display dhcp
+  - display port-security
+  - display dhcp snooping
+  - display port vlan

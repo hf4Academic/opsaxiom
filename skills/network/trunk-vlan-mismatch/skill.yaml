@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.switching.trunk-vlan-mismatch
+  name: Trunk 允许 VLAN 不一致排查
+  taxonomy: network/switching/trunk-vlan-mismatch
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_trunk
+  nodes:
+  - id: check_trunk
+    type: check
+    title: 查 trunk 允许的 VLAN 列表
+    run:
+      cisco_ios: show interfaces trunk
+      huawei_vrp: display port vlan | include trunk|hybrid
+    parser: generic/table-v1
+    branch:
+    - when: output.row_count > 0
+      goto: check_native
+    - when: output.row_count == 0
+      goto: done_no_trunk
+    otherwise: check_native
+    cautions:
+    - 某 VLAN 不通先看它在不在 trunk 允许列表里——两端 allowed vlan 必须都放行该 VLAN，少一端就断
+  - id: check_native
+    type: check
+    title: 查 native vlan 是否两端一致
+    run:
+      cisco_ios: show interfaces trunk | include native|Native
+      huawei_vrp: display port vlan | include default
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_check_native
+    - when: output.value == 0
+      goto: done_allowed_list
+    otherwise: escalate
+    cautions:
+    - native vlan 两端不一致会导致该 VLAN 流量错配且 CDP 会告警——这是 trunk 配置的经典坑
+  - id: done_no_trunk
+    type: done
+    summary: 该口不是 trunk(可能是 access)。跨交换机传多 VLAN 需配 trunk，确认拓扑与端口模式。
+  - id: done_allowed_list
+    type: done
+    summary: 核对 trunk 两端的 allowed vlan 列表——确保不通的那个 VLAN在两端都被放行；补齐缺失的一端。
+  - id: done_check_native
+    type: done
+    summary: native vlan 相关。确认 trunk 两端 native vlan 一致，不一致会造成 VLAN 流量错配，改成两端相同。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-switching-trunk-vlan-mismatch-auto
+  expect_path:
+  - check_trunk
+  - check_native
+  - done_check_native
+feedback:
+  ask: Trunk 允许 VLAN 不一致排查定位了吗？

@@ -1,0 +1,11 @@
+skill: skills/network/dhcp-snooping-drop/skill.yaml
+scenario: network.security-policy.dhcp-snooping-drop 自动求解走查
+expect_path:
+- check_snoop
+- done_snoop_drop
+node_ctx:
+  check_snoop:
+    output:
+      value: 1
+    rows:
+    - {}

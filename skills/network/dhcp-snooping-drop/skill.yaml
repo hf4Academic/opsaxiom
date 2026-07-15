@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.security-policy.dhcp-snooping-drop
+  name: DHCP 客户端拿不到地址排查(含 snooping)
+  taxonomy: network/security-policy/dhcp-snooping-drop
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_snoop
+  nodes:
+  - id: check_snoop
+    type: check
+    title: 查 DHCP snooping 是否拦截
+    run:
+      cisco_ios: show ip dhcp snooping | include drop|untrusted
+      huawei_vrp: display dhcp snooping | include drop|discard
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_snoop_drop
+    - when: output.value == 0
+      goto: check_relay
+    otherwise: check_relay
+    cautions:
+    - 接 DHCP 服务器的上行口必须配成 trusted，否则 snooping 会把服务器的 OFFER 当非法报文丢弃——这是启用 snooping 后最常见的'自己把自己坑了'
+  - id: check_relay
+    type: check
+    title: 查 DHCP 中继配置
+    run:
+      cisco_ios: show running-config | include ip helper-address
+      huawei_vrp: display current-configuration | include dhcp relay
+    parser: generic/count-v1
+    branch:
+    - when: output.value == 0
+      goto: done_no_relay
+    - when: output.value > 0
+      goto: done_relay_ok
+    otherwise: escalate
+    cautions:
+    - 跨网段的 DHCP 必须配中继(helper-address 指向 DHCP 服务器)；同网段直连才不需要
+  - id: done_snoop_drop
+    type: done
+    summary: DHCP snooping 在丢包。检查上行到 DHCP 服务器的端口是否配 trusted；非法源(私接的 DHCP 服务器)被拦是正常防护，定位并处理私接设备。
+  - id: done_no_relay
+    type: done
+    summary: 客户端与 DHCP 服务器跨网段但没配中继。在客户端网关接口配 ip helper-address 指向 DHCP 服务器地址。
+  - id: done_relay_ok
+    type: done
+    summary: 中继已配，问题可能在 DHCP 服务器侧(地址池耗尽/作用域不对)或路径不通。到服务器查地址池，并确认中继与服务器间双向可达。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-security-policy-dhcp-snooping-drop-auto
+  expect_path:
+  - check_snoop
+  - done_snoop_drop
+feedback:
+  ask: DHCP 客户端拿不到地址排查(含 snooping)定位了吗？

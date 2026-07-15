@@ -1,0 +1,76 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.routing.vrrp-flapping
+  name: VRRP 主备震荡排查
+  taxonomy: network/routing/vrrp-flapping
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_state
+  nodes:
+  - id: check_state
+    type: check
+    title: 查 VRRP 组状态与优先级
+    run:
+      cisco_ios: show vrrp brief
+      huawei_vrp: display vrrp brief
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_flap
+    - when: output.value == 0
+      goto: escalate
+    otherwise: check_flap
+    cautions:
+    - 两端都显示自己是 Master=脑裂，多因 VRRP 通告收不到(链路/ACL 挡了组播 224.0.0.18)
+  - id: check_flap
+    type: check
+    title: 查状态切换日志频率
+    run:
+      cisco_ios: show logging | include VRRP|Master|Backup
+      huawei_vrp: display logbuffer | include VRRP|MASTER|BACKUP
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 5
+      goto: done_flapping
+    - when: output.value <= 5
+      goto: done_stable
+    otherwise: escalate
+    cautions:
+    - 频繁切换常因：上行接口 track 抖动带动 VRRP 切、通告间隔/超时配置两端不一致、或抢占(preempt)配置引起反复夺主。别忽视 track
+      的联动
+  - id: done_stable
+    type: done
+    summary: VRRP 状态稳定。网关时断另查(ARP/上行/ACL)。
+  - id: done_flapping
+    type: done
+    summary: VRRP 频繁切换。排查三处：①上行 track 对象是否抖动；②两端通告间隔与超时是否一致；③是否 preempt 配置引起反复夺主(可关抢占或调优先级差)。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-routing-vrrp-flapping-auto
+  expect_path:
+  - check_state
+  - check_flap
+  - done_flapping
+feedback:
+  ask: VRRP 主备震荡排查定位了吗？
