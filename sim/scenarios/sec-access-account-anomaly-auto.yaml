@@ -1,0 +1,11 @@
+skill: skills/sec/account-anomaly/skill.yaml
+scenario: sec.access.account-anomaly 自动求解走查
+expect_path:
+- check_uid0
+- done_extra_root
+node_ctx:
+  check_uid0:
+    output:
+      value: 2
+    rows:
+    - {}

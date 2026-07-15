@@ -1,0 +1,76 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: sec.access.ssh-weak-config
+  name: SSH 弱配置审计
+  taxonomy: sec/access/ssh-weak-config
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_rootlogin
+  nodes:
+  - id: check_rootlogin
+    type: check
+    title: 查是否允许 root 直接登录
+    run:
+      linux: sshd -T 2>/dev/null | grep -ic '^permitrootlogin yes'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_root_allowed
+    - when: output.value == 0
+      goto: check_passwd
+    otherwise: check_passwd
+    cautions:
+    - 用 sshd -T 看'生效值'而非 grep 配置文件——Match 块/Include 会覆盖，直接读文件常误判;PermitRootLogin yes
+      让 root 成暴力破解首要目标,基线应为 no 或 prohibit-password
+  - id: check_passwd
+    type: check
+    title: 查是否允许密码登录
+    run:
+      linux: sshd -T 2>/dev/null | grep -ic '^passwordauthentication yes'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_passwd_on
+    - when: output.value == 0
+      goto: done_baseline_ok
+    otherwise: escalate
+    cautions:
+    - 开启密码登录=可被暴力破解/撞库;基线应仅用密钥(PasswordAuthentication no)。关之前务必先确认已配好可用密钥,否则会把自己锁在外面
+  - id: done_root_allowed
+    type: done
+    summary: 允许 root 直接登录(高风险)。改 PermitRootLogin 为 no/prohibit-password,改用普通账号+sudo;改前确认有可用的非
+      root 登录方式再重载 sshd。
+  - id: done_passwd_on
+    type: done
+    summary: root 已受限但仍允许密码登录。评估改为仅密钥认证(PasswordAuthentication no);先给相关账号配好密钥并验证可登录,再关闭密码认证,防止锁死。
+  - id: done_baseline_ok
+    type: done
+    summary: SSH 基线较好(禁 root 直登+禁密码)。可进一步核对算法套件、登录源限制(AllowUsers/防火墙)、失败重试与 MaxAuthTries。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: sec-access-ssh-weak-config-auto
+  expect_path:
+  - check_rootlogin
+  - done_root_allowed
+feedback:
+  ask: SSH 弱配置审计定位了吗？

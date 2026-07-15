@@ -1,0 +1,75 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: sec.integrity.suid-anomaly
+  name: 异常 SUID/SGID 文件审计
+  taxonomy: sec/integrity/suid-anomaly
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_suid_count
+  nodes:
+  - id: check_suid_count
+    type: check
+    title: 统计系统内 SUID 文件数
+    run:
+      linux: find /usr /bin /sbin /opt -xdev -perm -4000 -type f 2>/dev/null | wc
+        -l
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 40
+      goto: check_writable_dirs
+    - when: output.value <= 40
+      goto: check_writable_dirs
+    otherwise: check_writable_dirs
+    cautions:
+    - SUID 文件以属主权限运行,是提权的常见跳板;应与已知基线清单比对,重点看'不该有 SUID'的程序(如 shell 解释器、find、nmap、cp)——它们带
+      SUID 往往是被人为植入的提权后门
+  - id: check_writable_dirs
+    type: check
+    title: 查可疑位置(可写目录)下的 SUID 文件
+    run:
+      linux: find /tmp /var/tmp /dev/shm /home -xdev -perm -4000 -type f 2>/dev/null
+        | wc -l
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_suspicious_suid
+    - when: output.value == 0
+      goto: done_suid_baseline
+    otherwise: escalate
+    cautions:
+    - /tmp、/home、/dev/shm 这类用户可写目录里出现 SUID 文件几乎必然是恶意的——正常系统的 SUID 都在系统目录且属主 root,可写目录里的属高危,优先处置
+  - id: done_suspicious_suid
+    type: done
+    summary: 在用户可写目录发现 SUID 文件(高危,疑似提权后门)。隔离取证该文件(勿直接删,先留证),核实哈希/来历,清除并排查入侵链(是谁放的、怎么进来的)。
+  - id: done_suid_baseline
+    type: done
+    summary: 可写目录无异常 SUID。将系统目录 SUID 清单与基线比对,重点核对非标准程序;建立 SUID 基线并定期 diff,新增项及时审查。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: sec-integrity-suid-anomaly-auto
+  expect_path:
+  - check_suid_count
+  - check_writable_dirs
+  - done_suspicious_suid
+feedback:
+  ask: 异常 SUID/SGID 文件审计定位了吗？

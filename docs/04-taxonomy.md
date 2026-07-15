@@ -349,6 +349,11 @@
 - `sec/vuln/scan-triage` — "漏洞扫描结果解读/怎么修/优先级"
 - `sec/vuln/patch-verify` — "确认漏洞是否已修/补丁验证"
 - `sec/cert/expiry-inventory` — "证书到期巡检/全网证书清点"
+- `sec/access/ssh-weak-config` — "SSH 弱配置/允许 root 登录/密码登录"
+- `sec/access/account-anomaly` — "异常账号/空口令/UID 0 非 root"
+- `sec/integrity/suid-anomaly` — "异常 SUID 文件/提权后门排查"
+- `sec/network/unexpected-listen` — "异常监听端口/未预期对外服务"
+- `sec/audit/auditd-gap` — "审计日志断档/auditd 未运行/事件丢弃"
 
 ### 5.8 proc
 - `proc/change/ticket-gen` — "生成变更单/写变更申请"

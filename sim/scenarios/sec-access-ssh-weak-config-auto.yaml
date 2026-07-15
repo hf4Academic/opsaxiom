@@ -1,0 +1,11 @@
+skill: skills/sec/ssh-weak-config/skill.yaml
+scenario: sec.access.ssh-weak-config 自动求解走查
+expect_path:
+- check_rootlogin
+- done_root_allowed
+node_ctx:
+  check_rootlogin:
+    output:
+      value: 1
+    rows:
+    - {}

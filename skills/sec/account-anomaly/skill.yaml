@@ -1,0 +1,75 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: sec.access.account-anomaly
+  name: 异常账号审计
+  taxonomy: sec/access/account-anomaly
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_uid0
+  nodes:
+  - id: check_uid0
+    type: check
+    title: 查除 root 外的 UID 0 账号
+    run:
+      linux: 'awk -F: ''$3==0 {c++} END{print c+0}'' /etc/passwd 2>/dev/null'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 1
+      goto: done_extra_root
+    - when: output.value <= 1
+      goto: check_empty
+    otherwise: check_empty
+    cautions:
+    - UID 0 就是 root 权限——正常系统只应有 root 一个 UID 0;多出来的 UID 0 账号是典型的隐蔽后门(等同于第二个 root),必须核实来历
+  - id: check_empty
+    type: check
+    title: 查空口令可登录账号
+    run:
+      linux: 'awk -F: ''($2=="") {c++} END{print c+0}'' /etc/shadow 2>/dev/null'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_empty_pw
+    - when: output.value == 0
+      goto: done_accounts_ok
+    otherwise: escalate
+    cautions:
+    - shadow 里密码字段为空=无需密码即可认证,极危险;应立即锁定(passwd -l)或设强密码。区分'空口令'与'锁定(!/*)'——后者是正常的不可登录状态
+  - id: done_extra_root
+    type: done
+    summary: 存在非 root 的 UID 0 账号(等同隐藏 root/疑似后门)。立即核实该账号来历,确认非法则锁定/删除并排查入侵痕迹(登录日志/history/计划任务)。
+  - id: done_empty_pw
+    type: done
+    summary: 存在空口令可登录账号(高危)。立即 passwd -l 锁定或设强密码;核查该账号是否被滥用登录过,并排查是谁/何时创建的。
+  - id: done_accounts_ok
+    type: done
+    summary: 无多余 UID 0、无空口令账号。可进一步核对:新增账号、sudoers 授权范围、长期未用账号是否应禁用、shell 为登录 shell
+      的服务账号。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: sec-access-account-anomaly-auto
+  expect_path:
+  - check_uid0
+  - done_extra_root
+feedback:
+  ask: 异常账号审计定位了吗？

@@ -1,0 +1,74 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: sec.audit.auditd-gap
+  name: auditd 审计日志断档排查
+  taxonomy: sec/audit/auditd-gap
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_running
+  nodes:
+  - id: check_running
+    type: check
+    title: 查 auditd 是否在运行
+    run:
+      linux: systemctl is-active auditd 2>/dev/null | grep -ic '^active'
+    parser: generic/count-v1
+    branch:
+    - when: output.value == 0
+      goto: done_not_running
+    - when: output.value > 0
+      goto: check_lost
+    otherwise: check_lost
+    cautions:
+    - auditd 没运行=这段时间完全没有审计记录,合规和事后取证都断档;先确认服务状态,别默认'装了就一定在跑'
+  - id: check_lost
+    type: check
+    title: 查审计事件是否有丢弃(缓冲不足)
+    run:
+      linux: auditctl -s 2>/dev/null | awk '/^lost/{print "lost", $2}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.lost > 0
+      goto: done_events_lost
+    - when: output.lost == 0
+      goto: done_audit_ok
+    otherwise: escalate
+    cautions:
+    - lost 计数增长=审计事件产生太快、缓冲(backlog)装不下被丢——审计有洞;调大 -b backlog_limit,或收窄规则减少无关事件
+  - id: done_not_running
+    type: done
+    summary: auditd 未运行,审计断档。启动并设开机自启(systemctl enable --now auditd);排查它为何停(被关/崩溃/磁盘满),补齐关键审计规则。
+  - id: done_events_lost
+    type: done
+    summary: auditd 在跑但有事件丢弃(lost>0)。调大 backlog_limit(-b)、精简过泛的审计规则减少无关事件;确认审计日志盘没满导致写不进。
+  - id: done_audit_ok
+    type: done
+    summary: auditd 运行正常且无丢弃。核对审计规则是否覆盖关键点(登录、提权、敏感文件、账号变更),并确认日志轮转与留存满足合规要求。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: sec-audit-auditd-gap-auto
+  expect_path:
+  - check_running
+  - done_not_running
+feedback:
+  ask: auditd 审计日志断档排查定位了吗？

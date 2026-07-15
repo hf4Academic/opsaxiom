@@ -1,0 +1,17 @@
+skill: skills/sec/suid-anomaly/skill.yaml
+scenario: sec.integrity.suid-anomaly 自动求解走查
+expect_path:
+- check_suid_count
+- check_writable_dirs
+- done_suspicious_suid
+node_ctx:
+  check_suid_count:
+    output:
+      value: 41
+    rows:
+    - {}
+  check_writable_dirs:
+    output:
+      value: 1
+    rows:
+    - {}

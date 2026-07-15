@@ -1,0 +1,76 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: sec.network.unexpected-listen
+  name: 异常监听端口审计
+  taxonomy: sec/network/unexpected-listen
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_listen
+  nodes:
+  - id: check_listen
+    type: check
+    title: 统计对外(非本地回环)监听端口数
+    run:
+      linux: ss -ltnH 2>/dev/null | awk '{print $4}' | grep -vcE '127\.0\.0\.1|::1|\[::1\]'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_high_ports
+    - when: output.value == 0
+      goto: done_only_local
+    otherwise: check_high_ports
+    cautions:
+    - '监听 0.0.0.0/:: 才是对外暴露,只听 127.0.0.1 的服务不对外;审计时先把回环的排除,剩下的每个对外端口都要能对应到一个已知服务'
+  - id: check_high_ports
+    type: check
+    title: 查高位端口上的可疑监听
+    run:
+      linux: ss -ltnpH 2>/dev/null | awk '{split($4,a,":"); p=a[length(a)]; if(p+0>1024
+        && $4!~/127.0.0.1|::1/) c++} END{print c+0}'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_high_listen
+    - when: output.value == 0
+      goto: done_listen_known
+    otherwise: escalate
+    cautions:
+    - 高位端口对外监听不一定是坏事(很多正常服务用高位),但要能说清是哪个进程/服务;对不上进程、或进程名可疑(乱码/隐藏路径)的高位监听,是反连木马/后门的特征
+  - id: done_only_local
+    type: done
+    summary: 仅本地回环监听,无对外暴露。基线良好;若预期应有对外服务却没有,反查服务是否没起。
+  - id: done_high_listen
+    type: done
+    summary: 存在对外的高位端口监听。逐一用 ss -ltnp 对应进程,确认每个都是已知服务;对不上进程或进程可疑的,取证排查是否为后门/反连木马。
+  - id: done_listen_known
+    type: done
+    summary: 对外监听均在常规端口。仍应逐一核对进程与预期一致,并用防火墙收窄对外暴露面(只放行必要端口+来源)。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: sec-network-unexpected-listen-auto
+  expect_path:
+  - check_listen
+  - check_high_ports
+  - done_high_listen
+feedback:
+  ask: 异常监听端口审计定位了吗？
