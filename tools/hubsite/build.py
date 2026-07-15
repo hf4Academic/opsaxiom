@@ -163,14 +163,24 @@ def _contribute_html(repo):
 <header><h1>怎么贡献你验证过的 Skill</h1>
 <div class="sub">两条通道殊途同归：都落到本仓库的一个 Pull Request，CI 自动质检，维护者合入即上架。</div></header>
 <div class="wrap">
-<div class="step"><h3>先装客户端（3 步，约 5 分钟）</h3>
+<div class="step"><h3>第 1 步 · 装客户端（约 5 分钟）</h3>
 <pre>git clone {MAIN_REPO}.git && cd opsaxiom
 ./install.sh                              # 装依赖、把 opsaxiom 命令软链进 PATH、自检
 export PATH="$HOME/.local/bin:$PATH"      # 若安装末尾提示 PATH，加这行（可写进 ~/.bashrc）</pre>
 <p class="mut">装完敲 <code>opsaxiom doctor</code>：🟢 全绿即可用（🟡 只是可选连接器没装，不影响）。
-气隙/内网环境用离线包：<code>./install.sh --offline</code>。想在对话里排查，另接一个模型即可
-（<code>opsaxiom model</code>，或 pi 界面里 <code>/login</code>）。客户端源码见
+气隙/内网环境用离线包：<code>./install.sh --offline</code>。客户端源码见
 <a href="{MAIN_REPO}">{MAIN_REPO}</a>。</p></div>
+<div class="step"><h3>第 2 步 · 启动</h3>
+<pre>opsaxiom                                  # 直接敲这一个词，进入交互界面</pre>
+<p class="mut">进去后直接用中文描述你的故障（如"磁盘满了但 df 显示还有空间"）就能开始排查。
+装了 node≥22 会自动进入 AI 对话界面；没装也没关系，进入经典逐步排查界面，功能一样全。
+<code>opsaxiom classic</code> 可强制经典界面。</p></div>
+<div class="step"><h3>第 3 步（可选）· 接一个 AI 模型，让它更懂人话</h3>
+<pre>opsaxiom model install-local              # 一键装 ollama + 最小千问模型（本机离线跑）</pre>
+<p class="mut">安装前会自动体检本机条件（磁盘 ≥3GB、内存 ≥1.5GB、root/sudo 权限、网络可达）——
+<b>不满足会明确提示：本地不具备安装本地小模型的依赖或资源，请连接远端模型，或离线使用</b>。
+连远端模型：<code>opsaxiom model use remote --endpoint … --api-key …</code>（或 AI 界面里
+<code>/login</code> 选服务商填 Key）。完全不接模型也能用：判断全靠验证过的排查方案，不靠 AI 现猜。</p></div>
 <div class="step"><h3>通道一：客户端（推荐，全程引导）</h3>
 <pre>opsaxiom skill from-session &lt;会话id&gt;   # 把你刚做完的排查自动变成草稿
 opsaxiom skill lint &lt;草稿&gt;             # 校验 + 缺口清单，补完

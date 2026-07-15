@@ -122,3 +122,71 @@ def test_off_config_means_wizard_wont_reask(monkeypatch, tmp_path):
     assert llm.config_path().exists()
     d = yaml.safe_load(llm.config_path().read_text())
     assert d == {"enabled": False}
+
+
+# ---------- install-local 体检（发起人需求：装前查依赖与空间） ----------
+def _du(free_gb):
+    import collections
+    DU = collections.namedtuple("du", "total used free")
+    return lambda p: DU(100 * 1024**3, 0, int(free_gb * 1024**3))
+
+
+def test_check_local_ready_all_pass(tmp_path):
+    mem = tmp_path / "meminfo"
+    mem.write_text("MemTotal: 8000000 kB\nMemAvailable: 4000000 kB\n")
+    probs = model_cli.check_local_ready(
+        disk_usage=_du(50), meminfo_path=str(mem),
+        which=lambda x: "/usr/bin/" + x,          # ollama/sudo 都有
+        geteuid=lambda: 1000, net_probe=lambda: True)
+    assert probs == []
+
+
+def test_check_local_ready_no_root_no_sudo(tmp_path):
+    mem = tmp_path / "meminfo"
+    mem.write_text("MemAvailable: 4000000 kB\n")
+    probs = model_cli.check_local_ready(
+        disk_usage=_du(50), meminfo_path=str(mem),
+        which=lambda x: None,                     # 无 ollama 也无 sudo
+        geteuid=lambda: 1000, net_probe=lambda: True)
+    assert any("root 或 sudo" in p for p in probs)
+
+
+def test_check_local_ready_low_disk(tmp_path):
+    mem = tmp_path / "meminfo"
+    mem.write_text("MemAvailable: 4000000 kB\n")
+    probs = model_cli.check_local_ready(
+        disk_usage=_du(1.2), meminfo_path=str(mem),
+        which=lambda x: "/usr/bin/" + x, geteuid=lambda: 0,
+        net_probe=lambda: True)
+    assert any("磁盘空间不足" in p for p in probs)
+
+
+def test_check_local_ready_low_mem(tmp_path):
+    mem = tmp_path / "meminfo"
+    mem.write_text("MemAvailable: 500000 kB\n")   # ~0.5GB
+    probs = model_cli.check_local_ready(
+        disk_usage=_du(50), meminfo_path=str(mem),
+        which=lambda x: "/usr/bin/" + x, geteuid=lambda: 0,
+        net_probe=lambda: True)
+    assert any("内存不足" in p for p in probs)
+
+
+def test_check_local_ready_net_down(tmp_path):
+    mem = tmp_path / "meminfo"
+    mem.write_text("MemAvailable: 4000000 kB\n")
+    probs = model_cli.check_local_ready(
+        disk_usage=_du(50), meminfo_path=str(mem),
+        which=lambda x: "/usr/bin/sudo" if x == "sudo" else None,   # 无 ollama
+        geteuid=lambda: 1000, net_probe=lambda: False)
+    assert any("ollama.com" in p for p in probs)
+
+
+def test_check_local_ready_ollama_installed_skips_net_and_root(tmp_path):
+    """已装 ollama：不再要求 root/网络（只需空间与内存）。"""
+    mem = tmp_path / "meminfo"
+    mem.write_text("MemAvailable: 4000000 kB\n")
+    probs = model_cli.check_local_ready(
+        disk_usage=_du(50), meminfo_path=str(mem),
+        which=lambda x: "/usr/bin/ollama" if x == "ollama" else None,
+        geteuid=lambda: 1000, net_probe=lambda: False)
+    assert probs == []

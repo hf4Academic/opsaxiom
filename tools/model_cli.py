@@ -183,6 +183,115 @@ def cmd_serve(args):
     return 0
 
 
+# ---------- install-local：一键装 ollama + 最小千问（发起人需求） ----------
+OLLAMA_MODEL = "qwen2.5:0.5b"          # ollama 上最小的千问
+NEED_DISK_GB = 3                       # ollama 本体 + 模型 + 余量
+NEED_MEM_GB = 1.5                      # 0.5b 推理常驻
+
+FAIL_MSG = ("本地不具备安装本地小模型的依赖或资源，请连接远端模型"
+            "（opsaxiom model use remote …，或 pi 界面里 /login），或离线使用"
+            "（不接模型也全功能可用）。")
+
+
+def check_local_ready(disk_usage=None, meminfo_path="/proc/meminfo",
+                      which=None, geteuid=None, net_probe=None):
+    """安装前体检：平台/权限/磁盘/内存/网络。返回问题清单（空=可装）。
+    各探测点可注入（测试用），默认真实探测。"""
+    import platform
+    import urllib.request
+    disk_usage = disk_usage or shutil.disk_usage
+    which = which or shutil.which
+    geteuid = geteuid or getattr(os, "geteuid", lambda: 0)
+    problems = []
+    if platform.system() != "Linux":
+        problems.append(f"仅支持 Linux 一键安装（当前 {platform.system()}）")
+    have_ollama = bool(which("ollama"))
+    if not have_ollama and geteuid() != 0 and not which("sudo"):
+        problems.append("安装 ollama 需要 root 或 sudo（当前都没有）")
+    try:
+        free_gb = disk_usage(str(pathlib.Path.home())).free / 1024**3
+        if free_gb < NEED_DISK_GB:
+            problems.append(f"磁盘空间不足：需 ≥{NEED_DISK_GB}GB，当前可用 {free_gb:.1f}GB")
+    except Exception:
+        problems.append("无法读取磁盘空间")
+    try:
+        mem_kb = 0
+        for line in open(meminfo_path):
+            if line.startswith("MemAvailable"):
+                mem_kb = int(line.split()[1])
+                break
+        if mem_kb and mem_kb / 1024**2 < NEED_MEM_GB:
+            problems.append(f"可用内存不足：需 ≥{NEED_MEM_GB}GB，当前 {mem_kb/1024**2:.1f}GB")
+    except Exception:
+        pass                            # 读不到 meminfo 不拦（容器常见），装得动就装
+    def _default_probe():
+        try:
+            urllib.request.urlopen("https://ollama.com/install.sh", timeout=8)
+            return True
+        except Exception:
+            return False
+    if not have_ollama and not (net_probe or _default_probe)():
+        problems.append("网络不可达 ollama.com（无法下载安装脚本）")
+    return problems
+
+
+def cmd_install_local(args):
+    """一键装 ollama + 最小千问并接入。先体检，不达标给明确提示不硬装。"""
+    print(f"== 安装前体检（磁盘≥{NEED_DISK_GB}GB / 内存≥{NEED_MEM_GB}GB / 权限 / 网络）==")
+    problems = check_local_ready()
+    if problems:
+        for p in problems:
+            print(f"  ✗ {p}")
+        print(f"\n{FAIL_MSG}")
+        return 1
+    print("  ✓ 体检通过")
+    if getattr(args, "check_only", False):
+        return 0
+    # 1) 装 ollama（已装则跳过）
+    if not shutil.which("ollama"):
+        print("== 安装 ollama（官方脚本）==")
+        import tempfile
+        import urllib.request
+        with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as f:
+            f.write(urllib.request.urlopen(
+                "https://ollama.com/install.sh", timeout=30).read().decode())
+            script = f.name
+        cmd = ["sh", script] if getattr(os, "geteuid", lambda: 1)() == 0 \
+            else ["sudo", "sh", script]
+        if subprocess.run(cmd).returncode != 0:
+            print(f"ollama 安装失败。\n{FAIL_MSG}")
+            return 1
+    # 2) 确认服务在跑（systemd 场景安装即启动；容器/无 systemd 则拉起）
+    import urllib.request as _u
+    def _up():
+        try:
+            _u.urlopen("http://127.0.0.1:11434/api/tags", timeout=3)
+            return True
+        except Exception:
+            return False
+    if not _up():
+        print("== 启动 ollama 服务 ==")
+        subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+        import time
+        for _ in range(20):
+            if _up():
+                break
+            time.sleep(1)
+    if not _up():
+        print(f"ollama 服务未能启动。\n{FAIL_MSG}")
+        return 1
+    # 3) 拉最小千问
+    print(f"== 下载最小千问模型 {OLLAMA_MODEL}（约 400MB）==")
+    if subprocess.run(["ollama", "pull", OLLAMA_MODEL]).returncode != 0:
+        print(f"模型下载失败（网络到 ollama 模型库不通？）。\n{FAIL_MSG}")
+        return 1
+    # 4) 写配置并验证
+    _write_cfg(make_config("ollama", model=OLLAMA_MODEL))
+    print(f"== 已接入本地模型（ollama / {OLLAMA_MODEL}），发探针验证 ==")
+    return cmd_test(args)
+
+
 def cmd_pull(args):
     llm.models_dir().mkdir(parents=True, exist_ok=True)
     dst = llm.models_dir() / llm.BUILTIN_MODEL_FILE
@@ -267,4 +376,9 @@ def add_model(sub):
     p = s2.add_parser("serve")
     p.add_argument("--port", type=int, default=11435)
     p.set_defaults(fn=cmd_serve)
+    p = s2.add_parser("install-local",
+                      help=f"一键装 ollama + 最小千问（{OLLAMA_MODEL}），先体检依赖与空间")
+    p.add_argument("--check-only", dest="check_only", action="store_true",
+                   help="只体检不安装")
+    p.set_defaults(fn=cmd_install_local)
     ap.set_defaults(fn=cmd_show)     # 裸 `model` = show
