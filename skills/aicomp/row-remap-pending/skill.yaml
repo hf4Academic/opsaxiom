@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.gpu.row-remap-pending
+  name: GPU 显存行重映射待处理排查
+  taxonomy: aicomp/gpu/row-remap-pending
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+  - gpu.driver.version
+tree:
+  entry: check_pending
+  nodes:
+  - id: check_pending
+    type: check
+    title: 查是否有待处理的行重映射
+    run:
+      linux: nvidia-smi -q 2>/dev/null | grep -icE 'Remapping Pending\s*:\s*Yes|Pending\s*:\s*Yes'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_failure
+    - when: output.value == 0
+      goto: done_no_pending
+    otherwise: check_failure
+    cautions:
+    - 'A100+ 用行重映射把坏的显存行替换为备用行,以隔离显存故障;''Pending: Yes''表示已标记但需要一次 GPU 重置/重启才真正生效——不重置,坏行还在用,可能
+      ECC 报错或崩'
+  - id: check_failure
+    type: check
+    title: 看是否有重映射失败(备用行耗尽)
+    run:
+      linux: nvidia-smi -q 2>/dev/null | grep -icE 'Remapping Failure|Failure Occurred\s*:\s*Yes'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_remap_failed
+    - when: output.value == 0
+      goto: done_need_reset
+    otherwise: escalate
+    cautions:
+    - Remapping Failure=备用行用尽或重映射失败,说明显存物理损坏已超出可修复范围——这张卡通常需要 RMA 更换,别再投产跑关键任务
+  - id: done_no_pending
+    type: done
+    summary: 无待处理行重映射。显存相关异常另查(ECC 计数/XID/具体报错)。
+  - id: done_remap_failed
+    type: done
+    summary: 行重映射失败(备用行耗尽,显存物理损坏)。将该卡下线报修/RMA,别再承载关键任务;记录序列号与错误供厂商核查。
+  - id: done_need_reset
+    type: done
+    summary: 有待处理重映射但未失败。安排窗口对该卡做 GPU reset(nvidia-smi -r,需无进程占用)或重启节点让重映射生效;生效后确认
+      Pending 变 No、观察 ECC 是否稳定。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: aicomp-gpu-row-remap-pending-auto
+  expect_path:
+  - check_pending
+  - check_failure
+  - done_remap_failed
+feedback:
+  ask: GPU 显存行重映射待处理排查定位了吗？

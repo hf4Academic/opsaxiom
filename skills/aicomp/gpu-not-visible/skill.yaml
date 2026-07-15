@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.scheduling.gpu-not-visible
+  name: 进程/容器看不到 GPU 排查
+  taxonomy: aicomp/scheduling/gpu-not-visible
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+  - gpu.driver.version
+tree:
+  entry: check_host
+  nodes:
+  - id: check_host
+    type: check
+    title: 查宿主机能否看到 GPU
+    run:
+      linux: nvidia-smi -L 2>/dev/null | grep -c 'GPU '
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_visible_env
+    - when: output.value == 0
+      goto: done_host_no_gpu
+    otherwise: check_visible_env
+    cautions:
+    - 先分层:宿主机能不能看到卡→容器/进程能不能看到→框架能不能用。宿主机都看不到,问题在驱动/硬件,不是容器配置
+  - id: check_visible_env
+    type: check
+    title: 查是否被 CUDA_VISIBLE_DEVICES 屏蔽
+    run:
+      linux: env 2>/dev/null | grep -c 'CUDA_VISIBLE_DEVICES=$\|CUDA_VISIBLE_DEVICES=-1\|CUDA_VISIBLE_DEVICES=""'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_masked_env
+    - when: output.value == 0
+      goto: done_container_runtime
+    otherwise: escalate
+    cautions:
+    - CUDA_VISIBLE_DEVICES 设成空或 -1 会让进程看不到任何卡——常是脚本/调度器注入的,程序里 is_available()=False
+      时先查这个环境变量,别急着怀疑驱动
+  - id: done_host_no_gpu
+    type: done
+    summary: 宿主机都看不到 GPU。查驱动是否加载(lsmod|grep nvidia)、卡是否掉总线(dmesg XID/fell off bus)、内核升级后驱动是否要重装;这是驱动/硬件层问题。
+  - id: done_masked_env
+    type: done
+    summary: 被 CUDA_VISIBLE_DEVICES 屏蔽(空/-1)。检查是谁设的(启动脚本/调度器/dockerfile),改成正确的卡号或取消屏蔽;这是'看不到卡'最常见的人为原因。
+  - id: done_container_runtime
+    type: done
+    summary: 宿主机可见且未被环境屏蔽,容器仍看不到=容器 GPU 直通没配好。确认用了nvidia-container-runtime、docker
+      加 --gpus 或 k8s 声明 nvidia.com/gpu、device plugin 正常。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: aicomp-scheduling-gpu-not-visible-auto
+  expect_path:
+  - check_host
+  - check_visible_env
+  - done_masked_env
+feedback:
+  ask: 进程/容器看不到 GPU 排查定位了吗？

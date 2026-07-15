@@ -1,0 +1,79 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.gpu.cuda-oom
+  name: GPU 显存 OOM 排查
+  taxonomy: aicomp/gpu/cuda-oom
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+  - gpu.driver.version
+tree:
+  entry: check_used
+  nodes:
+  - id: check_used
+    type: check
+    title: 查显存占用最高的卡(百分比)
+    run:
+      linux: nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits
+        2>/dev/null | awk '{p=$1/$3*100; if(p>m)m=p} END{print int(m)}'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 90
+      goto: check_procs
+    - when: output.value <= 90
+      goto: done_frag_or_spike
+    otherwise: check_procs
+    cautions:
+    - CUDA OOM 未必是显存真满——PyTorch 缓存分配器会预留大块,碎片化会让'有余量却分不出连续块';先看整体占用高不高再区分是真满还是碎片
+  - id: check_procs
+    type: check
+    title: 看是否有多个进程共占一张卡
+    run:
+      linux: nvidia-smi --query-compute-apps=gpu_uuid --format=csv,noheader 2>/dev/null
+        | sort | uniq -c | sort -rn | head -1 | awk '{print $1}'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 1
+      goto: done_shared_gpu
+    - when: output.value <= 1
+      goto: done_real_oom
+    otherwise: escalate
+    cautions:
+    - 一张卡上跑了多个进程(别人的任务/上次没退干净的僵尸进程)会瓜分显存;常见是训练崩了但进程没释放,显存一直被占,新任务就 OOM
+  - id: done_frag_or_spike
+    type: done
+    summary: 整体占用不算满却 OOM,多为碎片化或瞬时峰值。设 PYTORCH_CUDA_ALLOC_CONF(expandable_segments)缓解碎片、减小
+      batch/开梯度检查点降峰值;必要时空出卡重跑。
+  - id: done_shared_gpu
+    type: done
+    summary: 多个进程共占同卡瓜分显存。确认是否有残留僵尸进程占着(kill 掉释放)、或调度没做卡隔离让多任务撞车;用 CUDA_VISIBLE_DEVICES/调度器保证独占。
+  - id: done_real_oom
+    type: done
+    summary: 单进程独占仍显存满=模型/批次确实超显存。减小 batch size、开梯度检查点/ZeRO/混合精度、或模型并行拆到多卡;评估是否需要更大显存的卡。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: aicomp-gpu-cuda-oom-auto
+  expect_path:
+  - check_used
+  - check_procs
+  - done_shared_gpu
+feedback:
+  ask: GPU 显存 OOM 排查定位了吗？

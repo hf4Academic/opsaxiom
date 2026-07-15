@@ -1,0 +1,17 @@
+skill: skills/aicomp/cuda-oom/skill.yaml
+scenario: aicomp.gpu.cuda-oom 自动求解走查
+expect_path:
+- check_used
+- check_procs
+- done_shared_gpu
+node_ctx:
+  check_used:
+    output:
+      value: 91
+    rows:
+    - {}
+  check_procs:
+    output:
+      value: 2
+    rows:
+    - {}

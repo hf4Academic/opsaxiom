@@ -1,0 +1,17 @@
+skill: skills/aicomp/dataloader-bottleneck/skill.yaml
+scenario: aicomp.training.dataloader-bottleneck 自动求解走查
+expect_path:
+- check_util
+- check_iowait
+- done_io_bound
+node_ctx:
+  check_util:
+    output:
+      value: 59
+    rows:
+    - {}
+  check_iowait:
+    output:
+      iowait: 11
+    rows:
+    - {}

@@ -1,0 +1,79 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.fabric.fabricmanager-down
+  name: nvidia-fabricmanager 异常排查(NVSwitch)
+  taxonomy: aicomp/fabric/fabricmanager-down
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+  - gpu.driver.version
+tree:
+  entry: check_fm
+  nodes:
+  - id: check_fm
+    type: check
+    title: 查 fabricmanager 服务是否在运行
+    run:
+      linux: systemctl is-active nvidia-fabricmanager 2>/dev/null | grep -ic '^active'
+    parser: generic/count-v1
+    branch:
+    - when: output.value == 0
+      goto: done_fm_down
+    - when: output.value > 0
+      goto: check_version
+    otherwise: check_version
+    cautions:
+    - NVSwitch 机型(如 DGX/HGX)必须跑 fabricmanager 才能建立 GPU 间 NVLink 全互联;它没起,GPU 可能直接不可用或
+      CUDA 初始化失败——这是这类机器的必查项
+  - id: check_version
+    type: check
+    title: 看 fabricmanager 与驱动版本是否匹配
+    run:
+      linux: journalctl -u nvidia-fabricmanager --since '-10min' 2>/dev/null | grep
+        -icE 'version mismatch|incompatible|failed to'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_version_mismatch
+    - when: output.value == 0
+      goto: done_fm_ok
+    otherwise: escalate
+    cautions:
+    - fabricmanager 版本必须与 GPU 驱动严格匹配;驱动升级后没同步升 fabricmanager 会启动失败,是升级后 GPU 集体不可用的常见坑
+  - id: done_fm_down
+    type: done
+    summary: fabricmanager 未运行(NVSwitch 机型必需)。systemctl start 并设自启;若起不来看日志(多为版本不匹配或驱动问题),修复后
+      GPU 全互联才能建立。
+  - id: done_version_mismatch
+    type: done
+    summary: fabricmanager 与驱动版本不匹配导致启动失败。安装与当前驱动完全一致版本的fabricmanager,重启服务;确保二者随驱动一起升级。
+  - id: done_fm_ok
+    type: done
+    summary: fabricmanager 运行正常无版本问题。GPU 仍异常另查(单卡 XID/NVLink 物理链路/具体 CUDA 报错),非 fabric
+      服务层问题。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: aicomp-fabric-fabricmanager-down-auto
+  expect_path:
+  - check_fm
+  - done_fm_down
+feedback:
+  ask: nvidia-fabricmanager 异常排查(NVSwitch)定位了吗？

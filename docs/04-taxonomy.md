@@ -284,6 +284,14 @@
 - `aicomp/collective/nccl-hang` — "训练 hang 在通信/NCCL 卡住不动"
 - `aicomp/collective/nccl-init-fail` — "NCCL 初始化失败/建不了通信组"
 
+**aicomp（H-push 第三批）**
+- `aicomp/gpu/cuda-oom` — "CUDA out of memory/显存不足/OOM 但看着有余量"
+- `aicomp/gpu/mig-misconfig` — "MIG 分不到实例/看不到 MIG 设备"
+- `aicomp/gpu/row-remap-pending` — "行重映射待处理/需重启/remap failure"
+- `aicomp/scheduling/gpu-not-visible` — "is_available()=False/容器看不到卡"
+- `aicomp/training/dataloader-bottleneck` — "GPU 空等数据/利用率锯齿/数据供不上"
+- `aicomp/fabric/fabricmanager-down` — "NVSwitch 机型 GPU 不可用/fabricmanager 未运行"
+
 **aicomp/training**
 - `aicomp/training/job-hang` — "训练任务卡住/loss 不动/进程在但没进展"
 - `aicomp/training/slow-node` — "个别节点拖慢/慢节点定位/木桶效应"

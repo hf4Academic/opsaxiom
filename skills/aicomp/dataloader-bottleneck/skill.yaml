@@ -1,0 +1,79 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.training.dataloader-bottleneck
+  name: 数据加载瓶颈排查(GPU 空等数据)
+  taxonomy: aicomp/training/dataloader-bottleneck
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+  - gpu.driver.version
+tree:
+  entry: check_util
+  nodes:
+  - id: check_util
+    type: check
+    title: 查 GPU 利用率是否偏低
+    run:
+      linux: nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader 2>/dev/null
+        | tr -dc '0-9\n' | sort -n | head -1
+    parser: generic/count-v1
+    branch:
+    - when: output.value < 60
+      goto: check_iowait
+    - when: output.value >= 60
+      goto: done_util_ok
+    otherwise: check_iowait
+    cautions:
+    - GPU 利用率低+训练慢的经典原因是数据供不上:GPU 算得快,CPU 预处理/磁盘读数据跟不上,GPU 只能空等。看利用率是否'锯齿状'(算一下等一下)
+  - id: check_iowait
+    type: check
+    title: 看是否 CPU/IO 成瓶颈
+    run:
+      linux: top -bn1 2>/dev/null | awk '/%Cpu/{print "iowait", $10}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.iowait > 10
+      goto: done_io_bound
+    - when: output.iowait <= 10
+      goto: done_cpu_bound
+    otherwise: escalate
+    cautions:
+    - iowait 高=卡在磁盘读数据(数据集在慢盘/网络存储、没做预取);iowait 低但 CPU 忙=卡在数据预处理(解码/增广)。两者解法不同
+  - id: done_util_ok
+    type: done
+    summary: GPU 利用率不低。训练慢另查(通信/checkpoint/同步点/小 batch)。
+  - id: done_io_bound
+    type: done
+    summary: IO 瓶颈:GPU 在等磁盘读数据。把数据集放本地 NVMe、用更高效格式(webdataset/lmdb)、加 DataLoader 预取(prefetch_factor)与
+      pin_memory;别让数据在慢盘/NFS 上拖训练。
+  - id: done_cpu_bound
+    type: done
+    summary: CPU 预处理瓶颈:增广/解码吃满 CPU 供不上。调大 num_workers、把重预处理下沉(离线预处理/GPU 增广如 DALI)、精简增广流水线;让数据供给跟上
+      GPU 算力。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: aicomp-training-dataloader-bottleneck-auto
+  expect_path:
+  - check_util
+  - check_iowait
+  - done_io_bound
+feedback:
+  ask: 数据加载瓶颈排查(GPU 空等数据)定位了吗？

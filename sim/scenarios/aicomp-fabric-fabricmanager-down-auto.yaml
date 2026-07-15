@@ -1,0 +1,11 @@
+skill: skills/aicomp/fabricmanager-down/skill.yaml
+scenario: aicomp.fabric.fabricmanager-down 自动求解走查
+expect_path:
+- check_fm
+- done_fm_down
+node_ctx:
+  check_fm:
+    output:
+      value: 0
+    rows:
+    - {}

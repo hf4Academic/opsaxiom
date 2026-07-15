@@ -1,0 +1,80 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.gpu.mig-misconfig
+  name: MIG 实例配置异常排查
+  taxonomy: aicomp/gpu/mig-misconfig
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+  - gpu.driver.version
+tree:
+  entry: check_mig_on
+  nodes:
+  - id: check_mig_on
+    type: check
+    title: 查是否启用了 MIG 模式
+    run:
+      linux: nvidia-smi --query-gpu=mig.mode.current --format=csv,noheader 2>/dev/null
+        | grep -ic 'Enabled'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_instances
+    - when: output.value == 0
+      goto: done_mig_off
+    otherwise: check_instances
+    cautions:
+    - MIG 模式切换需要 GPU 空闲且常要重置(有的卡要重启)才生效;'开了没生效'多因当时有进程占用或没做 GPU reset
+  - id: check_instances
+    type: check
+    title: 查是否已创建 MIG 实例
+    run:
+      linux: nvidia-smi mig -lgi 2>/dev/null | grep -cE 'MIG [0-9]+g'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_instances_ok
+    - when: output.value == 0
+      goto: done_no_instances
+    otherwise: escalate
+    cautions:
+    - MIG 模式开了还得手动创建 GI(GPU Instance)+CI(Compute Instance)才有可用切片;只开模式不建实例=任务看不到任何
+      MIG 设备
+  - id: done_mig_off
+    type: done
+    summary: MIG 模式未启用。若需要切分:nvidia-smi -mig 1 开启(GPU 需空闲,可能要 reset/重启),再创建实例;若本不该用
+      MIG,则任务按整卡调度即可。
+  - id: done_instances_ok
+    type: done
+    summary: MIG 模式开且已建实例。任务调度不上多为调度器/容器侧没正确暴露 MIG 设备(k8s 需 MIG 策略配置、CUDA_VISIBLE_DEVICES
+      用 MIG UUID);核对设备暴露与请求匹配。
+  - id: done_no_instances
+    type: done
+    summary: MIG 模式开了但没创建实例,自然无可用切片。用 nvidia-smi mig -cgi/-cci 按需求创建 GI+CI(选合适的 profile),再让调度器发现这些实例。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: aicomp-gpu-mig-misconfig-auto
+  expect_path:
+  - check_mig_on
+  - check_instances
+  - done_instances_ok
+feedback:
+  ask: MIG 实例配置异常排查定位了吗？
