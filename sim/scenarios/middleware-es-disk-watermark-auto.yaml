@@ -1,0 +1,17 @@
+skill: skills/middleware/disk-watermark/skill.yaml
+scenario: middleware.es.disk-watermark 自动求解走查
+expect_path:
+- check_ro
+- check_disk
+- done_disk_full
+node_ctx:
+  check_ro:
+    output:
+      value: 1
+    rows:
+    - {}
+  check_disk:
+    output:
+      value: 86
+    rows:
+    - {}

@@ -1,0 +1,17 @@
+skill: skills/middleware/consumer-lag/skill.yaml
+scenario: middleware.kafka.consumer-lag 自动求解走查
+expect_path:
+- check_lag
+- check_state
+- done_slow_consumer
+node_ctx:
+  check_lag:
+    output:
+      value: 10001
+    rows:
+    - {}
+  check_state:
+    output:
+      value: 1
+    rows:
+    - {}

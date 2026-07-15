@@ -1,0 +1,81 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.nginx.worker-connections-full
+  name: Nginx worker 连接耗尽排查
+  taxonomy: middleware/nginx/worker-connections-full
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_errlog
+  nodes:
+  - id: check_errlog
+    type: check
+    title: 查是否报连接不足
+    run:
+      linux: tail -500 /var/log/nginx/error.log 2>/dev/null | grep -ic 'worker_connections
+        are not enough'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_ulimit
+    - when: output.value == 0
+      goto: done_not_this
+    otherwise: check_ulimit
+    cautions:
+    - worker 总连接上限 = worker_processes × worker_connections；反代场景每个客户端连接还要占一个到上游的连接，实际容量要除以
+      2
+  - id: check_ulimit
+    type: check
+    title: 查进程 fd 上限是否够
+    run:
+      linux: cat /proc/$(pgrep -o nginx)/limits 2>/dev/null | awk '/open files/{print
+        "nofile", $4}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.nofile < 10240
+      goto: done_ulimit_low
+    - when: output.nofile >= 10240
+      goto: done_raise_conn
+    otherwise: escalate
+    cautions:
+    - worker_connections 调再大，若进程 nofile(ulimit -n)不够也白搭——两者要一起调；systemd 管理的 nginx
+      要改 LimitNOFILE
+  - id: done_not_this
+    type: done
+    summary: 非连接耗尽。并发上不去另查(上游慢/CPU/keepalive 配置)。
+  - id: done_ulimit_low
+    type: done
+    summary: 进程 fd 上限太低卡住了连接数。先调大 nginx 进程的 LimitNOFILE(systemd)或 worker_rlimit_nofile，再调
+      worker_connections。
+  - id: done_raise_conn
+    type: done
+    summary: fd 够，需调大 worker_connections。评估内存后上调，反代场景记得容量要按需求×2；同时确认 worker_processes
+      匹配核数。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: middleware-nginx-worker-connections-full-auto
+  expect_path:
+  - check_errlog
+  - check_ulimit
+  - done_ulimit_low
+feedback:
+  ask: Nginx worker 连接耗尽排查定位了吗？

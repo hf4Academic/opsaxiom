@@ -285,6 +285,8 @@
 - `middleware/redis/slowlog-high` — "Redis 响应慢/有慢命令/延迟高"
 - `middleware/kafka/isr-shrink` — "Kafka ISR 收缩/副本不同步/under-replicated"
 **middleware/mysql**
+- `middleware/mysql/slow-query-storm` — "MySQL 突然变慢/慢查询暴增"
+- `middleware/es/disk-watermark` — "ES 无法写入/索引只读/磁盘水位"
 - `middleware/mysql/slow-query` — "MySQL 慢/慢查询多/CPU 高"
 - `middleware/mysql/replication-lag` — "主从延迟大/从库落后"
 - `middleware/mysql/replication-broken` — "主从断了/复制报错/Slave 停了"

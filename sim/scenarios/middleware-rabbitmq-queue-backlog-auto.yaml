@@ -1,0 +1,17 @@
+skill: skills/middleware/queue-backlog/skill.yaml
+scenario: middleware.rabbitmq.queue-backlog 自动求解走查
+expect_path:
+- check_ready
+- check_consumers
+- done_no_consumer
+node_ctx:
+  check_ready:
+    output:
+      value: 10001
+    rows:
+    - {}
+  check_consumers:
+    output:
+      value: 0
+    rows:
+    - {}

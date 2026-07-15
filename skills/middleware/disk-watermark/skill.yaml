@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.es.disk-watermark
+  name: ES 磁盘水位锁写排查
+  taxonomy: middleware/es/disk-watermark
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_ro
+  nodes:
+  - id: check_ro
+    type: check
+    title: 查是否有索引被置为只读
+    run:
+      linux: curl -s 'localhost:9200/_all/_settings' 2>/dev/null | grep -ic 'read_only_allow_delete.*true'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_disk
+    - when: output.value == 0
+      goto: done_not_ro
+    otherwise: check_disk
+    cautions:
+    - ES 磁盘超 flood_stage(默认 95%)会自动给索引加 read_only_allow_delete 块——清理磁盘后块不会自动解除，必须手动清除该设置
+  - id: check_disk
+    type: check
+    title: 查节点磁盘使用
+    run:
+      linux: curl -s 'localhost:9200/_cat/allocation?h=disk.percent' 2>/dev/null |
+        sort -rn | head -1
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 85
+      goto: done_disk_full
+    - when: output.value <= 85
+      goto: done_clear_block
+    otherwise: escalate
+    cautions:
+    - 三档水位：low(85%)停止分配新分片、high(90%)迁移分片走、flood(95%)锁写。别只清磁盘忘了解锁
+  - id: done_not_ro
+    type: done
+    summary: 无只读索引。写入失败另查(mapping/线程池/集群健康)。
+  - id: done_disk_full
+    type: done
+    summary: 磁盘超水位导致锁写。先清理(删旧索引/扩盘)把磁盘降到 flood 以下，再手动解除只读块：PUT _all/_settings {read_only_allow_delete:null}。
+  - id: done_clear_block
+    type: done
+    summary: 磁盘已降下来但只读块残留(不会自动解)。手动清除：PUT _all/_settings 把 read_only_allow_delete
+      设为 null，写入即恢复。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: middleware-es-disk-watermark-auto
+  expect_path:
+  - check_ro
+  - check_disk
+  - done_disk_full
+feedback:
+  ask: ES 磁盘水位锁写排查定位了吗？

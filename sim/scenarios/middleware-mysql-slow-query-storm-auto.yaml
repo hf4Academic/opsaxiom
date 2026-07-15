@@ -1,0 +1,17 @@
+skill: skills/middleware/slow-query-storm/skill.yaml
+scenario: middleware.mysql.slow-query-storm 自动求解走查
+expect_path:
+- check_running
+- check_lock
+- done_lock_pileup
+node_ctx:
+  check_running:
+    output:
+      value: 6
+    rows:
+    - {}
+  check_lock:
+    output:
+      value: 1
+    rows:
+    - {}

@@ -1,0 +1,17 @@
+skill: skills/middleware/worker-connections-full/skill.yaml
+scenario: middleware.nginx.worker-connections-full 自动求解走查
+expect_path:
+- check_errlog
+- check_ulimit
+- done_ulimit_low
+node_ctx:
+  check_errlog:
+    output:
+      value: 1
+    rows:
+    - {}
+  check_ulimit:
+    output:
+      nofile: 10239
+    rows:
+    - {}

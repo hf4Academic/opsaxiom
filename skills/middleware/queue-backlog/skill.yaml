@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.rabbitmq.queue-backlog
+  name: RabbitMQ 队列堆积排查
+  taxonomy: middleware/rabbitmq/queue-backlog
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_ready
+  nodes:
+  - id: check_ready
+    type: check
+    title: 查堆积最多的队列
+    run:
+      linux: rabbitmqctl list_queues name messages 2>/dev/null | sort -k2 -rn | head
+        -3 | awk '{print $2}' | head -1
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 10000
+      goto: check_consumers
+    - when: output.value <= 10000
+      goto: done_backlog_ok
+    otherwise: check_consumers
+    cautions:
+    - 消息堆积会占内存，超过 vm_memory_high_watermark(默认 40%)会阻塞生产者(流控)——堆积不处理最终会连生产一起卡
+  - id: check_consumers
+    type: check
+    title: 看该队列有无消费者
+    run:
+      linux: rabbitmqctl list_queues name consumers 2>/dev/null | sort -k2 -n | head
+        -1 | awk '{print $2}'
+    parser: generic/count-v1
+    branch:
+    - when: output.value == 0
+      goto: done_no_consumer
+    - when: output.value > 0
+      goto: done_slow_consumer
+    otherwise: escalate
+    cautions:
+    - 消费者数为 0=没人消费(消费者挂了/没连上)，堆积必然；有消费者仍堆=消费处理慢或prefetch 太小限制了吞吐
+  - id: done_backlog_ok
+    type: done
+    summary: 队列堆积不严重。若有告警看是否某队列个别堆积或内存其它占用。
+  - id: done_no_consumer
+    type: done
+    summary: 堆积队列没有消费者。查消费者进程是否挂了/连接断了/绑定错队列；恢复消费者后积压会被消化。
+  - id: done_slow_consumer
+    type: done
+    summary: 有消费者但消费慢。优化消费逻辑、增加消费者、调大 prefetch_count 提升吞吐(权衡公平性)；确认没有 unacked 消息卡住。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: middleware-rabbitmq-queue-backlog-auto
+  expect_path:
+  - check_ready
+  - check_consumers
+  - done_no_consumer
+feedback:
+  ask: RabbitMQ 队列堆积排查定位了吗？

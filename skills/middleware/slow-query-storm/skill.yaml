@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.mysql.slow-query-storm
+  name: MySQL 慢查询风暴排查
+  taxonomy: middleware/mysql/slow-query-storm
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_running
+  nodes:
+  - id: check_running
+    type: check
+    title: 查当前长时间运行的查询
+    run:
+      linux: mysql -e "SELECT COUNT(*) c FROM information_schema.processlist WHERE
+        command='Query' AND time>5" 2>/dev/null | tail -1
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 5
+      goto: check_lock
+    - when: output.value <= 5
+      goto: done_few_slow
+    otherwise: check_lock
+    cautions:
+    - 同一条 SQL 大量并发慢=多为缺索引全表扫；先看是不是集中在某条语句(processlist 的 info)
+  - id: check_lock
+    type: check
+    title: 看是否有锁等待放大
+    run:
+      linux: mysql -e "SELECT COUNT(*) c FROM information_schema.processlist WHERE
+        state LIKE '%lock%'" 2>/dev/null | tail -1
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_lock_pileup
+    - when: output.value == 0
+      goto: done_missing_index
+    otherwise: escalate
+    cautions:
+    - 锁等待会让原本快的查询也排队变慢——一条持锁的大事务能拖垮全库；别只优化慢 SQL 而忽略锁源
+  - id: done_few_slow
+    type: done
+    summary: 长查询不多。变慢另查(连接数/内存/磁盘 IO)。
+  - id: done_lock_pileup
+    type: done
+    summary: 锁等待放大了慢查询。定位持锁的大事务/长事务(information_schema.innodb_trx)，处理它(提交/回滚/优化)，排队的查询会随之疏通。
+  - id: done_missing_index
+    type: done
+    summary: 大量慢查询且无锁，多为缺索引全表扫或突发大查询。从 processlist 或慢日志抓 SQL，EXPLAIN 看执行计划补索引；限流大查询。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: middleware-mysql-slow-query-storm-auto
+  expect_path:
+  - check_running
+  - check_lock
+  - done_lock_pileup
+feedback:
+  ask: MySQL 慢查询风暴排查定位了吗？
