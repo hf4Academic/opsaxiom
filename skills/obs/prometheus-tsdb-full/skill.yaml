@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: obs.metrics.prometheus-tsdb-full
+  name: Prometheus TSDB 撑盘排查
+  taxonomy: obs/metrics/prometheus-tsdb-full
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_series
+  nodes:
+  - id: check_series
+    type: check
+    title: 查活跃时间序列数
+    run:
+      linux: curl -s 'localhost:9090/api/v1/status/tsdb' 2>/dev/null | grep -oE '"numSeries":[0-9]+'
+        | grep -oE '[0-9]+'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 2000000
+      goto: check_cardinality
+    - when: output.value <= 2000000
+      goto: done_series_ok
+    otherwise: check_cardinality
+    cautions:
+    - TSDB 大小主要由活跃 series 数决定，不是采集频率——series 爆炸(高基数标签)是撑盘首因
+  - id: check_cardinality
+    type: check
+    title: 查高基数标签
+    run:
+      linux: curl -s 'localhost:9090/api/v1/status/tsdb' 2>/dev/null | grep -icE 'seriesCountByMetricName|labelValueCountByLabelName'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_cardinality
+    - when: output.value == 0
+      goto: done_retention
+    otherwise: escalate
+    cautions:
+    - 高基数标签(如把 request_id/user_id/pod_ip 当 label)会让 series 爆炸——把这类高基数值放进 label 是 Prometheus
+      头号反模式
+  - id: done_series_ok
+    type: done
+    summary: series 数不高。撑盘另查(retention 太长/采集目标太多)。
+  - id: done_cardinality
+    type: done
+    summary: 高基数标签导致 series 爆炸。定位问题 metric(status/tsdb 的 top10)，在 relabel 里 drop 高基数标签或该
+      metric；治本靠改埋点别把高基数值当 label。
+  - id: done_retention
+    type: done
+    summary: series 不算爆炸，撑盘多为 retention 太长或目标太多。缩短 retention、或用远程存储(Thanos/VM)卸载历史数据。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: obs-metrics-prometheus-tsdb-full-auto
+  expect_path:
+  - check_series
+  - check_cardinality
+  - done_cardinality
+feedback:
+  ask: Prometheus TSDB 撑盘排查定位了吗？

@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: obs.metrics.remote-write-backlog
+  name: Prometheus 远程写堆积排查
+  taxonomy: obs/metrics/remote-write-backlog
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_pending
+  nodes:
+  - id: check_pending
+    type: check
+    title: 查远程写待发样本数
+    run:
+      linux: curl -s localhost:9090/metrics 2>/dev/null | awk '/prometheus_remote_storage_samples_pending/{print
+        "pending", $2}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.pending > 10000
+      goto: check_failed
+    - when: output.pending <= 10000
+      goto: done_backlog_ok
+    otherwise: check_failed
+    cautions:
+    - pending 高且涨=发送速度跟不上产生速度，队列会满并丢样本；远端慢或网络是常见因
+  - id: check_failed
+    type: check
+    title: 查发送失败样本数
+    run:
+      linux: curl -s localhost:9090/metrics 2>/dev/null | awk '/remote_storage_samples_failed_total/{print
+        "failed", $2}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.failed > 0
+      goto: done_remote_err
+    - when: output.failed == 0
+      goto: done_throughput
+    otherwise: escalate
+    cautions:
+    - failed 增长=远端在拒绝(限流/鉴权/格式)；只是 pending 高但不 failed=纯吞吐不够
+  - id: done_backlog_ok
+    type: done
+    summary: 远程写无明显堆积。远端收不到另查(远端存储自身/网络分区)。
+  - id: done_remote_err
+    type: done
+    summary: 远程写有失败样本。查远端返回的错误(429 限流/401 鉴权/400 格式)，对症解决；调整 remote_write 的 queue_config
+      与远端容量匹配。
+  - id: done_throughput
+    type: done
+    summary: 只是吞吐不够(pending 高但不 failed)。调大 max_shards/max_samples_per_send提升并发，或降低采集量；确认到远端的网络带宽足够。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: obs-metrics-remote-write-backlog-auto
+  expect_path:
+  - check_pending
+  - check_failed
+  - done_remote_err
+feedback:
+  ask: Prometheus 远程写堆积排查定位了吗？

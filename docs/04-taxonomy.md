@@ -324,6 +324,10 @@
 - `middleware/rabbitmq/memory-alarm` — "RabbitMQ 内存告警/流控/阻塞发布"
 
 ### 5.6 obs
+- `obs/metrics/prometheus-tsdb-full` — "Prometheus 磁盘满/TSDB 撑盘"
+- `obs/metrics/scrape-timeout` — "target down/scrape 超时/指标断点"
+- `obs/metrics/remote-write-backlog` — "远程写堆积/远端收不到"
+- `obs/alerting/silence-leak` — "该告警的没响/静默忘删"
 - `obs/alerting/alert-storm` — "告警风暴/一堆告警/降噪"
 - `obs/alerting/false-positive` — "误报/告警不准/阈值要调"
 - `obs/metrics/missing` — "监控没数据/指标断了/采集不到"

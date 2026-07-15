@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: obs.metrics.scrape-timeout
+  name: Prometheus 抓取目标超时排查
+  taxonomy: obs/metrics/scrape-timeout
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_targets
+  nodes:
+  - id: check_targets
+    type: check
+    title: 查 down 的抓取目标数
+    run:
+      linux: curl -s 'localhost:9090/api/v1/targets' 2>/dev/null | grep -oE '"health":"down"'
+        | wc -l
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_duration
+    - when: output.value == 0
+      goto: done_all_up
+    otherwise: check_duration
+    cautions:
+    - target down 分两类：连不上(网络/目标挂)vs 抓取超时(目标响应慢/指标太多)——lastError 字段直接区分
+  - id: check_duration
+    type: check
+    title: 看是否抓取耗时接近超时阈值
+    run:
+      linux: curl -s 'localhost:9090/api/v1/targets' 2>/dev/null | grep -icE 'context
+        deadline exceeded|timeout'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_timeout
+    - when: output.value == 0
+      goto: done_unreachable
+    otherwise: escalate
+    cautions:
+    - 单个 target 暴露几万条指标会让 scrape 超时——大目标要么调大 scrape_timeout，要么在目标侧减少指标
+  - id: done_all_up
+    type: done
+    summary: 所有目标健康。指标断点另查(Prometheus 自身重启/远程写堆积)。
+  - id: done_timeout
+    type: done
+    summary: 抓取超时。目标指标太多则调大 scrape_timeout(不超过 interval)或精简指标；目标响应慢则优化目标的 /metrics
+      端点。
+  - id: done_unreachable
+    type: done
+    summary: 目标连不上(非超时)。查网络可达性、目标进程是否存活、服务发现是否把已下线的实例还留在列表里。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: obs-metrics-scrape-timeout-auto
+  expect_path:
+  - check_targets
+  - check_duration
+  - done_timeout
+feedback:
+  ask: Prometheus 抓取目标超时排查定位了吗？

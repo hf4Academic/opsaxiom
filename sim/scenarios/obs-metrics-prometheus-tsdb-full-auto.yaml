@@ -1,0 +1,17 @@
+skill: skills/obs/prometheus-tsdb-full/skill.yaml
+scenario: obs.metrics.prometheus-tsdb-full 自动求解走查
+expect_path:
+- check_series
+- check_cardinality
+- done_cardinality
+node_ctx:
+  check_series:
+    output:
+      value: 2000001
+    rows:
+    - {}
+  check_cardinality:
+    output:
+      value: 1
+    rows:
+    - {}

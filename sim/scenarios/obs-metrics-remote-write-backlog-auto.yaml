@@ -1,0 +1,17 @@
+skill: skills/obs/remote-write-backlog/skill.yaml
+scenario: obs.metrics.remote-write-backlog 自动求解走查
+expect_path:
+- check_pending
+- check_failed
+- done_remote_err
+node_ctx:
+  check_pending:
+    output:
+      pending: 10001
+    rows:
+    - {}
+  check_failed:
+    output:
+      failed: 1
+    rows:
+    - {}
