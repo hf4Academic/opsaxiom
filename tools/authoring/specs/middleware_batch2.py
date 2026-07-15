@@ -3,35 +3,7 @@
 _M = {"capability_level": "read", "connector": "ssh"}
 
 SPECS = [
-    {**_M,
-     "id": "middleware.kafka.consumer-lag", "name": "Kafka 消费积压排查",
-     "taxonomy": "middleware/kafka/consumer-lag",
-     "symptom": "Kafka 消费积压/lag 很大/消费跟不上生产",
-     "params": {"group": "消费组名"},
-     "checks": [
-        {"id": "check_lag", "title": "查消费组总 lag",
-         "cmd": "kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group {{group}} 2>/dev/null | awk 'NR>1{s+=$6} END{print s+0}'",
-         "parser": "generic/count-v1",
-         "branches": [{"when": "output.value > 10000", "goto": "check_state"},
-                      {"when": "output.value <= 10000", "goto": "done_lag_ok"}],
-         "otherwise": "check_state",
-         "cautions": ["lag 大要看是持续增长还是稳定——稳定的固定 lag(如批处理)无害，持续涨才是消费跟不上"]},
-        {"id": "check_state", "title": "查消费组状态是否稳定",
-         "cmd": "kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group {{group}} --state 2>/dev/null | grep -ic 'Stable'",
-         "parser": "generic/count-v1",
-         "branches": [{"when": "output.value > 0", "goto": "done_slow_consumer"},
-                      {"when": "output.value == 0", "goto": "done_rebalancing"}],
-         "otherwise": "escalate",
-         "cautions": ["消费并行度上限=分区数，消费者多于分区也没用；lag 大且组稳定=消费处理慢或分区不够"]},
-     ],
-     "dones": [
-        {"id": "done_lag_ok", "summary": "lag 不大，消费正常。若业务觉得慢查端到端时延而非积压。"},
-        {"id": "done_slow_consumer", "summary": "组稳定但 lag 涨=消费处理慢或分区不足。优化消费逻辑、"
-                                               "加消费者实例(不超过分区数)、或增加分区数提升并行度。"},
-        {"id": "done_rebalancing", "summary": "消费组不稳定(在 rebalance)。频繁 rebalance 会让消费停滞——"
-                                             "查是否消费者频繁加入退出、max.poll.interval 超时被踢、心跳配置。"},
-     ]},
-    {**_M,
+        {**_M,
      "id": "middleware.mysql.slow-query-storm", "name": "MySQL 慢查询风暴排查",
      "taxonomy": "middleware/mysql/slow-query-storm",
      "symptom": "MySQL 突然变慢/慢查询暴增/CPU 高/连接堆积",

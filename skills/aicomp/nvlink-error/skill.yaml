@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.fabric.nvlink-error
+  name: NVLink 错误/降级排查
+  taxonomy: aicomp/fabric/nvlink-error
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+  - gpu.driver.version
+tree:
+  entry: check_nvlink_err
+  nodes:
+  - id: check_nvlink_err
+    type: check
+    title: 查 NVLink 错误计数
+    run:
+      linux: nvidia-smi nvlink -e 2>/dev/null | grep -icE 'Replay|Recovery|CRC.*[1-9]'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_status
+    - when: output.value == 0
+      goto: done_no_err
+    otherwise: check_status
+    cautions:
+    - Replay/Recovery 错误偶发可自愈，但持续增长会降带宽；CRC 错误多为物理链路(NVLink 桥接/背板)
+  - id: check_status
+    type: check
+    title: 查 NVLink 链路是否 up
+    run:
+      linux: nvidia-smi nvlink -s 2>/dev/null | grep -ic 'inactive\|Link is down'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_link_down
+    - when: output.value == 0
+      goto: done_err_only
+    otherwise: escalate
+    cautions:
+    - NVLink 掉链路会让卡间通信回退到 PCIe(慢一个数量级)，多卡训练性能断崖——NCCL 慢先排查 NVLink 是否全 up
+  - id: done_no_err
+    type: done
+    summary: NVLink 无错误计数。卡间慢另查(NCCL 配置/拓扑/PCIe)。
+  - id: done_link_down
+    type: done
+    summary: 有 NVLink 链路 down，通信回退 PCIe 导致性能断崖。检查 NVLink桥接器/背板连接，重新插拔；确认 nvidia-fabricmanager
+      服务正常(NVSwitch 机型)。
+  - id: done_err_only
+    type: done
+    summary: 链路 up 但有错误计数。偶发可观察，持续增长则查物理链路质量；错误多时带宽会降，影响 all-reduce 性能。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: aicomp-fabric-nvlink-error-auto
+  expect_path:
+  - check_nvlink_err
+  - check_status
+  - done_link_down
+feedback:
+  ask: NVLink 错误/降级排查定位了吗？

@@ -1,0 +1,17 @@
+skill: skills/aicomp/pcie-downgrade/skill.yaml
+scenario: aicomp.gpu.pcie-downgrade 自动求解走查
+expect_path:
+- check_width
+- check_load
+- done_real_downgrade
+node_ctx:
+  check_width:
+    output:
+      value: 15
+    rows:
+    - {}
+  check_load:
+    output:
+      value: 51
+    rows:
+    - {}

@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.gpu.pcie-downgrade
+  name: GPU PCIe 链路降速排查
+  taxonomy: aicomp/gpu/pcie-downgrade
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+  - gpu.driver.version
+tree:
+  entry: check_width
+  nodes:
+  - id: check_width
+    type: check
+    title: 查 PCIe 当前链路宽度
+    run:
+      linux: nvidia-smi --query-gpu=pcie.link.width.current --format=csv,noheader
+        2>/dev/null | sort -n | head -1
+    parser: generic/count-v1
+    branch:
+    - when: output.value < 16
+      goto: check_load
+    - when: output.value >= 16
+      goto: done_width_ok
+    otherwise: check_load
+    cautions:
+    - 空载时 PCIe 会主动降速省电(ASPM)，此时 x4/x8 是正常的——必须在有负载时看当前宽度，别把节能降速误判成硬件故障
+  - id: check_load
+    type: check
+    title: 确认 GPU 是否在负载中
+    run:
+      linux: nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader 2>/dev/null
+        | tr -dc '0-9\n' | sort -rn | head -1
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 50
+      goto: done_real_downgrade
+    - when: output.value <= 50
+      goto: done_maybe_aspm
+    otherwise: escalate
+    cautions:
+    - 降速的真实危害在多卡训练的 all-reduce/参数同步阶段——H2D/D2D 带宽腰斩会拖慢整个训练
+  - id: done_width_ok
+    type: done
+    summary: PCIe 链路宽度正常(x16)。传输慢另查(NUMA 亲和/拷贝方式/pinned memory)。
+  - id: done_real_downgrade
+    type: done
+    summary: 负载中仍降速=真实链路问题。排查：GPU 没插紧/金手指氧化、PCIe 插槽或转接卡故障、BIOS 里 PCIe 代数/lane 配置。重新插拔+清洁是第一步。
+  - id: done_maybe_aspm
+    type: done
+    summary: GPU 空载，当前降速可能只是 ASPM 节能。加负载(跑个 bandwidthTest)再看宽度是否恢复 x16；恢复则正常，仍降速才是硬件问题。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: aicomp-gpu-pcie-downgrade-auto
+  expect_path:
+  - check_width
+  - check_load
+  - done_real_downgrade
+feedback:
+  ask: GPU PCIe 链路降速排查定位了吗？

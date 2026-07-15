@@ -1,14 +1,14 @@
 {
-  "skill": "middleware.kafka.consumer-lag",
+  "skill": "aicomp.gpu.clocks-locked",
   "action": "promote",
   "from": "draft",
   "to": "sim_verified",
-  "at": "2026-07-15T14:42:28",
+  "at": "2026-07-15T14:45:34",
   "validator": "0 ERROR",
   "evidence": "context_walk",
   "scenarios": [
     {
-      "scenario": "middleware-kafka-consumer-lag-auto.yaml",
+      "scenario": "aicomp-gpu-clocks-locked-auto.yaml",
       "mode": "context_walk",
       "path_ok": true,
       "rollback_ok": null

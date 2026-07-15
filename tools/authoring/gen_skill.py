@@ -98,17 +98,30 @@ def generate(spec, promote=True):
     """spec → skill.yaml 落盘 → 求解场景 → （可选）晋级。返回 (skill_path, status)。"""
     skill = _skill_from_spec(spec)
     _check_tree_floor(skill)
+    # 全局 id 唯一性防护（H-6 踩坑：id 写错撞了别处的 Skill）
+    for other in (ROOT / "skills").rglob("skill.yaml"):
+        try:
+            om = yaml.safe_load(other.read_text(encoding="utf-8")).get("metadata", {})
+        except Exception:
+            continue
+        if om.get("id") == spec["id"] and \
+           other.parent.name != spec["taxonomy"].split("/")[-1]:
+            return other, f"✘ id {spec['id']} 已被 {other} 占用（重复 id），换 id 或复用"
     # 落盘：skills/<l1>/<leaf>/skill.yaml
     l1 = spec["taxonomy"].split("/")[0]
     leaf = spec["taxonomy"].split("/")[-1]
     d = ROOT / "skills" / l1 / leaf
     skill_path = d / "skill.yaml"
-    # 叶名冲突防护：目录已存在且是别的 id → 拒绝，绝不覆盖既有 Skill（H-4 踩坑）
+    # 覆盖防护（H-4/H-6 踩坑）：目录已存在时——
+    #   ①别的 id 占用 → 拒绝（叶名冲突）；②同 id 但已晋级 → 拒绝（别覆盖既有成品）。
     if skill_path.exists():
         old = yaml.safe_load(skill_path.read_text(encoding="utf-8"))
-        if old.get("metadata", {}).get("id") != spec["id"]:
-            return skill_path, (f"✘ 叶名冲突：{d} 已被 {old['metadata']['id']} 占用，"
-                                f"换 taxonomy 叶名或复用既有 Skill")
+        oid = old.get("metadata", {}).get("id")
+        omat = old.get("metadata", {}).get("maturity")
+        if oid != spec["id"]:
+            return skill_path, (f"✘ 叶名冲突：{d} 已被 {oid} 占用，换 taxonomy 叶名或复用既有 Skill")
+        if omat and omat != "draft":
+            return skill_path, (f"✘ 已存在同名成品 {oid}（{omat}），拒绝覆盖——本就有这个 Skill，无需重造")
     d.mkdir(parents=True, exist_ok=True)
     skill_path.write_text(yaml.safe_dump(skill, allow_unicode=True, sort_keys=False),
                           encoding="utf-8")

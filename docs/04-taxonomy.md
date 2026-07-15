@@ -254,6 +254,9 @@
 
 ### 5.4 aicomp
 **aicomp/gpu**
+- `aicomp/gpu/pcie-downgrade` — "GPU 传输慢/PCIe x16 降 x4"
+- `aicomp/gpu/clocks-locked` — "GPU 算力上不去/时钟被锁降频"
+- `aicomp/fabric/nvlink-error` — "NVLink 报错/卡间带宽低"
 - `aicomp/gpu/xid-error` — "GPU XID 报错/dmesg 有 NVRM Xid"
 - `aicomp/gpu/ecc-error` — "GPU ECC 错误/显存报错"
 - `aicomp/gpu/fell-off-bus` — "掉卡/nvidia-smi 少了卡/GPU is lost"

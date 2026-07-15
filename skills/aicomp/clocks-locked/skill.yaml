@@ -1,0 +1,93 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.gpu.clocks-locked
+  name: GPU 时钟被锁/降频排查
+  taxonomy: aicomp/gpu/clocks-locked
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+  - gpu.driver.version
+tree:
+  entry: check_throttle
+  nodes:
+  - id: check_throttle
+    type: check
+    title: 查降频原因标志
+    run:
+      linux: nvidia-smi -q -d PERFORMANCE 2>/dev/null | grep -icE 'SW Thermal.*Active|HW
+        Thermal.*Active|SW Power.*Active|HW Slowdown.*Active'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_temp
+    - when: output.value == 0
+      goto: check_locked
+    otherwise: check_temp
+    cautions:
+    - nvidia-smi 的 clocks throttle reasons 直接告诉你为啥降频——热/功耗/硬件慢速。别猜，看这个字段
+  - id: check_temp
+    type: check
+    title: 查温度是否触发热降频
+    run:
+      linux: nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader 2>/dev/null
+        | sort -rn | head -1
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 83
+      goto: done_thermal
+    - when: output.value <= 83
+      goto: done_power_limit
+    otherwise: escalate
+    cautions:
+    - 多数卡 83-90℃ 开始热降频；温度高先查散热(风道/积灰/风扇/机房温度)，别急着怀疑卡坏
+  - id: check_locked
+    type: check
+    title: 查是否被 nvidia-smi -lgc 手动锁频
+    run:
+      linux: nvidia-smi --query-gpu=clocks.applications.graphics --format=csv,noheader
+        2>/dev/null | tr -dc '0-9\n' | sort -n | head -1
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_manual_lock
+    - when: output.value == 0
+      goto: escalate
+    otherwise: escalate
+    cautions:
+    - 有人跑过 nvidia-smi -lgc/-ac 锁频后忘了 -rgc 恢复，是'莫名降频'的常见人为原因
+  - id: done_thermal
+    type: done
+    summary: 热降频。查散热：清积灰、检查风扇转速、机房进风温度、GPU 风道是否被挡；降温后时钟自动恢复。
+  - id: done_power_limit
+    type: done
+    summary: 非热主导，多为功耗墙降频。查 power limit(nvidia-smi -pl)是否被调低、整机供电是否不足；按卡规格恢复功耗上限。
+  - id: done_manual_lock
+    type: done
+    summary: 时钟被手动锁定(应用时钟被设过)。用 nvidia-smi -rgc 恢复默认时钟、-rac 恢复应用时钟；确认没有开机脚本在自动锁频。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: aicomp-gpu-clocks-locked-auto
+  expect_path:
+  - check_throttle
+  - check_temp
+  - done_thermal
+feedback:
+  ask: GPU 时钟被锁/降频排查定位了吗？
