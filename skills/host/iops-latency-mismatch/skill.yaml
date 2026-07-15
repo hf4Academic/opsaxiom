@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.storage.iops-latency-mismatch
+  name: 磁盘延迟高但利用率不高排查
+  taxonomy: host/storage/iops-latency-mismatch
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_await
+  nodes:
+  - id: check_await
+    type: check
+    title: 查 await 与 util
+    run:
+      linux: iostat -dx 1 2 2>/dev/null | awk '/^[sv]d|nvme/{a=$(NF-1); u=$NF} END{print
+        "await", a; print "util", u}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.await > 20
+      goto: check_pattern
+    - when: output.await <= 20
+      goto: done_await_ok
+    otherwise: check_pattern
+    cautions:
+    - await 高 util 低=单次 IO 慢但队列不满，多为单次大 IO、fsync 频繁或后端存储（云盘/网络存储）本身延迟高，不是本地盘打满
+  - id: check_pattern
+    type: check
+    title: 看 IO 是否以同步写/小 IO 为主
+    run:
+      linux: iostat -dx 1 2 2>/dev/null | awk '/^[sv]d|nvme/{print "wps", $(2)}' |
+        tail -1
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.wps > 0
+      goto: done_sync_write
+    - when: output.wps <= 0
+      goto: done_backend_latency
+    otherwise: escalate
+    cautions:
+    - 频繁 fsync(数据库/日志)会让每次写都等落盘，await 天然高；这不是故障是特性，优化方向是 IO 合并/换更快介质，而非'修盘'
+  - id: done_await_ok
+    type: done
+    summary: await 不高，慢的原因不在磁盘延迟。转查是否 CPU/内存或应用自身。
+  - id: done_sync_write
+    type: done
+    summary: 以同步写为主，await 高是 fsync 等落盘的固有代价。优化：应用侧批量提交/组提交、开写缓存(权衡掉电风险)、换 NVMe/更快存储。
+  - id: done_backend_latency
+    type: done
+    summary: await 高但非本地同步写主导，多为后端存储(云盘/SAN/NFS)本身延迟。核对存储侧指标与 QoS 限速，非本机能修则联系存储团队。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-storage-iops-latency-mismatch-auto
+  expect_path:
+  - check_await
+  - check_pattern
+  - done_sync_write
+feedback:
+  ask: 磁盘延迟高但利用率不高排查定位了吗？

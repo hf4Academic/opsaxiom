@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.memory.hugepage-misconfig
+  name: 大页配置不当排查
+  taxonomy: host/memory/hugepage-misconfig
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_huge
+  nodes:
+  - id: check_huge
+    type: check
+    title: 查大页总数与空闲
+    run:
+      linux: awk '/HugePages_Total/{print "total",$2} /HugePages_Free/{print "free",$2}'
+        /proc/meminfo
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.total == 0
+      goto: done_not_allocated
+    - when: output.total > 0
+      goto: check_thp
+    otherwise: check_thp
+    cautions:
+    - HugePages_Total=0 说明没预留大页；预留要在内存碎片化前做（开机早期或 boot 参数），运行期临时预留常因碎片化拿不满
+  - id: check_thp
+    type: check
+    title: 看透明大页(THP)是否干扰
+    run:
+      linux: cat /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null | grep -c
+        '\[always\]'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_thp_on
+    - when: output.value == 0
+      goto: done_alloc_ok
+    otherwise: escalate
+    cautions:
+    - THP=always 对 Redis/Mongo/Oracle 常带来延迟尖刺（内存规整卡顿），这些数据库官方建议关 THP——别和显式 HugePages
+      混为一谈
+  - id: done_not_allocated
+    type: done
+    summary: 未预留大页(Total=0)。在 sysctl 配 vm.nr_hugepages 或 GRUB 加 hugepages= 参数并重启，确保碎片化前预留足量。
+  - id: done_thp_on
+    type: done
+    summary: THP=always。对延迟敏感数据库建议改为 madvise 或 never（echo never > .../enabled 并写进开机脚本），消除内存规整引起的尖刺。
+  - id: done_alloc_ok
+    type: done
+    summary: 大页已预留且 THP 未开 always。若应用仍申请失败，核对其请求的大页数量/尺寸(2M vs 1G)与实际预留是否匹配。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-memory-hugepage-misconfig-auto
+  expect_path:
+  - check_huge
+  - done_not_allocated
+feedback:
+  ask: 大页配置不当排查定位了吗？

@@ -102,7 +102,7 @@
 - `host/memory/swap-thrash` — "swap 用满/系统巨慢/si so 很高"
 - `host/memory/cache-pressure` — "available 内存很低但没进程占用/page cache"
 - `host/memory/slab-leak` — "内存被吃但没进程占用/slab 很大"
-- `host/memory/hugepage-misconfig` — "大页配置不对/应用申请大页失败"
+- `host/memory/hugepage-misconfig` — "大页配置不当/申请大页失败/THP 干扰" — "大页配置不对/应用申请大页失败"
 
 **host/storage**
 - `host/storage/capacity/disk-full` ⭐ — "磁盘满了/No space left on device"
@@ -111,6 +111,7 @@
 - `host/storage/fs-readonly` — "文件系统变只读/Read-only file system"
 - `host/storage/fs-corruption` — "文件系统报错/需要 fsck/坏块"
 - `host/storage/raid-degraded` — "RAID 降级/掉盘/阵列重建"
+- `host/storage/iops-latency-mismatch` — "磁盘 await 高但 util 不满/IO 不多却慢"
 - `host/storage/mount-failed` — "挂载失败/开机卡在挂载"
 - `host/storage/inode-exhausted` — "df 有空间却报 No space/inode 用满"
 - `host/storage/mount-failed` — "挂载失败/开机卡挂载/emergency mode"
@@ -132,6 +133,7 @@
 - `host/process/unexpected-exit` — "进程莫名退出/服务自己挂了/没日志"
 - `host/process/thread-explosion` — "线程数暴涨/nproc 超限/pthread_create 失败"
 - `host/process/thread-explosion` — "线程数暴涨/pthread_create 失败"
+- `host/process/unexpected-exit` — "进程莫名退出没日志/服务自己挂了"
 - `host/process/dstate-hang` — "进程卡 D 状态/kill 不掉/不可中断睡眠"
 
 **host/system**
@@ -150,6 +152,7 @@
 **host/provision**
 - `host/provision/agent-deploy` — "批量装探针/部署 node_exporter/下发 agent"
 - `host/provision/bootstrap` — "新机器初始化/装机后基础配置"
+- `host/provision/baseline-drift` — "配置和基线不一致/参数被改过"
 - `host/provision/baseline-harden` — "安全基线加固/等保整改/CIS 基线"
 
 ### 5.2 network

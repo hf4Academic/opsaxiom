@@ -1,0 +1,11 @@
+skill: skills/host/baseline-drift/skill.yaml
+scenario: host.provision.baseline-drift 自动求解走查
+expect_path:
+- check_sysctl
+- done_drift_found
+node_ctx:
+  check_sysctl:
+    output:
+      swappiness: 31
+    rows:
+    - {}

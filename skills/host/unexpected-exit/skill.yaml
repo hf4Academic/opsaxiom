@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.process.unexpected-exit
+  name: 进程莫名退出排查
+  taxonomy: host/process/unexpected-exit
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_oom
+  nodes:
+  - id: check_oom
+    type: check
+    title: 先排除被 OOM 杀
+    run:
+      linux: dmesg -T 2>/dev/null | grep -icE 'Killed process|oom-kill|Out of memory'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_oom
+    - when: output.value == 0
+      goto: check_journal
+    otherwise: check_journal
+    cautions:
+    - '''没日志的消失''第一嫌疑永远是 OOM——被内核 SIGKILL 的进程来不及写任何日志'
+  - id: check_journal
+    type: check
+    title: 查有无 core dump 或信号记录
+    run:
+      linux: coredumpctl list --no-pager 2>/dev/null | grep -c SERVICE || journalctl
+        --since '-1h' 2>/dev/null | grep -icE 'segfault|core dumped'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_crash
+    - when: output.value == 0
+      goto: done_no_trace
+    otherwise: escalate
+    cautions:
+    - 段错误会留 core（若开了 core dump）；没开 core 时 segfault 也会进 dmesg。生产建议开 coredumpctl 便于事后分析
+  - id: done_oom
+    type: done
+    summary: 被 OOM Killer 杀掉——这就是'没日志消失'的原因。查该进程内存增长（泄漏或配置过大），限制 MemoryMax 或修泄漏；转
+      memory/oom-kill 细查。
+  - id: done_crash
+    type: done
+    summary: 有崩溃痕迹(core/segfault)。用 coredumpctl gdb 分析 core 定位崩溃点，或看 segfault 的地址与库定位问题模块。
+  - id: done_no_trace
+    type: done
+    summary: 既非 OOM 也无崩溃痕迹。可能是被外部信号杀（人/脚本/编排器）或正常退出被误判——查是否有 supervisor/k8s 主动杀，开审计看
+      kill 来源。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-process-unexpected-exit-auto
+  expect_path:
+  - check_oom
+  - done_oom
+feedback:
+  ask: 进程莫名退出排查定位了吗？

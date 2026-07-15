@@ -1,0 +1,11 @@
+skill: skills/host/unexpected-exit/skill.yaml
+scenario: host.process.unexpected-exit 自动求解走查
+expect_path:
+- check_oom
+- done_oom
+node_ctx:
+  check_oom:
+    output:
+      value: 1
+    rows:
+    - {}

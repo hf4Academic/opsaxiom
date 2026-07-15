@@ -1,0 +1,17 @@
+skill: skills/host/iops-latency-mismatch/skill.yaml
+scenario: host.storage.iops-latency-mismatch 自动求解走查
+expect_path:
+- check_await
+- check_pattern
+- done_sync_write
+node_ctx:
+  check_await:
+    output:
+      await: 21
+    rows:
+    - {}
+  check_pattern:
+    output:
+      wps: 1
+    rows:
+    - {}

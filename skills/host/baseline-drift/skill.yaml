@@ -1,0 +1,76 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.provision.baseline-drift
+  name: 主机基线配置漂移排查
+  taxonomy: host/provision/baseline-drift
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_sysctl
+  nodes:
+  - id: check_sysctl
+    type: check
+    title: 抽查关键内核参数是否偏离基线
+    run:
+      linux: sysctl -n net.ipv4.ip_forward net.ipv4.conf.all.rp_filter vm.swappiness
+        2>/dev/null | paste -sd' ' | awk '{print "forward",$1; print "rpfilter",$2;
+        print "swappiness",$3}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.swappiness > 30
+      goto: done_drift_found
+    - when: output.swappiness <= 30
+      goto: check_selinux
+    otherwise: check_selinux
+    cautions:
+    - 基线值因业务而异（此处 swappiness 阈值仅示例）——真实基线应来自你的标准，本 Skill 演示漂移检测方法而非规定具体值
+  - id: check_selinux
+    type: check
+    title: 查安全模块状态是否被关
+    run:
+      linux: getenforce 2>/dev/null | grep -ic 'disabled\|permissive'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_security_off
+    - when: output.value == 0
+      goto: done_baseline_ok
+    otherwise: escalate
+    cautions:
+    - SELinux 被临时 setenforce 0 不会持久但会留隐患；被改 config 则重启后仍关——两者危害不同，要区分临时态与配置态
+  - id: done_drift_found
+    type: done
+    summary: 检测到内核参数偏离基线。对照标准基线恢复（sysctl -w 临时、写 sysctl.conf 持久）；查审计日志追谁改的、为什么。
+  - id: done_security_off
+    type: done
+    summary: 安全模块被关(disabled/permissive)。确认是否有意为之；无正当理由则恢复 enforcing，并排查是谁在什么时候关的。
+  - id: done_baseline_ok
+    type: done
+    summary: 抽查项符合基线。全量核查建议用配置管理工具(ansible/salt)跑一次 diff，本 Skill 只做快速抽检。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-provision-baseline-drift-auto
+  expect_path:
+  - check_sysctl
+  - done_drift_found
+feedback:
+  ask: 主机基线配置漂移排查定位了吗？

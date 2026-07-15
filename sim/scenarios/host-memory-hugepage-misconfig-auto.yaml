@@ -1,0 +1,11 @@
+skill: skills/host/hugepage-misconfig/skill.yaml
+scenario: host.memory.hugepage-misconfig 自动求解走查
+expect_path:
+- check_huge
+- done_not_allocated
+node_ctx:
+  check_huge:
+    output:
+      total: 0
+    rows:
+    - {}
