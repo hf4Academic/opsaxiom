@@ -1,0 +1,17 @@
+skill: skills/middleware/replication-slot-bloat/skill.yaml
+scenario: middleware.postgres.replication-slot-bloat 自动求解走查
+expect_path:
+- check_slots
+- check_lag
+- done_slot_bloat
+node_ctx:
+  check_slots:
+    output:
+      value: 1
+    rows:
+    - {}
+  check_lag:
+    output:
+      value: 1025
+    rows:
+    - {}

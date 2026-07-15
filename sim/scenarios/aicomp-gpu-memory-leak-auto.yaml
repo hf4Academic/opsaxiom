@@ -1,0 +1,17 @@
+skill: skills/aicomp/memory-leak/skill.yaml
+scenario: aicomp.gpu.memory-leak 自动求解走查
+expect_path:
+- check_orphan
+- check_procs
+- done_orphan_mem
+node_ctx:
+  check_orphan:
+    output:
+      value: 1001
+    rows:
+    - {}
+  check_procs:
+    output:
+      value: 1
+    rows:
+    - {}

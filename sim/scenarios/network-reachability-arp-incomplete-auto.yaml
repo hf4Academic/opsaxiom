@@ -1,0 +1,17 @@
+skill: skills/network/arp-incomplete/skill.yaml
+scenario: network.reachability.arp-incomplete 自动求解走查
+expect_path:
+- check_incomplete
+- check_intf
+- done_l2_issue
+node_ctx:
+  check_incomplete:
+    output:
+      value: 1
+    rows:
+    - {}
+  check_intf:
+    output:
+      value: 1
+    rows:
+    - {}

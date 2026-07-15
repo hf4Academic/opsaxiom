@@ -1,0 +1,17 @@
+skill: skills/network/mac-table-full/skill.yaml
+scenario: network.switching.mac-table-full 自动求解走查
+expect_path:
+- check_count
+- check_port
+- done_flood_attack
+node_ctx:
+  check_count:
+    output:
+      value: 8001
+    rows:
+    - {}
+  check_port:
+    output:
+      value: 5001
+    rows:
+    - {}

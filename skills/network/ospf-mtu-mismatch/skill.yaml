@@ -1,0 +1,83 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.routing.ospf-mtu-mismatch
+  name: OSPF 邻居卡 ExStart(MTU 不匹配)排查
+  taxonomy: network/routing/ospf-mtu-mismatch
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_stuck
+  nodes:
+  - id: check_stuck
+    type: check
+    title: 查是否有邻居卡在 ExStart/Exchange
+    run:
+      cisco_ios: show ip ospf neighbor | include EXSTART|EXCHANGE
+      huawei_vrp: display ospf peer | include ExStart|Exchange
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_mtu
+    - when: output.value == 0
+      goto: done_not_stuck
+    otherwise: check_mtu
+    cautions:
+    - OSPF 邻居卡 ExStart/Exchange 建不成 Full 的最经典原因就是两端接口 MTU 不一致——DBD 报文交换时因 MTU 对不上被拒,卡住不前;先怀疑
+      MTU 再查别的
+  - id: check_mtu
+    type: check
+    title: 查接口 MTU 配置
+    run:
+      cisco_ios: show ip ospf interface | include MTU
+      huawei_vrp: display ospf interface | include MTU
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_mtu_check
+    - when: output.value == 0
+      goto: done_other_param
+    otherwise: escalate
+    cautions:
+    - 核对两端接口 MTU 必须一致;临时可在接口下配 ip ospf mtu-ignore 让 OSPF 忽略 MTU 检查绕过,但那是权宜——根治要把两端
+      MTU 改一致,否则大 LSA 仍可能出问题
+  - id: done_not_stuck
+    type: done
+    summary: 无邻居卡 ExStart/Exchange。OSPF 邻居问题另查(Init/2-Way 卡则是 hello/网络类型/DR 选举;建不起则查
+      area/认证/timer)。
+  - id: done_mtu_check
+    type: done
+    summary: 邻居卡 ExStart 且能读到 MTU=高度疑似 MTU 不匹配。核对两端接口 MTU 改一致;应急可配 mtu-ignore 先建起邻居,但要尽快统一
+      MTU 根治。
+  - id: done_other_param
+    type: done
+    summary: 卡 ExStart 但 MTU 信息不足以判定。逐项核对两端:MTU、OSPF 区域类型、认证、以及是否有 ACL/防火墙挡了 OSPF
+      组播(224.0.0.5/6)。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-routing-ospf-mtu-mismatch-auto
+  expect_path:
+  - check_stuck
+  - check_mtu
+  - done_mtu_check
+feedback:
+  ask: OSPF 邻居卡 ExStart(MTU 不匹配)排查定位了吗？

@@ -1,0 +1,79 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.physical.input-drops
+  name: 接口输入丢包排查(收方向)
+  taxonomy: network/physical/input-drops
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_indrops
+  nodes:
+  - id: check_indrops
+    type: check
+    title: 查接口输入丢包/溢出
+    run:
+      cisco_ios: show interfaces | include input.*drops|overrun|no buffer|ignored
+      huawei_vrp: display interface | include Input.*drop|Overrun|buffer
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_rate
+    - when: output.value == 0
+      goto: done_no_indrop
+    otherwise: check_rate
+    cautions:
+    - 输入丢包(input drops/overrun/no buffer)多在收方向缓冲不够或收包处理跟不上:CPU 忙、中断处理慢、或瞬时收包超过接口/驱动缓冲——和输出丢包(拥塞)成因不同,别混为一谈
+  - id: check_rate
+    type: check
+    title: 看输入速率是否接近接口能力
+    run:
+      cisco_ios: show interfaces | include input rate|rxload
+      huawei_vrp: display interface | include input rate|InUti
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_overrun
+    - when: output.value == 0
+      goto: done_buffer_tune
+    otherwise: escalate
+    cautions:
+    - overrun(收方硬件来不及取走帧)常伴随高收包率或 CPU 繁忙;ignored/no buffer 多为缓冲资源不足。持续 input drops
+      会造成上层重传、吞吐下降
+  - id: done_no_indrop
+    type: done
+    summary: 接口无输入丢包。收包问题另查(错包 CRC/双工/光功率/对端发送)。
+  - id: done_overrun
+    type: done
+    summary: 输入丢包伴高收包率=收方处理/缓冲跟不上。查设备 CPU 是否繁忙、是否有异常大流量(攻击/环路)冲击;分流或升级接口,必要时优化收包路径(硬件转发/中断)。
+  - id: done_buffer_tune
+    type: done
+    summary: 输入丢包但速率不高,多为缓冲资源不足或突发。调整接口收缓冲/队列、排查是否微突发冲击;若持续 ignored/no buffer 需查设备缓冲配置与整体负载。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-physical-input-drops-auto
+  expect_path:
+  - check_indrops
+  - check_rate
+  - done_overrun
+feedback:
+  ask: 接口输入丢包排查(收方向)定位了吗？

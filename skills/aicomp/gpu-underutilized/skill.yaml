@@ -1,0 +1,80 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.inference.gpu-underutilized
+  name: 推理服务 GPU 利用率低排查
+  taxonomy: aicomp/inference/gpu-underutilized
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+  - gpu.driver.version
+tree:
+  entry: check_util
+  nodes:
+  - id: check_util
+    type: check
+    title: 查推理时 GPU 利用率
+    run:
+      linux: nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader 2>/dev/null
+        | tr -dc '0-9\n' | sort -rn | head -1
+    parser: generic/count-v1
+    branch:
+    - when: output.value < 50
+      goto: check_batch
+    - when: output.value >= 50
+      goto: done_util_ok
+    otherwise: check_batch
+    cautions:
+    - 推理 GPU 利用率低+延迟高的典型原因是没做动态批处理(dynamic batching):请求一个个串行推,GPU 大量空泡;吞吐瓶颈常在服务框架配置而非
+      GPU 本身
+  - id: check_batch
+    type: check
+    title: 看是否单请求独占(未批处理)
+    run:
+      linux: nvidia-smi --query-compute-apps=used_memory --format=csv,noheader,nounits
+        2>/dev/null | sort -n | head -1
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_no_batching
+    - when: output.value == 0
+      goto: done_idle_service
+    otherwise: escalate
+    cautions:
+    - 提吞吐的杠杆:开动态批处理攒请求一起算、多实例/多 worker 填满 GPU、用 Triton/vLLM 这类带批调度的推理框架;盲目加卡不如先把单卡吃满
+  - id: done_util_ok
+    type: done
+    summary: GPU 利用率不低。吞吐不达标另查(前后处理/网络/序列化/客户端并发不足)。
+  - id: done_no_batching
+    type: done
+    summary: GPU 有负载但利用率低,多为未批处理串行推理。开动态批处理(dynamic batching)、调大 max_batch_size 与队列延迟、部署多实例填满
+      GPU;换 Triton/vLLM 等带批调度框架。
+  - id: done_idle_service
+    type: done
+    summary: GPU 上没有推理进程占用,服务可能没真正加载到 GPU 或请求没进来。确认模型加载到了 GPU(非 CPU 回退)、服务在监听、客户端确有请求打过来。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: aicomp-inference-gpu-underutilized-auto
+  expect_path:
+  - check_util
+  - check_batch
+  - done_no_batching
+feedback:
+  ask: 推理服务 GPU 利用率低排查定位了吗？

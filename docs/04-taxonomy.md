@@ -161,6 +161,12 @@
 - `host/provision/baseline-harden` — "安全基线加固/等保整改/CIS 基线"
 
 ### 5.2 network
+**network（H-push 第五批，收官至 200）**
+- `network/routing/ospf-mtu-mismatch` — "OSPF 卡 ExStart/Exchange/MTU 不一致"
+- `network/switching/mac-table-full` — "MAC 表满/未知单播泛洪/学不了新地址"
+- `network/reachability/arp-incomplete` — "ARP incomplete/解析不到 MAC/网关不通"
+- `network/physical/input-drops` — "接口输入丢包/overrun/no buffer/收方向"
+
 **network（H-push 第四批）**
 - `network/routing/bgp-max-prefix` — "BGP 前缀超限断邻居/max-prefix 触发/邻居 Idle"
 - `network/reachability/asymmetric-routing` — "非对称路由/单向不通/防火墙丢半程"
@@ -307,6 +313,12 @@
 - `aicomp/collective/nccl-hang` — "训练 hang 在通信/NCCL 卡住不动"
 - `aicomp/collective/nccl-init-fail` — "NCCL 初始化失败/建不了通信组"
 
+**aicomp（H-push 第四批）**
+- `aicomp/inference/gpu-underutilized` — "推理 QPS 低/GPU 没吃满/未批处理"
+- `aicomp/gpu/memory-leak` — "显存只涨不降/退出后没释放/长跑 OOM"
+- `aicomp/gpu/persistence-mode-off` — "首次调用慢/驱动反复初始化/持久化未开"
+- `aicomp/collective/nccl-topology-suboptimal` — "没走 NVLink/P2P 被禁/带宽低于预期"
+
 **aicomp（H-push 第三批）**
 - `aicomp/gpu/cuda-oom` — "CUDA out of memory/显存不足/OOM 但看着有余量"
 - `aicomp/gpu/mig-misconfig` — "MIG 分不到实例/看不到 MIG 设备"
@@ -326,6 +338,12 @@
 - `aicomp/scheduling/gpu-fragmentation` — "GPU 碎片化/整机分配不出来"
 
 ### 5.5 middleware
+**H-push 第四批**
+- `middleware/redis/cluster-down` — "CLUSTERDOWN/槽位未覆盖/hash slot not served"
+- `middleware/kafka/log-disk-full` — "broker 磁盘满/log dir offline/写不进"
+- `middleware/postgres/replication-slot-bloat` — "复制槽滞留 WAL/pg_wal 撑盘"
+- `middleware/nginx/reload-fail` — "reload 失败/nginx -t 不过/配置不生效"
+
 **新引擎（H-push 第三批）**
 - `middleware/postgres/connection-exhausted` — "PG too many clients/连接耗尽/idle in txn"
 - `middleware/postgres/autovacuum-lag` — "PG 表膨胀/autovacuum 跟不上/事务ID回卷"

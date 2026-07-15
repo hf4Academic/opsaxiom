@@ -40,3 +40,5 @@ prefixes:
   - display cpu-usage
   # H-push network batch4 扩展（Huawei VRP Command Reference，只读）
   - display storm-control
+  # H-push network batch5 扩展（Huawei VRP Command Reference，只读）
+  - display ospf interface

@@ -1,0 +1,80 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.postgres.replication-slot-bloat
+  name: PostgreSQL 复制槽导致 WAL 撑盘排查
+  taxonomy: middleware/postgres/replication-slot-bloat
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_slots
+  nodes:
+  - id: check_slots
+    type: check
+    title: 查是否有非活跃复制槽
+    run:
+      linux: psql -tAc "SELECT count(*) FROM pg_replication_slots WHERE active='f'"
+        2>/dev/null
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_lag
+    - when: output.value == 0
+      goto: done_no_dead_slot
+    otherwise: check_lag
+    cautions:
+    - 复制槽会让主库保留下游还没消费的 WAL——下游(从库/逻辑订阅)掉了但槽还在,主库就一直不敢删 WAL,pg_wal 无限膨胀直到撑爆磁盘;废弃的 inactive
+      槽是撑盘头号元凶
+  - id: check_lag
+    type: check
+    title: 查槽滞留的 WAL 大小
+    run:
+      linux: psql -tAc "SELECT COALESCE(max(pg_wal_lsn_diff(pg_current_wal_lsn(),
+        restart_lsn))/1048576,0)::int FROM pg_replication_slots" 2>/dev/null
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 1024
+      goto: done_slot_bloat
+    - when: output.value <= 1024
+      goto: done_slot_ok
+    otherwise: escalate
+    cautions:
+    - 槽滞留 WAL 很大=下游远远落后或已死;确认该槽对应的下游是否还需要——真废弃就 drop 掉释放 WAL,别设 max_slot_wal_keep_size
+      之外还留着僵尸槽
+  - id: done_no_dead_slot
+    type: done
+    summary: 无非活跃复制槽。pg_wal 涨另查(checkpoint 间隔、archive_command 卡住没归档成功、wal 生成量突增)。
+  - id: done_slot_bloat
+    type: done
+    summary: 非活跃复制槽滞留大量 WAL 撑盘。确认对应下游确已废弃后 pg_drop_replication_slot删除该槽,WAL 即可回收;设
+      max_slot_wal_keep_size 兜底防复发。
+  - id: done_slot_ok
+    type: done
+    summary: 有非活跃槽但滞留 WAL 不大。观察下游是否会重连消费;短期掉线可等其恢复,长期不用则清理该槽,避免日后堆积。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: middleware-postgres-replication-slot-bloat-auto
+  expect_path:
+  - check_slots
+  - check_lag
+  - done_slot_bloat
+feedback:
+  ask: PostgreSQL 复制槽导致 WAL 撑盘排查定位了吗？

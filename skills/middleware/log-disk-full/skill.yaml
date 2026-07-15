@@ -1,0 +1,80 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.kafka.log-disk-full
+  name: Kafka 磁盘满/日志段堆积排查
+  taxonomy: middleware/kafka/log-disk-full
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_disk
+  nodes:
+  - id: check_disk
+    type: check
+    title: 查 Kafka 数据目录磁盘使用
+    run:
+      linux: df /var/lib/kafka /data/kafka 2>/dev/null | awk 'NR>1{gsub(/%/,"",$5);
+        if($5>m)m=$5} END{print m+0}'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 85
+      goto: check_retention
+    - when: output.value <= 85
+      goto: done_disk_ok
+    otherwise: check_retention
+    cautions:
+    - Kafka 磁盘满会让对应 log dir 下线,该 broker 上的分区不可用;别直接删 .log 段文件——会破坏索引和副本一致性,要通过调 retention
+      让 Kafka 自己清
+  - id: check_retention
+    type: check
+    title: 看是否有超大 topic 占满盘
+    run:
+      linux: du -s /var/lib/kafka/* /data/kafka/* 2>/dev/null | sort -rn | head -1
+        | awk '{print int($1/1048576)}'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 50
+      goto: done_big_topic
+    - when: output.value <= 50
+      goto: done_general_full
+    otherwise: escalate
+    cautions:
+    - 单 topic 占盘巨大多因 retention 设太长/无限、或该 topic 写入量远超预期;调小 retention.ms/retention.bytes
+      让旧段被清,是安全的降盘手段(别手删文件)
+  - id: done_disk_ok
+    type: done
+    summary: Kafka 磁盘未满。写入失败另查(broker/controller 状态、ISR、副本、ZK/KRaft 元数据)。
+  - id: done_big_topic
+    type: done
+    summary: 某 topic 占盘过大撑满磁盘。对其调小 retention.ms/retention.bytes 触发清理,或扩盘/迁移分区;确认写入量是否异常(生产端暴增)。别手动删段文件。
+  - id: done_general_full
+    type: done
+    summary: 磁盘普遍占满,非单 topic 独大。整体缩短 retention、扩容磁盘、或增加 broker分摊分区;恢复空间后被 offline
+      的 log dir 需按流程重新上线。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: middleware-kafka-log-disk-full-auto
+  expect_path:
+  - check_disk
+  - check_retention
+  - done_big_topic
+feedback:
+  ask: Kafka 磁盘满/日志段堆积排查定位了吗？

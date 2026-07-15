@@ -1,0 +1,80 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.collective.nccl-topology-suboptimal
+  name: NCCL 拓扑选路不优排查
+  taxonomy: aicomp/collective/nccl-topology-suboptimal
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+  - gpu.driver.version
+tree:
+  entry: check_p2p
+  nodes:
+  - id: check_p2p
+    type: check
+    title: 查卡间是否支持 P2P(NVLink/PCIe 直连)
+    run:
+      linux: nvidia-smi topo -m 2>/dev/null | grep -icE 'NV[0-9]+'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_env
+    - when: output.value == 0
+      goto: done_no_nvlink
+    otherwise: check_env
+    cautions:
+    - nvidia-smi topo -m 的矩阵里 NV# 表示卡间走 NVLink,PIX/PXB 走 PCIe,SYS 跨 NUMA/QPI 最慢;NCCL
+      会按拓扑选路,但选路不优时带宽远低于 NVLink 峰值——先看物理拓扑支持什么
+  - id: check_env
+    type: check
+    title: 查是否有环境变量强制降级选路
+    run:
+      linux: env 2>/dev/null | grep -icE 'NCCL_P2P_DISABLE=1|NCCL_P2P_LEVEL=0|NCCL_SHM_DISABLE=1'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_p2p_disabled
+    - when: output.value == 0
+      goto: done_topo_ok
+    otherwise: escalate
+    cautions:
+    - NCCL_P2P_DISABLE=1 之类环境变量(常为规避某些 bug 临时加的)会强制关掉 P2P,让通信绕远路;'有 NVLink 却走得慢'先查是不是被这类变量降级了
+  - id: done_no_nvlink
+    type: done
+    summary: 卡间无 NVLink 直连(拓扑走 PCIe/SYS)。这是硬件拓扑决定的上限;多机/无 NVLink 机型要靠 IB/RoCE 与合理并行策略,别期望
+      NVLink 级带宽。
+  - id: done_p2p_disabled
+    type: done
+    summary: 有 NVLink 但被环境变量关了 P2P。核实 NCCL_P2P_DISABLE/P2P_LEVEL/SHM_DISABLE是否有必要(多为遗留的临时规避),去掉后让
+      NCCL 走 NVLink,带宽恢复。
+  - id: done_topo_ok
+    type: done
+    summary: 拓扑支持 NVLink 且无强制降级,选路应正常。带宽仍不达预期用 NCCL_DEBUG=INFO看实际选的 channel/协议、确认绑核与
+      NUMA 亲和、以及是否被其它进程抢占带宽。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: aicomp-collective-nccl-topology-suboptimal-auto
+  expect_path:
+  - check_p2p
+  - check_env
+  - done_p2p_disabled
+feedback:
+  ask: NCCL 拓扑选路不优排查定位了吗？

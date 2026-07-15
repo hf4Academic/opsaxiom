@@ -83,9 +83,14 @@ def score(query, skill):
     return s
 
 
+# 噪声地板：单个字符 2-gram 偶然重合得分 0.6，属噪声不应浮出为假设。
+# 真实匹配（哪怕弱相关）都 ≥1.2（两个 bigram 或任一词元命中），故 1.0 干净切分。
+NOISE_FLOOR = 1.0
+
+
 def match(query, idx=None, top=5):
     idx = idx or load_index()
     scored = [(score(query, sk), sk) for sk in idx]
-    scored = [(sc, sk) for sc, sk in scored if sc > 0]
+    scored = [(sc, sk) for sc, sk in scored if sc >= NOISE_FLOOR]
     scored.sort(key=lambda x: (-x[0], x[1]["id"]))
     return scored[:top]

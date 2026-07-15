@@ -1,0 +1,79 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.switching.mac-table-full
+  name: MAC 地址表满排查
+  taxonomy: network/switching/mac-table-full
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_count
+  nodes:
+  - id: check_count
+    type: check
+    title: 查 MAC 表项规模
+    run:
+      cisco_ios: show mac address-table count | include Dynamic|Total
+      huawei_vrp: display mac-address total-number
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 8000
+      goto: check_port
+    - when: output.value <= 8000
+      goto: done_not_full
+    otherwise: check_port
+    cautions:
+    - MAC 表满后学不到新地址,目的为新地址的帧只能全端口泛洪(未知单播泛洪),既浪费带宽又是安全隐患;表项异常暴涨常因二层环路或 MAC 泛洪攻击
+  - id: check_port
+    type: check
+    title: 看是否某端口学到海量 MAC
+    run:
+      cisco_ios: show mac address-table | include DYNAMIC
+      huawei_vrp: display mac-address | include dynamic
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 5000
+      goto: done_flood_attack
+    - when: output.value <= 5000
+      goto: done_real_scale
+    otherwise: escalate
+    cautions:
+    - 单端口学到成千上万 MAC=典型 MAC 泛洪(攻击/环路/下挂大量虚拟机);port-security 限制每端口MAC 数可止血;正常大二层则是规模到了,需评估表容量
+  - id: done_not_full
+    type: done
+    summary: MAC 表未满。接入不通另查(VLAN/端口状态/STP block/物理链路)。
+  - id: done_flood_attack
+    type: done
+    summary: 单端口学到海量 MAC(疑似泛洪/环路)。定位该端口下挂什么,配 port-security 限制每端口 MAC 数止血,排查二层环路或异常主机;这是
+      MAC 表被打满的根因。
+  - id: done_real_scale
+    type: done
+    summary: MAC 分布正常但总量接近上限=真实规模大。评估交换机 MAC 表容量,拆分广播域/VLAN 减少单表规模,或升级到表更大的设备。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-switching-mac-table-full-auto
+  expect_path:
+  - check_count
+  - check_port
+  - done_flood_attack
+feedback:
+  ask: MAC 地址表满排查定位了吗？

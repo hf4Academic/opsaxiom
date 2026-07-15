@@ -1,0 +1,17 @@
+skill: skills/middleware/log-disk-full/skill.yaml
+scenario: middleware.kafka.log-disk-full 自动求解走查
+expect_path:
+- check_disk
+- check_retention
+- done_big_topic
+node_ctx:
+  check_disk:
+    output:
+      value: 86
+    rows:
+    - {}
+  check_retention:
+    output:
+      value: 51
+    rows:
+    - {}

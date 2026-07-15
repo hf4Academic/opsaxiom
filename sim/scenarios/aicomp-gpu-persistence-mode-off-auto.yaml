@@ -1,0 +1,17 @@
+skill: skills/aicomp/persistence-mode-off/skill.yaml
+scenario: aicomp.gpu.persistence-mode-off 自动求解走查
+expect_path:
+- check_pm
+- check_daemon
+- done_daemon_on
+node_ctx:
+  check_pm:
+    output:
+      value: 1
+    rows:
+    - {}
+  check_daemon:
+    output:
+      value: 1
+    rows:
+    - {}

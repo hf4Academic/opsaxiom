@@ -1,0 +1,17 @@
+{
+  "skill": "aicomp.collective.nccl-topology-suboptimal",
+  "action": "promote",
+  "from": "draft",
+  "to": "sim_verified",
+  "at": "2026-07-15T16:36:44",
+  "validator": "0 ERROR",
+  "evidence": "context_walk",
+  "scenarios": [
+    {
+      "scenario": "aicomp-collective-nccl-topology-suboptimal-auto.yaml",
+      "mode": "context_walk",
+      "path_ok": true,
+      "rollback_ok": null
+    }
+  ]
+}

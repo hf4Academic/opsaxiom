@@ -1,0 +1,79 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.gpu.memory-leak
+  name: GPU 显存泄漏排查(占用只涨不降)
+  taxonomy: aicomp/gpu/memory-leak
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+  - gpu.driver.version
+tree:
+  entry: check_orphan
+  nodes:
+  - id: check_orphan
+    type: check
+    title: 查是否有已退出进程仍占显存
+    run:
+      linux: nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null
+        | sort -rn | head -1
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 1000
+      goto: check_procs
+    - when: output.value <= 1000
+      goto: done_mem_low
+    otherwise: check_procs
+    cautions:
+    - 显存'只涨不降'要分清:是运行中进程真的在累积(应用层泄漏,如没释放的中间张量/缓存),还是崩溃进程没清干净残留占用——两者定位完全不同
+  - id: check_procs
+    type: check
+    title: 看占显存的进程是否还活着
+    run:
+      linux: nvidia-smi --query-compute-apps=pid --format=csv,noheader 2>/dev/null
+        | while read p; do kill -0 $p 2>/dev/null || echo dead; done | grep -c dead
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_orphan_mem
+    - when: output.value == 0
+      goto: done_app_leak
+    otherwise: escalate
+    cautions:
+    - nvidia-smi 有时显示已死进程仍占显存(驱动没回收);而进程都活着却显存涨=应用层泄漏。MPS/容器环境残留更常见
+  - id: done_mem_low
+    type: done
+    summary: 显存占用不高。OOM 另查(峰值批次/碎片,见 aicomp.gpu.cuda-oom)。
+  - id: done_orphan_mem
+    type: done
+    summary: 有已退出进程残留占显存(崩溃没清干净)。确认无正常任务后清理残留进程/重置 GPU(nvidia-smi -r,需无活跃进程);容器/MPS
+      环境注意退出时的资源回收。
+  - id: done_app_leak
+    type: done
+    summary: 占显存进程都活着但显存持续涨=应用层泄漏。查代码是否累积张量/未清缓存(如 Python 引用没释放、循环里 append GPU 张量);用显存快照工具定位增长点。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: aicomp-gpu-memory-leak-auto
+  expect_path:
+  - check_orphan
+  - check_procs
+  - done_orphan_mem
+feedback:
+  ask: GPU 显存泄漏排查(占用只涨不降)定位了吗？

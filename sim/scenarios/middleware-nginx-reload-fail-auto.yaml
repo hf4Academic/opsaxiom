@@ -1,0 +1,11 @@
+skill: skills/middleware/reload-fail/skill.yaml
+scenario: middleware.nginx.reload-fail 自动求解走查
+expect_path:
+- check_test
+- done_syntax_err
+node_ctx:
+  check_test:
+    output:
+      value: 1
+    rows:
+    - {}

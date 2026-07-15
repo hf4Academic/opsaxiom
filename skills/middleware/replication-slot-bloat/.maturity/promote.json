@@ -1,0 +1,17 @@
+{
+  "skill": "middleware.postgres.replication-slot-bloat",
+  "action": "promote",
+  "from": "draft",
+  "to": "sim_verified",
+  "at": "2026-07-15T16:35:25",
+  "validator": "0 ERROR",
+  "evidence": "context_walk",
+  "scenarios": [
+    {
+      "scenario": "middleware-postgres-replication-slot-bloat-auto.yaml",
+      "mode": "context_walk",
+      "path_ok": true,
+      "rollback_ok": null
+    }
+  ]
+}

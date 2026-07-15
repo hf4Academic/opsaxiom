@@ -57,5 +57,6 @@ def test_remote_target_returns_plan_not_execution(monkeypatch, tmp_path):
 
 def test_no_match_is_graceful(monkeypatch, tmp_path):
     monkeypatch.setenv("OPSAXIOM_HOME", str(tmp_path))
+    # 无关输入的单个 2-gram 偶然重合（噪声地板以下）不应浮出为假设
     r = IC.run_incident("zzz 完全不相关的输入 qqq", target="local")
     assert r["hypotheses"] == [] and r["dossier"] is None

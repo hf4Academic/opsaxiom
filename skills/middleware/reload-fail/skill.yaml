@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.nginx.reload-fail
+  name: Nginx 配置 reload 失败排查
+  taxonomy: middleware/nginx/reload-fail
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_test
+  nodes:
+  - id: check_test
+    type: check
+    title: 查配置语法测试是否通过
+    run:
+      linux: nginx -t 2>&1 | grep -ic 'test failed\|emerg\|unexpected\|unknown directive'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_syntax_err
+    - when: output.value == 0
+      goto: check_master
+    otherwise: check_master
+    cautions:
+    - reload 前 Nginx 会先测配置,测不过就拒绝加载、继续用旧配置(这是保护,服务不中断);'改了不生效'第一件事就是 nginx -t 看新配置到底有没有语法/引用错误
+  - id: check_master
+    type: check
+    title: 看 master 进程是否在运行
+    run:
+      linux: 'pgrep -c -f ''nginx: master'' 2>/dev/null'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_reload_ok
+    - when: output.value == 0
+      goto: done_no_master
+    otherwise: escalate
+    cautions:
+    - reload 靠给 master 发 HUP 信号;master 没跑(或 reload 命令发给了错的实例)自然不生效;确认是对正确的 master
+      进程做 reload,systemd 管理的用 systemctl reload
+  - id: done_syntax_err
+    type: done
+    summary: 配置语法测试不通过,reload 被拒(仍用旧配置)。按 nginx -t 报错定位行修复(常见:分号缺失、指令拼错、引用的证书/upstream
+      文件不存在),修好再 reload。
+  - id: done_no_master
+    type: done
+    summary: Nginx master 进程未运行,reload 无对象。这已不是 reload 问题——先 start 起 Nginx;查它为何没跑(上次启动失败/被
+      kill/端口占用)。
+  - id: done_reload_ok
+    type: done
+    summary: 配置测试通过且 master 在跑,reload 应已生效。若仍是旧行为,确认改的是被 include的正确文件、是否有多实例、浏览器/上游缓存;必要时用
+      systemctl reload 再触发一次。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: middleware-nginx-reload-fail-auto
+  expect_path:
+  - check_test
+  - done_syntax_err
+feedback:
+  ask: Nginx 配置 reload 失败排查定位了吗？

@@ -1,0 +1,17 @@
+skill: skills/aicomp/gpu-underutilized/skill.yaml
+scenario: aicomp.inference.gpu-underutilized 自动求解走查
+expect_path:
+- check_util
+- check_batch
+- done_no_batching
+node_ctx:
+  check_util:
+    output:
+      value: 49
+    rows:
+    - {}
+  check_batch:
+    output:
+      value: 1
+    rows:
+    - {}

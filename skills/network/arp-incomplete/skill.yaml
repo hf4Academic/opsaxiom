@@ -1,0 +1,82 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.reachability.arp-incomplete
+  name: ARP 解析失败排查(网关/主机不通)
+  taxonomy: network/reachability/arp-incomplete
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_incomplete
+  nodes:
+  - id: check_incomplete
+    type: check
+    title: 查 incomplete/未解析的 ARP 表项
+    run:
+      cisco_ios: show ip arp | include Incomplete
+      huawei_vrp: 'display arp | include Incomplete|I - '
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_intf
+    - when: output.value == 0
+      goto: done_arp_resolved
+    otherwise: check_intf
+    cautions:
+    - ARP 表项 Incomplete=发了 ARP 请求但没收到应答,解析不到对端 MAC,二层就发不出去;先分清是对端真不在/没响应,还是中间二层不通(VLAN
+      不对/端口 down/被隔离)
+  - id: check_intf
+    type: check
+    title: 查相关接口是否 up
+    run:
+      cisco_ios: show ip interface brief | include up
+      huawei_vrp: display ip interface brief | include up
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_l2_issue
+    - when: output.value == 0
+      goto: done_intf_down
+    otherwise: escalate
+    cautions:
+    - 接口/SVI down 时该网段 ARP 必然解析不了;接口 up 却 incomplete 则问题在二层路径(VLAN 不匹配、端口隔离、对端主机防火墙丢
+      ARP)
+  - id: done_arp_resolved
+    type: done
+    summary: ARP 均已解析。不通另查(三层路由/ACL/对端服务/更高层)。
+  - id: done_intf_down
+    type: done
+    summary: 相关接口/SVI down 导致 ARP 解析失败。先恢复接口(物理链路/no shutdown/VLAN 接口状态);接口起来 ARP
+      才能正常解析。
+  - id: done_l2_issue
+    type: done
+    summary: 接口 up 但 ARP incomplete=二层路径不通。查 VLAN 是否两端一致、端口是否被隔离(port-isolate/PVLAN)、对端主机是否在线且未防火墙丢
+      ARP;必要时抓包看 ARP 请求是否到对端。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-reachability-arp-incomplete-auto
+  expect_path:
+  - check_incomplete
+  - check_intf
+  - done_l2_issue
+feedback:
+  ask: ARP 解析失败排查(网关/主机不通)定位了吗？

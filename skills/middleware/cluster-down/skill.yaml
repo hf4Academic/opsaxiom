@@ -1,0 +1,80 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.redis.cluster-down
+  name: Redis Cluster 槽位未覆盖排查
+  taxonomy: middleware/redis/cluster-down
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_state
+  nodes:
+  - id: check_state
+    type: check
+    title: 查集群状态是否 ok
+    run:
+      linux: redis-cli cluster info 2>/dev/null | grep -c 'cluster_state:fail'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_slots
+    - when: output.value == 0
+      goto: done_state_ok
+    otherwise: check_slots
+    cautions:
+    - cluster_state:fail=有槽位没有主节点提供服务,整个集群拒绝相关请求;默认配置下只要有一个槽无人负责,cluster-require-full-coverage
+      就让全集群不可写——一个分片挂能拖垮全局
+  - id: check_slots
+    type: check
+    title: 查已分配的槽位数是否满 16384
+    run:
+      linux: 'redis-cli cluster info 2>/dev/null | awk -F: ''/cluster_slots_assigned/{print
+        "assigned", $2}'''
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.assigned < 16384
+      goto: done_slots_missing
+    - when: output.assigned >= 16384
+      goto: done_all_assigned
+    otherwise: escalate
+    cautions:
+    - 16384 个槽必须全部有主负责集群才 ok;缺槽多因某主节点宕机且无从可升、或 reshard 中断;cluster_slots_assigned <
+      16384 直接点出缺了多少槽
+  - id: done_state_ok
+    type: done
+    summary: 集群状态 ok。部分 key 失败另查(客户端未处理 MOVED/ASK 重定向、连错节点、大 key 超时)。
+  - id: done_slots_missing
+    type: done
+    summary: 有槽位未分配(集群 fail)。查负责缺失槽的主节点是否宕机——恢复它或把其从升为主(cluster failover);reshard
+      中断则续做迁移把槽补齐,集群才恢复。
+  - id: done_all_assigned
+    type: done
+    summary: 槽位已满但状态曾 fail,可能是从节点视角或瞬时。在多个节点确认 cluster_state,检查节点间连通(cluster bus 端口)与
+      pfail/fail 标记,排查网络分区。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: middleware-redis-cluster-down-auto
+  expect_path:
+  - check_state
+  - check_slots
+  - done_slots_missing
+feedback:
+  ask: Redis Cluster 槽位未覆盖排查定位了吗？
