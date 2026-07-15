@@ -1,0 +1,11 @@
+skill: skills/sec/security-baseline/skill.yaml
+scenario: sec.kernel.security-baseline 自动求解走查
+expect_path:
+- check_aslr
+- done_aslr_off
+node_ctx:
+  check_aslr:
+    output:
+      aslr: 1
+    rows:
+    - {}

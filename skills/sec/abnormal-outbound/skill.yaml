@@ -1,0 +1,76 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: sec.network.abnormal-outbound
+  name: 异常外连排查
+  taxonomy: sec/network/abnormal-outbound
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_estab
+  nodes:
+  - id: check_estab
+    type: check
+    title: 统计对外已建立连接数
+    run:
+      linux: ss -tnH state established 2>/dev/null | awk '{print $4}' | grep -vcE
+        '127\.0\.0\.1|::1'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_proc
+    - when: output.value == 0
+      goto: done_no_outbound
+    otherwise: check_proc
+    cautions:
+    - 排查外连先看'谁在连、连去哪'两件事;正常业务外连能对应到已知服务(DB/API/仓库),对不上进程或目的地陌生的才可疑,别把正常业务连接当威胁
+  - id: check_proc
+    type: check
+    title: 查是否有无属主/可疑进程发起外连
+    run:
+      linux: ss -tnpH state established 2>/dev/null | grep -icE 'users:\(\("(sh|bash|perl|python[0-9.]*|nc|ncat|curl|wget)"'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_suspicious_conn
+    - when: output.value == 0
+      goto: done_outbound_known
+    otherwise: escalate
+    cautions:
+    - shell/脚本解释器/nc 直接持有对外长连接是反连(reverse shell)的典型特征;而 curl/wget 常连=可能是定时下载器(挖矿/木马拉马)。看它连的目的地和父进程链
+  - id: done_no_outbound
+    type: done
+    summary: 无对外已建立连接。若怀疑外连威胁,可再抓一段时间(周期性外连可能间歇);或结合防火墙出站日志看有无被拦的尝试。
+  - id: done_suspicious_conn
+    type: done
+    summary: shell/脚本/nc 类进程持有外连(疑似反连或恶意下载)。取证(记录目的IP/端口/进程树/打开文件),隔离该主机,排查入侵入口与持久化(计划任务/启动项)。
+  - id: done_outbound_known
+    type: done
+    summary: 外连均由常规服务发起。逐一核对目的地与业务预期一致,用出站防火墙白名单收窄(只放行必要目的地),降低被反连/外传的面。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: sec-network-abnormal-outbound-auto
+  expect_path:
+  - check_estab
+  - check_proc
+  - done_suspicious_conn
+feedback:
+  ask: 异常外连排查定位了吗？

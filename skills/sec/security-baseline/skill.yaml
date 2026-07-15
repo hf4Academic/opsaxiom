@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: sec.kernel.security-baseline
+  name: 内核安全基线审计
+  taxonomy: sec/kernel/security-baseline
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_aslr
+  nodes:
+  - id: check_aslr
+    type: check
+    title: 查 ASLR 是否启用
+    run:
+      linux: cat /proc/sys/kernel/randomize_va_space 2>/dev/null | awk '{print "aslr",
+        $1}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.aslr < 2
+      goto: done_aslr_off
+    - when: output.aslr >= 2
+      goto: check_dmesg
+    otherwise: check_dmesg
+    cautions:
+    - randomize_va_space 应为 2(完全 ASLR);被调成 0/1 会大幅削弱对内存破坏类漏洞的防护——有人为调试关了 ASLR 后忘了恢复是常见基线偏移
+  - id: check_dmesg
+    type: check
+    title: 查非特权用户是否可读内核日志
+    run:
+      linux: cat /proc/sys/kernel/dmesg_restrict 2>/dev/null | awk '{print "restrict",
+        $1}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.restrict == 0
+      goto: done_dmesg_open
+    - when: output.restrict > 0
+      goto: done_baseline_ok
+    otherwise: escalate
+    cautions:
+    - dmesg_restrict=0 让普通用户能读内核日志,可能泄露内核地址/指针帮助绕过 ASLR;加固基线应设为 1。这类 sysctl 项要写进 /etc/sysctl.d
+      持久化,别只临时改
+  - id: done_aslr_off
+    type: done
+    summary: ASLR 未完全启用(<2)。设 kernel.randomize_va_space=2 并写入 sysctl.d 持久化;排查是否有调试脚本/配置把它关了。
+  - id: done_dmesg_open
+    type: done
+    summary: 内核日志对普通用户开放(dmesg_restrict=0)。设为 1 限制读取并持久化;顺带核对其它加固项(kptr_restrict、ptrace_scope、sysrq)。
+  - id: done_baseline_ok
+    type: done
+    summary: ASLR 与 dmesg 限制均达标。可继续核对更多加固项(kptr_restrict、kernel.yama.ptrace_scope、net.ipv4
+      反欺骗),并确保都在 sysctl.d 持久化。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: sec-kernel-security-baseline-auto
+  expect_path:
+  - check_aslr
+  - done_aslr_off
+feedback:
+  ask: 内核安全基线审计定位了吗？

@@ -354,6 +354,11 @@
 - `sec/integrity/suid-anomaly` — "异常 SUID 文件/提权后门排查"
 - `sec/network/unexpected-listen` — "异常监听端口/未预期对外服务"
 - `sec/audit/auditd-gap` — "审计日志断档/auditd 未运行/事件丢弃"
+- `sec/network/abnormal-outbound` — "可疑外连/反连木马/挖矿外联"
+- `sec/access/fail2ban-ineffective` — "暴破没拦住/fail2ban 装了不生效"
+- `sec/tls/cert-expiry` — "证书临期/证书链不全/HTTPS 不受信"
+- `sec/integrity/world-writable` — "文件权限过松/world-writable 敏感文件"
+- `sec/kernel/security-baseline` — "内核安全基线/ASLR/加固参数核对"
 
 ### 5.8 proc
 - `proc/change/ticket-gen` — "生成变更单/写变更申请"

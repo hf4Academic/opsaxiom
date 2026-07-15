@@ -1,0 +1,74 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: sec.access.fail2ban-ineffective
+  name: fail2ban 失效排查(暴力破解未被拦)
+  taxonomy: sec/access/fail2ban-ineffective
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_running
+  nodes:
+  - id: check_running
+    type: check
+    title: 查 fail2ban 是否在运行
+    run:
+      linux: systemctl is-active fail2ban 2>/dev/null | grep -ic '^active'
+    parser: generic/count-v1
+    branch:
+    - when: output.value == 0
+      goto: done_not_running
+    - when: output.value > 0
+      goto: check_jail
+    otherwise: check_jail
+    cautions:
+    - '''装了但没在跑''是最常见失效——先确认服务 active,别默认它一直在守'
+  - id: check_jail
+    type: check
+    title: 查 sshd jail 是否启用且有拦截
+    run:
+      linux: fail2ban-client status sshd 2>/dev/null | awk '/Currently banned/{print
+        "banned", $NF}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.banned >= 0
+      goto: done_jail_active
+    otherwise: done_jail_missing
+    cautions:
+    - 能查到 sshd jail 状态=jail 已启用;查不到(命令失败)多为没 enable sshd jail 或日志路径/backend配错,导致 fail2ban
+      根本没在读认证日志、看不到失败登录
+  - id: done_not_running
+    type: done
+    summary: fail2ban 未运行,暴破无人拦。systemctl enable --now fail2ban 启动并自启;排查它为何停,确认 jail.local
+      配置正确后再观察拦截。
+  - id: done_jail_active
+    type: done
+    summary: sshd jail 已启用在工作。若仍觉没拦住,核对 maxretry/findtime/bantime是否太宽松、日志路径是否匹配当前系统(journald
+      vs 文件),必要时收紧阈值。
+  - id: done_jail_missing
+    type: done
+    summary: 服务在跑但 sshd jail 没生效(查不到状态)。检查 jail.local 是否 enabled=true、logpath/backend
+      是否匹配本机认证日志来源;修正后重载并验证能读到失败登录。
+tests:
+- scenario: sec-access-fail2ban-ineffective-auto
+  expect_path:
+  - check_running
+  - done_not_running
+feedback:
+  ask: fail2ban 失效排查(暴力破解未被拦)定位了吗？

@@ -1,0 +1,11 @@
+skill: skills/sec/fail2ban-ineffective/skill.yaml
+scenario: sec.access.fail2ban-ineffective 自动求解走查
+expect_path:
+- check_running
+- done_not_running
+node_ctx:
+  check_running:
+    output:
+      value: 0
+    rows:
+    - {}

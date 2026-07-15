@@ -1,0 +1,76 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: sec.integrity.world-writable
+  name: 关键路径权限过松审计
+  taxonomy: sec/integrity/world-writable
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_ww_bin
+  nodes:
+  - id: check_ww_bin
+    type: check
+    title: 查系统目录下的 world-writable 文件
+    run:
+      linux: find /etc /usr/bin /usr/sbin /bin /sbin -xdev -type f -perm -0002 2>/dev/null
+        | wc -l
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_ww_system
+    - when: output.value == 0
+      goto: check_ww_noexec
+    otherwise: check_ww_noexec
+    cautions:
+    - 系统目录里任何 world-writable 文件都是高危——任意用户可改 /etc 配置或系统二进制=提权/持久化;正常系统这里应为 0 个
+  - id: check_ww_noexec
+    type: check
+    title: 查关键配置的 world-writable 情况
+    run:
+      linux: find /etc/cron.d /etc/cron.daily /etc/systemd/system -xdev -type f -perm
+        -0002 2>/dev/null | wc -l
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_ww_cron
+    - when: output.value == 0
+      goto: done_perms_ok
+    otherwise: escalate
+    cautions:
+    - cron/systemd 目录 world-writable 尤其危险——普通用户可写入定时任务/服务单元实现 root 提权;这类是攻击者最爱的持久化落点
+  - id: done_ww_system
+    type: done
+    summary: 系统目录存在 world-writable 文件(高危)。立即收紧权限(chmod o-w),核实是谁/何时改松的、是否已被利用(查文件内容/修改时间/相关日志)。
+  - id: done_ww_cron
+    type: done
+    summary: cron/systemd 配置目录有 world-writable 项(可被提权持久化)。立即 chmod o-w,逐一核对这些任务/单元内容是否被篡改或植入,清除可疑项。
+  - id: done_perms_ok
+    type: done
+    summary: 关键路径无 world-writable。可进一步核对敏感文件属主与权限(/etc/shadow 600、私钥 600、sudoers 440),建立权限基线定期核查。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: sec-integrity-world-writable-auto
+  expect_path:
+  - check_ww_bin
+  - done_ww_system
+feedback:
+  ask: 关键路径权限过松审计定位了吗？

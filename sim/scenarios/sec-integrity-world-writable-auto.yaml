@@ -1,0 +1,11 @@
+skill: skills/sec/world-writable/skill.yaml
+scenario: sec.integrity.world-writable 自动求解走查
+expect_path:
+- check_ww_bin
+- done_ww_system
+node_ctx:
+  check_ww_bin:
+    output:
+      value: 1
+    rows:
+    - {}

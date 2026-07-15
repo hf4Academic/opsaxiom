@@ -1,0 +1,79 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: sec.tls.cert-expiry
+  name: TLS 证书临期/链路问题排查
+  taxonomy: sec/tls/cert-expiry
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  params:
+  - name: endpoint
+    source: alert
+    desc: 待检测的 host:port，如 example.com:443
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_days
+  nodes:
+  - id: check_days
+    type: check
+    title: 查证书剩余有效天数
+    run:
+      linux: echo | openssl s_client -connect {{endpoint}} -servername ${SNI:-localhost}
+        2>/dev/null | openssl x509 -noout -checkend 604800 2>/dev/null; echo $?
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_chain
+    - when: output.value == 0
+      goto: check_chain
+    otherwise: check_chain
+    cautions:
+    - checkend 604800 判断'是否 7 天内过期',返回非 0 即将过期;证书过期是最高频的可用性事故之一,应提前(30 天)告警而非等浏览器报错
+  - id: check_chain
+    type: check
+    title: 查证书链是否完整可信
+    run:
+      linux: echo | openssl s_client -connect {{endpoint}} -servername ${SNI:-localhost}
+        2>&1 | grep -icE 'unable to get local issuer|self signed|verify error|certificate
+        has expired'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_chain_broken
+    - when: output.value == 0
+      goto: done_cert_ok
+    otherwise: escalate
+    cautions:
+    - '''unable to get local issuer''=服务器没把中间证书一起发下来(链不全)——本机 curl 可能因缓存中间证而正常,别的客户端却报错;必须在服务端补全证书链(fullchain)'
+  - id: done_chain_broken
+    type: done
+    summary: 证书链不完整或不受信(缺中间证/自签/已过期)。服务端部署 fullchain(叶证+中间证),确认用了受信 CA;自签证书需在客户端信任或换正式证书。
+  - id: done_cert_ok
+    type: done
+    summary: 证书链完整且短期内不过期。纳入到期巡检(提前 30 天告警)、确认自动续期(如 certbot)在跑,避免下次临期无人续。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: sec-tls-cert-expiry-auto
+  expect_path:
+  - check_days
+  - check_chain
+  - done_chain_broken
+feedback:
+  ask: TLS 证书临期/链路问题排查定位了吗？
