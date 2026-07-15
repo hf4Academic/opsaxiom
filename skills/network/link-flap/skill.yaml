@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.physical.link-flap
+  name: 接口 up/down 抖动排查
+  taxonomy: network/physical/link-flap
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_flap_log
+  nodes:
+  - id: check_flap_log
+    type: check
+    title: 查接口状态变化日志频率
+    run:
+      cisco_ios: show logging | include changed state|LINK-3|LINEPROTO
+      huawei_vrp: display logbuffer | include LINK_STATE|link is
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 10
+      goto: check_errors
+    - when: output.value <= 10
+      goto: done_stable
+    otherwise: check_errors
+    cautions:
+    - 翻动次数结合时间窗看——一天翻两次和一分钟翻十次性质完全不同
+  - id: check_errors
+    type: check
+    title: 看该接口物理层错误
+    run:
+      cisco_ios: show interfaces | include error|CRC|reset
+      huawei_vrp: display interface | include errors|CRC
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_physical
+    - when: output.value == 0
+      goto: done_negotiation
+    otherwise: escalate
+    cautions:
+    - 有 CRC/error=物理层问题(线/光模块/接口)；无错误却抖多为双工/速率协商不一致或对端节能(EEE)引起
+  - id: done_stable
+    type: done
+    summary: 接口状态变化不频繁，基本稳定。若业务仍偶断，查上层(路由/STP)。
+  - id: done_physical
+    type: done
+    summary: 接口抖动伴物理层错误。排查顺序：换线 → 换光模块 → 换接口/板卡；光口用 show transceiver 看收发光功率是否越界。
+  - id: done_negotiation
+    type: done
+    summary: 抖动无物理错误，多为速率/双工协商不一致或对端 EEE 节能。两端固定同样的速率/双工，或关闭 EEE 后观察。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-physical-link-flap-auto
+  expect_path:
+  - check_flap_log
+  - check_errors
+  - done_physical
+feedback:
+  ask: 接口 up/down 抖动排查定位了吗？

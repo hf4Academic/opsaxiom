@@ -32,10 +32,12 @@ import validate as V    # noqa: E402
 def _skill_from_spec(spec):
     plat = spec.get("platform", "linux")
     cap = spec.get("capability_level", "read")
+    net = spec.get("network", False)       # True → 网络设备 skill（多平台 run + device 元信息）
     nodes = []
     for c in spec["checks"]:
-        node = {"id": c["id"], "type": "check", "title": c["title"],
-                "run": {plat: c["cmd"]}}
+        # 多平台命令：check 用 cmds={cisco_ios:..,huawei_vrp:..} 或单平台 cmd
+        run = c["cmds"] if c.get("cmds") else {plat: c["cmd"]}
+        node = {"id": c["id"], "type": "check", "title": c["title"], "run": run}
         if c.get("parser"):
             node["parser"] = c["parser"]
         node["branch"] = [{"when": b["when"], "goto": b["goto"]} for b in c["branches"]]
@@ -59,14 +61,15 @@ def _skill_from_spec(spec):
         "metadata": {
             "id": spec["id"], "name": spec["name"], "taxonomy": spec["taxonomy"],
             "version": "0.1.0", "maturity": "draft",
-            "platforms": [{"os": "linux"}] if plat == "linux" else [{"os": "network"}],
+            "platforms": ([{"device": d} for d in spec.get("devices", ["cisco_ios"])]
+                          if net else [{"os": "linux"}]),
             "authors": ["opsagent-core"], "license": "Apache-2.0",
             "provenance": {"generated_by": "claude-opus-4-8",
                            "reviewed_by": ["claude-fable-5"]},
             "expires_review": "2027-07-01"},
         "requirements": {"capability_level": cap,
-                         "connectors": [spec.get("connector", "ssh")],
-                         "facts": ["os.family"]},
+                         "connectors": [spec.get("connector", "netconf" if net else "ssh")],
+                         "facts": spec.get("facts", ["os.family"])},
         "tree": {"entry": entry, "nodes": nodes},
         "tests": [],                       # 由求解器 + skill.tests 声明补
         "feedback": {"ask": spec.get("feedback", f"{spec['name']}定位了吗？")},

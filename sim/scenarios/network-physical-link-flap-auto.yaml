@@ -1,0 +1,17 @@
+skill: skills/network/link-flap/skill.yaml
+scenario: network.physical.link-flap 自动求解走查
+expect_path:
+- check_flap_log
+- check_errors
+- done_physical
+node_ctx:
+  check_flap_log:
+    output:
+      value: 11
+    rows:
+    - {}
+  check_errors:
+    output:
+      value: 1
+    rows:
+    - {}

@@ -161,6 +161,7 @@
 - `network/reachability/latency-high` — "网络延迟大/rtt 高/访问慢"
 - `network/reachability/mtu-blackhole` — "大包不通小包通/MTU 黑洞/ping 通但传文件卡"
 - `network/reachability/asymmetric-route` — "回包走了别的路/非对称路由/单向不通"
+- `network/reachability/latency-high` — "网络延迟大/慢在哪一跳"
 - `network/reachability/path-trace` — "不知道断在哪一跳/要逐跳排查"
 
 **network/routing**
@@ -168,7 +169,7 @@
 - `network/routing/bgp-route-missing` — "BGP 收不到路由/前缀没通告过来"
 - `network/routing/ospf-adjacency-stuck` — "OSPF 邻居卡 ExStart/Init/邻接建不起来"
 - `network/routing/route-leak` — "路由泄漏/学到不该有的路由/环路风险"
-- `network/routing/default-route-missing` — "默认路由丢了/出不去外网"
+- `network/routing/default-route-missing` — "出不了外网/默认路由没了" — "默认路由丢了/出不去外网"
 
 **network/switching**
 - `network/switching/vlan-misconfig` — "VLAN 不通/跨交换机同网段不通/trunk 没放行"

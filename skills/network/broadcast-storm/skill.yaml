@@ -1,0 +1,76 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.traffic.broadcast-storm
+  name: 广播风暴排查
+  taxonomy: network/traffic/broadcast-storm
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_counters
+  nodes:
+  - id: check_counters
+    type: check
+    title: 查接口广播/组播包计数
+    run:
+      cisco_ios: show interfaces counters | include broadcast|Broadcast
+      huawei_vrp: display interface | include broadcast|Broadcast
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_stp
+    - when: output.value == 0
+      goto: escalate
+    otherwise: check_stp
+    cautions:
+    - 广播计数是累计值，要看增速；短时间暴增才是风暴。风暴时先隔离(关可疑端口)止血，再排根因
+  - id: check_stp
+    type: check
+    title: 看 STP 是否异常(环路征兆)
+    run:
+      cisco_ios: show spanning-tree | include FWD|BLK|Topology
+      huawei_vrp: display stp | include FORWARDING|DISCARDING|TC
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_stp_loop
+    - when: output.value == 0
+      goto: done_source_host
+    otherwise: escalate
+    cautions:
+    - 频繁 TC(拓扑变更)或本该 BLOCK 的口在 FWD=环路。风暴的两大来源：二层环路、或某主机故障狂发广播——STP 异常指向前者
+  - id: done_stp_loop
+    type: done
+    summary: STP 异常，广播风暴源于二层环路。定位环路(哪两条路径成环)，确认 STP 配置(是否有端口被误配 BPDU filter/portfast
+      导致不参与计算)，消除环路。
+  - id: done_source_host
+    type: done
+    summary: STP 正常，风暴可能源于某主机狂发广播(网卡故障/病毒/错误软件)。按端口广播计数定位源端口，隔离该主机排查。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-traffic-broadcast-storm-auto
+  expect_path:
+  - check_counters
+  - check_stp
+  - done_stp_loop
+feedback:
+  ask: 广播风暴排查定位了吗？

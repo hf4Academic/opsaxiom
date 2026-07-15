@@ -1,0 +1,11 @@
+skill: skills/network/latency-high/skill.yaml
+scenario: network.reachability.latency-high 自动求解走查
+expect_path:
+- ping_target
+- done_unreachable
+node_ctx:
+  ping_target:
+    output:
+      loss: 50
+    rows:
+    - {}

@@ -1,0 +1,76 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.switching.port-err-disabled
+  name: 端口 err-disabled 排查
+  taxonomy: network/switching/port-err-disabled
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_status
+  nodes:
+  - id: check_status
+    type: check
+    title: 查有无 err-disabled 端口
+    run:
+      cisco_ios: show interfaces status | include err-disabled|errdisable
+      huawei_vrp: display interface brief | include *down|ERROR
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_reason
+    - when: output.value == 0
+      goto: done_none
+    otherwise: check_reason
+    cautions:
+    - err-disabled 是保护机制不是故障——端口触发了某种违规(风暴/BPDU/安全)被主动关，直接 shut/no shut 会再次触发，必须先找原因
+  - id: check_reason
+    type: check
+    title: 查触发原因
+    run:
+      cisco_ios: show logging | include err-disable|psecure|bpduguard|storm
+      huawei_vrp: display logbuffer | include error-down|security
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_found_reason
+    - when: output.value == 0
+      goto: escalate
+    otherwise: escalate
+    cautions:
+    - 常见触发：port-security 学到超限 MAC、BPDU Guard 收到 BPDU(接了交换机)、storm-control 超阈值。对症解决而非盲目恢复端口
+  - id: done_none
+    type: done
+    summary: 无 err-disabled 端口。接口 down 另有原因(物理/对端/管理关闭)。
+  - id: done_found_reason
+    type: done
+    summary: 找到 err-disabled 触发原因。对症处理：安全违规查接入设备、BPDU 违规查是否误接交换机、风暴查环路；处理后再恢复端口（或配
+      errdisable recovery 自动恢复）。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-switching-port-err-disabled-auto
+  expect_path:
+  - check_status
+  - check_reason
+  - done_found_reason
+feedback:
+  ask: 端口 err-disabled 排查定位了吗？

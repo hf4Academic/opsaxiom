@@ -1,0 +1,17 @@
+skill: skills/network/default-route-missing/skill.yaml
+scenario: network.routing.default-route-missing 自动求解走查
+expect_path:
+- check_default
+- check_source
+- done_static_gone
+node_ctx:
+  check_default:
+    output:
+      value: 0
+    rows:
+    - {}
+  check_source:
+    output:
+      value: 1
+    rows:
+    - {}

@@ -1,0 +1,72 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.reachability.latency-high
+  name: 网络延迟高逐跳定位
+  taxonomy: network/reachability/latency-high
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: ping_target
+  nodes:
+  - id: ping_target
+    type: check
+    title: 先测到目标的连通与丢包
+    run:
+      cisco_ios: ping 8.8.8.8 repeat 20
+      huawei_vrp: ping -c 20 8.8.8.8
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.loss >= 50
+      goto: done_unreachable
+    - when: output.loss < 50
+      goto: trace_hops
+    otherwise: trace_hops
+    cautions:
+    - 设备 CPU 处理的 ping 会被低优先级排队，偶发大 rtt 不代表转发面慢——关注平均值与丢包，别被个别尖刺误导
+  - id: trace_hops
+    type: check
+    title: 逐跳定位延迟拐点
+    run:
+      cisco_ios: traceroute 8.8.8.8
+      huawei_vrp: tracert 8.8.8.8
+    parser: generic/table-v1
+    branch:
+    - when: output.row_count > 0
+      goto: done_hop_found
+    otherwise: escalate
+    cautions:
+    - 找延迟'跳变'的那一跳：从某跳起 rtt 阶跃上升=瓶颈在该跳到上一跳之间。但中间设备对 traceroute 探测限速会造成假高，最后一跳延迟才最可信
+  - id: done_unreachable
+    type: done
+    summary: 到目标丢包严重(≥50%)，这已不是'延迟高'而是'通不了'——转按丢包/可达性排查(逐跳 traceroute 看断点)，而非纠结延迟数值。
+  - id: done_hop_found
+    type: done
+    summary: 逐跳数据已获取。定位延迟阶跃出现的那一跳，其上游链路为瓶颈；若阶跃跳是运营商网络则需联系 ISP，内网跳则查该段链路拥塞/绕行。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-reachability-latency-high-auto
+  expect_path:
+  - ping_target
+  - done_unreachable
+feedback:
+  ask: 网络延迟高逐跳定位定位了吗？

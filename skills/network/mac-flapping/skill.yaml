@@ -1,0 +1,75 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.switching.mac-flapping
+  name: MAC 地址漂移排查
+  taxonomy: network/switching/mac-flapping
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_log
+  nodes:
+  - id: check_log
+    type: check
+    title: 查日志有无 MAC 漂移告警
+    run:
+      cisco_ios: show logging | include MAC.*flap|MACFLAP
+      huawei_vrp: display logbuffer | include MAC|flapping
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_mac
+    - when: output.value == 0
+      goto: done_no_flap
+    otherwise: check_mac
+    cautions:
+    - MAC 漂移几乎总是二层环路或双上行未做好聚合的征兆——先怀疑拓扑，别急着清 MAC 表
+  - id: check_mac
+    type: check
+    title: 看该 MAC 当前学习在哪些端口
+    run:
+      cisco_ios: show mac address-table | include DYNAMIC
+      huawei_vrp: display mac-address | include Dynamic
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_loop_suspect
+    - when: output.value == 0
+      goto: escalate
+    otherwise: escalate
+    cautions:
+    - 同 MAC 在两个端口间反复跳=环路；若一端是服务器双网卡，多为 bond 模式配错（两口都在转发同一 MAC）
+  - id: done_no_flap
+    type: done
+    summary: 无 MAC 漂移告警。若仍偶发丢包，转查接口错包或链路抖动。
+  - id: done_loop_suspect
+    type: done
+    summary: 存在 MAC 漂移，高度疑似二层环路或双上行配置问题。核对 STP 是否正常收敛、服务器 bond 模式与交换机侧聚合是否匹配；定位漂移的两个端口后从拓扑上消除环路。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-switching-mac-flapping-auto
+  expect_path:
+  - check_log
+  - check_mac
+  - done_loop_suspect
+feedback:
+  ask: MAC 地址漂移排查定位了吗？

@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.routing.default-route-missing
+  name: 默认路由丢失排查
+  taxonomy: network/routing/default-route-missing
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_default
+  nodes:
+  - id: check_default
+    type: check
+    title: 查是否存在默认路由
+    run:
+      cisco_ios: show ip route 0.0.0.0
+      huawei_vrp: display ip routing-table 0.0.0.0
+    parser: generic/count-v1
+    branch:
+    - when: output.value == 0
+      goto: check_source
+    - when: output.value > 0
+      goto: done_has_default
+    otherwise: check_source
+    cautions:
+    - 默认路由可能来自静态、也可能来自动态协议(BGP/OSPF)通告——丢失原因因来源而异
+  - id: check_source
+    type: check
+    title: 看默认路由本该从哪来
+    run:
+      cisco_ios: show running-config | include ip route 0.0.0.0|default-information
+      huawei_vrp: display current-configuration | include ip route-static 0.0.0.0|default-route
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_static_gone
+    - when: output.value == 0
+      goto: done_dynamic_gone
+    otherwise: escalate
+    cautions:
+    - 配了静态默认路由却不在路由表=下一跳不可达被撤(接口down/递归失败)；配置里没有=依赖动态协议但通告方停了
+  - id: done_has_default
+    type: done
+    summary: 默认路由存在。出不去外网另有原因(NAT/ACL/上游)，转查这些。
+  - id: done_static_gone
+    type: done
+    summary: 配了静态默认路由但未生效——下一跳不可达导致路由被撤。检查下一跳接口是否 up、下一跳地址是否可达(递归路由是否解析)。
+  - id: done_dynamic_gone
+    type: done
+    summary: 无静态默认路由，依赖动态协议通告的默认路由消失了。到通告方(上游路由器)确认其是否仍在发默认路由、邻居是否正常。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-routing-default-route-missing-auto
+  expect_path:
+  - check_default
+  - check_source
+  - done_static_gone
+feedback:
+  ask: 默认路由丢失排查定位了吗？
