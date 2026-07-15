@@ -1,0 +1,11 @@
+skill: skills/k8s/cronjob-not-running/skill.yaml
+scenario: k8s.workload.cronjob-not-running 自动求解走查
+expect_path:
+- check_suspend
+- done_suspended
+node_ctx:
+  check_suspend:
+    output:
+      value: 1
+    rows:
+    - {}

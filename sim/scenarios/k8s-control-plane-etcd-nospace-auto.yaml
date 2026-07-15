@@ -1,0 +1,17 @@
+skill: skills/k8s/etcd-nospace/skill.yaml
+scenario: k8s.control-plane.etcd-nospace 自动求解走查
+expect_path:
+- check_health
+- check_events
+- done_nospace
+node_ctx:
+  check_health:
+    output:
+      value: 0
+    rows:
+    - {}
+  check_events:
+    output:
+      value: 1
+    rows:
+    - {}

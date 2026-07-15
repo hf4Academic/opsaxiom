@@ -211,6 +211,7 @@
 
 ### 5.3 k8s / svc
 **k8s/workload**
+- `k8s/workload/cronjob-not-running` — "CronJob 到点不跑/没生成 Job"
 - `k8s/workload/crashloop` — "Pod 一直重启/CrashLoopBackOff"
 - `k8s/workload/image-pull-fail` — "拉不了镜像/ImagePullBackOff/ErrImagePull"
 - `k8s/workload/oomkilled` — "Pod 被 OOMKilled/容器内存超限"
@@ -218,12 +219,15 @@
 - `k8s/workload/pod-evicted` — "Pod 被驱逐/Evicted/节点压力"
 
 **k8s/scheduling**
+- `k8s/scheduling/node-pressure` — "节点 DiskPressure/PIDPressure/Pod 驱逐"
 - `k8s/scheduling/pending-unschedulable` — "Pod 一直 Pending/调度不上去"
 - `k8s/scheduling/resource-quota-exceeded` — "配额超了/建不了资源/quota exceeded"
 - `k8s/scheduling/node-notready` — "节点 NotReady/节点掉了"
 - `k8s/scheduling/taint-toleration` — "污点容忍不匹配/调度不到指定节点"
 
 **k8s/networking**
+- `k8s/networking/coredns-failing` — "集群内 DNS 解析失败/慢"
+- `k8s/networking/ingress-5xx` — "Ingress 访问 502/504"
 - `k8s/networking/service-no-endpoints` — "Service 访问不通/没有 endpoints"
 - `k8s/networking/dns-fail` — "集群内 DNS 解析失败/CoreDNS 问题"
 - `k8s/networking/ingress-503` — "Ingress 502/503/外部访问不通"
@@ -234,6 +238,7 @@
 - `k8s/storage/volume-mount-fail` — "挂卷失败/FailedMount/多重挂载冲突"
 
 **k8s/control-plane**
+- `k8s/control-plane/etcd-nospace` — "etcd 空间满/NOSPACE/集群只读"
 - `k8s/control-plane/apiserver-slow` — "kubectl 很慢/apiserver 超时/429"
 - `k8s/control-plane/etcd-unhealthy` — "etcd 不健康/告警/空间满"
 

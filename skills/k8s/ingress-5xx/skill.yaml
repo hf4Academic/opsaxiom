@@ -1,0 +1,81 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.networking.ingress-5xx
+  name: Ingress 502/504 排查
+  taxonomy: k8s/networking/ingress-5xx
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - platform: kubernetes
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  params:
+  - name: ns
+    source: alert
+    desc: 命名空间
+  - name: svc
+    source: alert
+    desc: 后端 Service 名
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - kubectl
+  facts:
+  - k8s.version
+tree:
+  entry: check_endpoints
+  nodes:
+  - id: check_endpoints
+    type: check
+    title: 查后端 Service 是否有就绪 Endpoints
+    run:
+      kubectl: kubectl -n {{ns}} get endpoints {{svc}} -o json 2>/dev/null | grep
+        -ic '"ip":'
+    parser: generic/count-v1
+    branch:
+    - when: output.value == 0
+      goto: done_no_endpoints
+    - when: output.value > 0
+      goto: check_ing_log
+    otherwise: check_ing_log
+    cautions:
+    - 502/504 第一嫌疑永远是后端没有就绪 Endpoint——Service 选不到 Pod 或 Pod 没 Ready，Ingress 就无处转发
+  - id: check_ing_log
+    type: check
+    title: 查 Ingress Controller 日志
+    run:
+      kubectl: kubectl -n ingress-nginx logs -l app.kubernetes.io/name=ingress-nginx
+        --tail=100 2>/dev/null | grep -ic '502\|504\|upstream timed out'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_timeout
+    - when: output.value == 0
+      goto: escalate
+    otherwise: escalate
+    cautions:
+    - 504=upstream 超时(后端处理慢或没响应)；502=后端返回非法响应或连接被拒。两者根因不同，别混为一谈
+  - id: done_no_endpoints
+    type: done
+    summary: 后端 Service 无就绪 Endpoints。查 ①Service 的 selector 是否匹配到 Pod；②Pod 是否 Ready(readiness
+      探针)；③目标端口是否对。
+  - id: done_timeout
+    type: done
+    summary: Ingress 日志有 5xx。504 看后端响应慢(扩容/优化后端、调大 proxy 超时)；502 看后端是否返回了非法响应或连接被拒(后端端口/协议不匹配)。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: k8s-networking-ingress-5xx-auto
+  expect_path:
+  - check_endpoints
+  - done_no_endpoints
+feedback:
+  ask: Ingress 502/504 排查定位了吗？

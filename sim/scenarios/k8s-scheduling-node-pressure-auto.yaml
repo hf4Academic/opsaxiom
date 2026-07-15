@@ -1,0 +1,17 @@
+skill: skills/k8s/node-pressure/skill.yaml
+scenario: k8s.scheduling.node-pressure 自动求解走查
+expect_path:
+- check_conditions
+- check_which
+- done_resource_high
+node_ctx:
+  check_conditions:
+    output:
+      value: 1
+    rows:
+    - {}
+  check_which:
+    output:
+      value: 86
+    rows:
+    - {}

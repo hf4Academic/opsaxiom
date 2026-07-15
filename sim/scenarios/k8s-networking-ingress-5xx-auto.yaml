@@ -1,0 +1,11 @@
+skill: skills/k8s/ingress-5xx/skill.yaml
+scenario: k8s.networking.ingress-5xx 自动求解走查
+expect_path:
+- check_endpoints
+- done_no_endpoints
+node_ctx:
+  check_endpoints:
+    output:
+      value: 0
+    rows:
+    - {}

@@ -1,0 +1,79 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.networking.coredns-failing
+  name: CoreDNS 解析失败/慢排查
+  taxonomy: k8s/networking/coredns-failing
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - platform: kubernetes
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - kubectl
+  facts:
+  - k8s.version
+tree:
+  entry: check_pods
+  nodes:
+  - id: check_pods
+    type: check
+    title: 查 CoreDNS Pod 是否正常
+    run:
+      kubectl: kubectl -n kube-system get pods -l k8s-app=kube-dns --no-headers |
+        grep -vc Running
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_pod_down
+    - when: output.value == 0
+      goto: check_logs
+    otherwise: check_logs
+    cautions:
+    - CoreDNS 默认 2 副本，全挂则整集群 DNS 瘫痪；只挂一个仍能服务但容量减半
+  - id: check_logs
+    type: check
+    title: 查 CoreDNS 日志有无错误
+    run:
+      kubectl: kubectl -n kube-system logs -l k8s-app=kube-dns --tail=100 2>/dev/null
+        | grep -ic 'SERVFAIL\|error\|timeout'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_upstream
+    - when: output.value == 0
+      goto: done_config_or_ndots
+    otherwise: escalate
+    cautions:
+    - CoreDNS 转发到上游(节点 /etc/resolv.conf)——上游 DNS 挂了 CoreDNS 也跟着 SERVFAIL；解析慢常因 ndots:5
+      让每次查询放大成多次(先试 svc.ns.svc.cluster.local 等后缀)
+  - id: done_pod_down
+    type: done
+    summary: CoreDNS Pod 有异常。describe 看重启原因(OOM/配置错)；全挂优先恢复，检查 configmap coredns 是否被改坏。
+  - id: done_upstream
+    type: done
+    summary: CoreDNS 日志有错误。多为上游 DNS(节点 resolv.conf 指向的)不可达或超时——在节点上验证上游 DNS，或调整 forward
+      配置。
+  - id: done_config_or_ndots
+    type: done
+    summary: CoreDNS 本身无明显错误，解析慢多为 ndots:5 放大查询。应用内用 FQDN(带末尾点)可跳过 search 域；或调 Pod
+      的 dnsConfig 减少 ndots。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: k8s-networking-coredns-failing-auto
+  expect_path:
+  - check_pods
+  - done_pod_down
+feedback:
+  ask: CoreDNS 解析失败/慢排查定位了吗？

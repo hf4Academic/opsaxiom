@@ -1,0 +1,83 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.workload.cronjob-not-running
+  name: CronJob 不触发排查
+  taxonomy: k8s/workload/cronjob-not-running
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - platform: kubernetes
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  params:
+  - name: ns
+    source: alert
+    desc: 命名空间
+  - name: name
+    source: alert
+    desc: CronJob 名
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - kubectl
+  facts:
+  - k8s.version
+tree:
+  entry: check_suspend
+  nodes:
+  - id: check_suspend
+    type: check
+    title: 查 CronJob 是否被暂停
+    run:
+      kubectl: kubectl -n {{ns}} get cronjob {{name}} -o jsonpath='{.spec.suspend}'
+        2>/dev/null | grep -ic true
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_suspended
+    - when: output.value == 0
+      goto: check_last
+    otherwise: check_last
+    cautions:
+    - suspend:true 会让 CronJob 完全不触发——排查第一步就看这个，最常见的'低级'原因
+  - id: check_last
+    type: check
+    title: 查最近调度与失败历史
+    run:
+      kubectl: kubectl -n {{ns}} get jobs 2>/dev/null | grep -c {{name}}
+    parser: generic/count-v1
+    branch:
+    - when: output.value == 0
+      goto: done_never_scheduled
+    - when: output.value > 0
+      goto: done_ran_check_job
+    otherwise: escalate
+    cautions:
+    - controller 时钟偏差 >100s 或 startingDeadlineSeconds 太小会让调度被跳过；concurrencyPolicy:Forbid
+      且上次没跑完也会跳过本次
+  - id: done_suspended
+    type: done
+    summary: CronJob 被 suspend。设 spec.suspend=false 恢复。
+  - id: done_never_scheduled
+    type: done
+    summary: 从未生成过 Job。核对 ①schedule 表达式(cron 5 段)是否正确；②startingDeadlineSeconds 是否过小导致错过就跳过；③控制器时钟。
+  - id: done_ran_check_job
+    type: done
+    summary: 有生成 Job 但你觉得没跑，问题在 Job/Pod 层。describe 最近的 Job看是否失败(镜像/资源/命令)，看 Pod 日志定位。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: k8s-workload-cronjob-not-running-auto
+  expect_path:
+  - check_suspend
+  - done_suspended
+feedback:
+  ask: CronJob 不触发排查定位了吗？

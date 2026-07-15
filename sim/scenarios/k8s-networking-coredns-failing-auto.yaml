@@ -1,0 +1,11 @@
+skill: skills/k8s/coredns-failing/skill.yaml
+scenario: k8s.networking.coredns-failing 自动求解走查
+expect_path:
+- check_pods
+- done_pod_down
+node_ctx:
+  check_pods:
+    output:
+      value: 1
+    rows:
+    - {}

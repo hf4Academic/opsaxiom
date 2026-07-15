@@ -1,0 +1,75 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.control-plane.etcd-nospace
+  name: etcd 空间告警排查
+  taxonomy: k8s/control-plane/etcd-nospace
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - platform: kubernetes
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - kubectl
+  facts:
+  - k8s.version
+tree:
+  entry: check_health
+  nodes:
+  - id: check_health
+    type: check
+    title: 查 etcd 健康(经 apiserver 侧信号)
+    run:
+      kubectl: kubectl get --raw /healthz/etcd 2>&1 | grep -ic 'ok'
+    parser: generic/count-v1
+    branch:
+    - when: output.value == 0
+      goto: check_events
+    - when: output.value > 0
+      goto: done_etcd_ok
+    otherwise: check_events
+    cautions:
+    - 不用 exec 进 etcd 容器跑 etcdctl(写权限风险)——apiserver 的 /healthz/etcd 已能反映健康
+  - id: check_events
+    type: check
+    title: 查 events 里的 NOSPACE 信号
+    run:
+      kubectl: kubectl get events -A 2>/dev/null | grep -ic 'NOSPACE\|mvcc\|database
+        space exceeded'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_nospace
+    - when: output.value == 0
+      goto: escalate
+    otherwise: escalate
+    cautions:
+    - etcd 默认配额 2GB，满了触发 NOSPACE 告警且集群转只读——写不进任何资源
+  - id: done_etcd_ok
+    type: done
+    summary: etcd 健康。集群异常另查(apiserver/controller/网络)。
+  - id: done_nospace
+    type: done
+    summary: etcd 空间满(NOSPACE)。**处置需 etcd 侧操作(人工/运维执行)：compact 历史版本 + defrag 碎片整理
+      + 解除 alarm；根治调大 --quota-backend-bytes并排查是谁在狂写(如大量 events/失控 controller)。** Agent
+      不代执行 etcd 维护。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: k8s-control-plane-etcd-nospace-auto
+  expect_path:
+  - check_health
+  - check_events
+  - done_nospace
+feedback:
+  ask: etcd 空间告警排查定位了吗？

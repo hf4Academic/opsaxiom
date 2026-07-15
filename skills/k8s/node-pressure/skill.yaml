@@ -1,0 +1,79 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.scheduling.node-pressure
+  name: 节点资源压力排查(Disk/PID/Memory Pressure)
+  taxonomy: k8s/scheduling/node-pressure
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - platform: kubernetes
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - kubectl
+  facts:
+  - k8s.version
+tree:
+  entry: check_conditions
+  nodes:
+  - id: check_conditions
+    type: check
+    title: 查节点是否有 Pressure 状态
+    run:
+      kubectl: 'kubectl get nodes -o json 2>/dev/null | grep -ic ''"type": "DiskPressure".*"status":
+        "True"\|PIDPressure.*True\|MemoryPressure.*True'''
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_which
+    - when: output.value == 0
+      goto: done_no_pressure
+    otherwise: check_which
+    cautions:
+    - Pressure 状态会让 kubelet 主动驱逐 Pod 并给节点打不可调度污点——Pod 被 Evicted 常源于此
+  - id: check_which
+    type: check
+    title: 看节点资源使用
+    run:
+      kubectl: kubectl top nodes --no-headers 2>/dev/null | awk '{print $3+0}' | sort
+        -rn | head -1
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 85
+      goto: done_resource_high
+    - when: output.value <= 85
+      goto: done_disk_or_pid
+    otherwise: escalate
+    cautions:
+    - top nodes 需 metrics-server；DiskPressure 看的是节点磁盘不是 CPU/内存——磁盘压力常因镜像/日志/emptyDir
+      占满 kubelet 目录(/var/lib/kubelet)
+  - id: done_no_pressure
+    type: done
+    summary: 节点无 Pressure。调度失败/驱逐另查(污点容忍/亲和/配额)。
+  - id: done_resource_high
+    type: done
+    summary: 节点 CPU/内存使用高触发压力。定位高占用 Pod(top pods)，确认 requests/limits 是否合理；扩容节点或迁移负载。
+  - id: done_disk_or_pid
+    type: done
+    summary: 非 CPU/内存主导，多为 DiskPressure 或 PIDPressure。DiskPressure 清理节点镜像(crictl rmi)/日志；PIDPressure
+      查是否有 Pod 狂 fork。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: k8s-scheduling-node-pressure-auto
+  expect_path:
+  - check_conditions
+  - check_which
+  - done_resource_high
+feedback:
+  ask: 节点资源压力排查(Disk/PID/Memory Pressure)定位了吗？

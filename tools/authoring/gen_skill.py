@@ -30,7 +30,8 @@ import validate as V    # noqa: E402
 
 
 def _skill_from_spec(spec):
-    plat = spec.get("platform", "linux")
+    k8s = spec.get("k8s", False)           # True → k8s skill（kubectl 只读命令）
+    plat = "kubectl" if k8s else spec.get("platform", "linux")
     cap = spec.get("capability_level", "read")
     net = spec.get("network", False)       # True → 网络设备 skill（多平台 run + device 元信息）
     nodes = []
@@ -61,14 +62,19 @@ def _skill_from_spec(spec):
         "metadata": {
             "id": spec["id"], "name": spec["name"], "taxonomy": spec["taxonomy"],
             "version": "0.1.0", "maturity": "draft",
-            "platforms": ([{"device": d} for d in spec.get("devices", ["cisco_ios"])]
+            "platforms": ([{"platform": "kubernetes"}] if k8s else
+                          [{"device": d} for d in spec.get("devices", ["cisco_ios"])]
                           if net else [{"os": "linux"}]),
             "authors": ["opsagent-core"], "license": "Apache-2.0",
             "provenance": {"generated_by": "claude-opus-4-8",
                            "reviewed_by": ["claude-fable-5"]},
+            **({"params": [{"name": p, "source": "alert",
+                            "desc": spec["params"][p]} for p in spec["params"]]}
+               if spec.get("params") else {}),
             "expires_review": "2027-07-01"},
         "requirements": {"capability_level": cap,
-                         "connectors": [spec.get("connector", "netconf" if net else "ssh")],
+                         "connectors": [spec.get("connector",
+                                        "kubectl" if k8s else "netconf" if net else "ssh")],
                          "facts": spec.get("facts", ["os.family"])},
         "tree": {"entry": entry, "nodes": nodes},
         "tests": [],                       # 由求解器 + skill.tests 声明补
