@@ -1,0 +1,80 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.collective.nccl-timeout
+  name: NCCL 通信超时/训练卡死排查
+  taxonomy: aicomp/collective/nccl-timeout
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_log
+  nodes:
+  - id: check_log
+    type: check
+    title: 查训练日志的 NCCL 超时
+    run:
+      linux: tail -300 /var/log/training.log 2>/dev/null | grep -icE 'NCCL.*timeout|Watchdog|collective.*timed
+        out'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_gpu
+    - when: output.value == 0
+      goto: done_no_timeout
+    otherwise: check_gpu
+    cautions:
+    - NCCL watchdog timeout 常是'某个 rank 卡住导致 all-reduce 集合等不齐'——掉的那个 rank 才是根因，超时报错的
+      rank 只是受害者
+  - id: check_gpu
+    type: check
+    title: 查是否有 GPU 掉卡/无进程
+    run:
+      linux: nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader 2>/dev/null
+        | tr -dc '0-9\n' | sort -n | head -1
+    parser: generic/count-v1
+    branch:
+    - when: output.value == 0
+      goto: done_rank_stuck
+    - when: output.value > 0
+      goto: done_network_stall
+    otherwise: escalate
+    cautions:
+    - 有卡利用率 0 而别的卡在跑=该 rank 已卡死(等它的集合永远等不到)；所有卡都 0=可能整体死锁或已崩
+  - id: done_no_timeout
+    type: done
+    summary: 无 NCCL 超时。训练卡另查(数据加载/checkpoint/死锁)。
+  - id: done_rank_stuck
+    type: done
+    summary: 有 rank 卡死(利用率 0)拖垮集合通信。定位卡住的 rank/节点，查其 GPU 是否掉卡(XID)、进程是否 D 状态、是否 OOM；该
+      rank 恢复后集合才能完成。
+  - id: done_network_stall
+    type: done
+    summary: GPU 都在跑但集合通信超时，多为网络/NVLink 问题导致某段通信卡住。查 NVLink/IB 链路、NCCL 环境变量(NCCL_DEBUG=INFO
+      看卡在哪个 channel)。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: aicomp-collective-nccl-timeout-auto
+  expect_path:
+  - check_log
+  - check_gpu
+  - done_rank_stuck
+feedback:
+  ask: NCCL 通信超时/训练卡死排查定位了吗？

@@ -1,0 +1,17 @@
+skill: skills/aicomp/checkpoint-slow/skill.yaml
+scenario: aicomp.training.checkpoint-slow 自动求解走查
+expect_path:
+- check_io
+- check_size
+- done_network_storage
+node_ctx:
+  check_io:
+    output:
+      await: 21
+    rows:
+    - {}
+  check_size:
+    output:
+      value: 1
+    rows:
+    - {}

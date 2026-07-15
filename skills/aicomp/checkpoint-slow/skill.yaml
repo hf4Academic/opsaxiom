@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.training.checkpoint-slow
+  name: Checkpoint 保存慢/训练周期性卡顿排查
+  taxonomy: aicomp/training/checkpoint-slow
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_io
+  nodes:
+  - id: check_io
+    type: check
+    title: 查 checkpoint 目录所在盘的写入能力
+    run:
+      linux: iostat -dx 1 2 2>/dev/null | awk '/nvme|sd/{w=$(NF-1)} END{print "await",
+        w+0}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.await > 20
+      goto: check_size
+    - when: output.await <= 20
+      goto: done_io_ok
+    otherwise: check_size
+    cautions:
+    - checkpoint 慢多因写盘慢——大模型 ckpt 几十上百 GB，写到慢盘/网络存储会阻塞训练。同步 save 会让所有 rank 等存完才继续
+  - id: check_size
+    type: check
+    title: 看是否写到了慢存储
+    run:
+      linux: df -T $(dirname ${CKPT_DIR:-/tmp}) 2>/dev/null | awk 'NR==2{print $2}'
+        | grep -ic 'nfs\|cifs\|fuse'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_network_storage
+    - when: output.value == 0
+      goto: done_local_slow
+    otherwise: escalate
+    cautions:
+    - 直接存到 NFS/对象存储会很慢——大 ckpt 应先写本地 NVMe 再异步上传；同步存到远端会周期性卡训练
+  - id: done_io_ok
+    type: done
+    summary: 写盘不慢。checkpoint 慢另查(序列化/GPU→CPU 拷贝/是否 rank0 单点存)。
+  - id: done_network_storage
+    type: done
+    summary: checkpoint 直接写网络存储导致慢。改为先写本地 NVMe 再异步上传；或用分布式 checkpoint(各 rank 存自己分片)避免单点。
+  - id: done_local_slow
+    type: done
+    summary: 本地盘写 ckpt 仍慢，多为盘本身慢或 ckpt 太大。用更快 NVMe、开启异步/分片 checkpoint、降低保存频率或只存必要状态。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: aicomp-training-checkpoint-slow-auto
+  expect_path:
+  - check_io
+  - check_size
+  - done_network_storage
+feedback:
+  ask: Checkpoint 保存慢/训练周期性卡顿排查定位了吗？

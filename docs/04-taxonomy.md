@@ -254,6 +254,9 @@
 
 ### 5.4 aicomp
 **aicomp/gpu**
+- `aicomp/collective/nccl-timeout` — "训练卡死/NCCL watchdog timeout"
+- `aicomp/training/checkpoint-slow` — "checkpoint 保存慢/周期性卡顿"
+- `aicomp/fabric/ib-perf-degraded` — "IB 带宽低/RDMA 慢/多机通信慢"
 - `aicomp/gpu/pcie-downgrade` — "GPU 传输慢/PCIe x16 降 x4"
 - `aicomp/gpu/clocks-locked` — "GPU 算力上不去/时钟被锁降频"
 - `aicomp/fabric/nvlink-error` — "NVLink 报错/卡间带宽低"

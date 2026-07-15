@@ -1,0 +1,75 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.fabric.ib-perf-degraded
+  name: InfiniBand 性能劣化排查
+  taxonomy: aicomp/fabric/ib-perf-degraded
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_rate
+  nodes:
+  - id: check_rate
+    type: check
+    title: 查 IB 端口速率是否降级
+    run:
+      linux: 'ibstat 2>/dev/null | grep -icE ''Rate: (10|25|40)\b'''
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_errors
+    - when: output.value == 0
+      goto: check_errors
+    otherwise: check_errors
+    cautions:
+    - IB 端口协商到低速率(如 HDR 卡跑成 EDR/FDR)=线缆/端口问题，带宽直接腰斩；先确认速率对不对再查别的
+  - id: check_errors
+    type: check
+    title: 查 IB 端口错误计数
+    run:
+      linux: 'perfquery 2>/dev/null | grep -icE ''SymbolError|LinkError|PortRcvErrors.*[1-9]''
+        || ibstat 2>/dev/null | grep -c ''State: Active'''
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_errors
+    - when: output.value == 0
+      goto: done_config
+    otherwise: escalate
+    cautions:
+    - SymbolError/PortRcvErrors 增长=物理链路质量问题(线缆/光模块)；RDMA 慢也可能是 GDR(GPUDirect RDMA)没开或
+      NUMA 亲和不对，非硬件
+  - id: done_errors
+    type: done
+    summary: IB 有错误计数或速率降级。查线缆/光模块/端口，换线重插；速率不对核对两端与交换机的速率配置。
+  - id: done_config
+    type: done
+    summary: IB 端口正常无错误，RDMA 慢多为配置问题。检查 GDR 是否启用、GPU 与 IB 卡的 NUMA 亲和(NCCL_IB_HCA/绑核)、MTU
+      是否一致。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: aicomp-fabric-ib-perf-degraded-auto
+  expect_path:
+  - check_rate
+  - check_errors
+  - done_errors
+feedback:
+  ask: InfiniBand 性能劣化排查定位了吗？

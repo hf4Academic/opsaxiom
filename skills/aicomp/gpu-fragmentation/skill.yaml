@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: aicomp.scheduling.gpu-fragmentation
+  name: GPU 调度碎片化排查
+  taxonomy: aicomp/scheduling/gpu-fragmentation
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_free
+  nodes:
+  - id: check_free
+    type: check
+    title: 查空闲 GPU 分布
+    run:
+      linux: nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader 2>/dev/null
+        | grep -c ' 0'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_pending
+    - when: output.value == 0
+      goto: done_all_busy
+    otherwise: check_pending
+    cautions:
+    - 单机有空闲卡但跨机凑不齐 8 卡=典型碎片化。整卡调度(要求同机多卡)对碎片敏感，别只看总空闲数
+  - id: check_pending
+    type: check
+    title: 查是否有 pending 的大任务
+    run:
+      linux: squeue 2>/dev/null | grep -ic 'PENDING\|PD' || kubectl get pods -A 2>/dev/null
+        | grep -ic Pending
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_fragmented
+    - when: output.value == 0
+      goto: done_no_demand
+    otherwise: escalate
+    cautions:
+    - gang scheduling(整组一起调)缺失时，大任务的卡被小任务零散占用，永远凑不齐——这是碎片化拖慢大任务的核心机制
+  - id: done_all_busy
+    type: done
+    summary: GPU 全忙，非碎片化是真满载。扩容或排队等待。
+  - id: done_fragmented
+    type: done
+    summary: 有空闲卡但大任务 pending=碎片化。启用 gang scheduling(整组调度)、用 bin-packing 策略把小任务集中、或为大任务预留整机；碎片整理后大任务可调度。
+  - id: done_no_demand
+    type: done
+    summary: 有空闲卡但无 pending 任务=只是没需求，非调度问题。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: aicomp-scheduling-gpu-fragmentation-auto
+  expect_path:
+  - check_free
+  - check_pending
+  - done_fragmented
+feedback:
+  ask: GPU 调度碎片化排查定位了吗？
