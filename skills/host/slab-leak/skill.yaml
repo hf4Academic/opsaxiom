@@ -1,0 +1,72 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.memory.slab-leak
+  name: 内核 slab 内存泄漏排查
+  taxonomy: host/memory/slab-leak
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_slab
+  nodes:
+  - id: check_slab
+    type: check
+    title: 查 slab 占用总量
+    run:
+      linux: awk '/Slab:/{print "slab_kb", $2} /SReclaimable:/{print "reclaim_kb",
+        $2}' /proc/meminfo
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.slab_kb > 4000000
+      goto: top_slab
+    - when: output.slab_kb <= 4000000
+      goto: done_slab_normal
+    otherwise: top_slab
+    cautions:
+    - Slab 大但 SReclaimable 也大=多为 dentry/inode 缓存，可回收不算泄漏；SUnreclaim 大才是真占用
+  - id: top_slab
+    type: check
+    title: 看哪类 slab 对象最多
+    run:
+      linux: slabtop -o -s c 2>/dev/null | head -8
+    parser: generic/table-v1
+    branch:
+    - when: output.row_count > 0
+      goto: done_found_slab
+    otherwise: escalate
+    cautions:
+    - dentry/inode_cache 巨大常因海量文件遍历或未关闭 fd；网络类对象大看连接泄漏。回收缓存：echo 2 > /proc/sys/vm/drop_caches（会短暂增加
+      IO，业务低峰做）
+  - id: done_slab_normal
+    type: done
+    summary: slab 占用不高，available 低另有原因（page cache 或匿名内存），转查 host/memory/cache-pressure。
+  - id: done_found_slab
+    type: done
+    summary: 定位到占用最大的 slab 对象类型。若是可回收缓存(dentry/inode)可 drop_caches 缓解；若是不可回收对象持续增长，是内核/驱动泄漏，记录对象类型升级排查。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-memory-slab-leak-auto
+  expect_path:
+  - check_slab
+  - top_slab
+  - done_found_slab
+feedback:
+  ask: 内核 slab 内存泄漏排查定位了吗？

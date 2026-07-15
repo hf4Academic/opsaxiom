@@ -1,0 +1,11 @@
+skill: skills/host/cron-not-firing/skill.yaml
+scenario: host.system.cron-not-firing 自动求解走查
+expect_path:
+- check_daemon
+- done_daemon_down
+node_ctx:
+  check_daemon:
+    output:
+      value: 0
+    rows:
+    - {}

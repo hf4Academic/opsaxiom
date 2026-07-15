@@ -1,0 +1,15 @@
+skill: skills/host/inode-exhausted/skill.yaml
+scenario: host.storage.inode-exhausted 自动求解走查
+expect_path:
+- check_inode
+- find_dirs
+- done_found_dir
+node_ctx:
+  check_inode:
+    output:
+      value: 95
+    rows:
+    - {}
+  find_dirs:
+    rows:
+    - name: 100001

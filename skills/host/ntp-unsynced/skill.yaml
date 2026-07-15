@@ -1,0 +1,76 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.system.ntp-unsynced
+  name: NTP 未同步排查（chrony/ntpd）
+  taxonomy: host/system/ntp-unsynced
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_service
+  nodes:
+  - id: check_service
+    type: check
+    title: 确认时间同步服务在跑
+    run:
+      linux: systemctl is-active chronyd ntpd systemd-timesyncd 2>/dev/null | grep
+        -c active
+    parser: generic/count-v1
+    branch:
+    - when: output.value == 0
+      goto: done_no_service
+    - when: output.value > 0
+      goto: check_sources
+    otherwise: check_sources
+    cautions:
+    - 三选一，别同时装两个（会抢 UDP 123 互相打架）
+  - id: check_sources
+    type: check
+    title: 查时间源可达性
+    run:
+      linux: chronyc sources 2>/dev/null | grep -c '^\^\*'
+    parser: generic/count-v1
+    branch:
+    - when: output.value == 0
+      goto: done_no_reachable_source
+    - when: output.value > 0
+      goto: done_synced
+    otherwise: escalate
+    cautions:
+    - '''^*'' 才是当前选定的同步源；只有 ''^?'' 说明源都不可达，多为 UDP 123 被防火墙挡'
+  - id: done_no_service
+    type: done
+    summary: 没有时间同步服务在运行。装并启用 chrony：systemctl enable --now chronyd。
+  - id: done_no_reachable_source
+    type: done
+    summary: 没有可达的时间源。检查 ①出方向 UDP 123 是否放行；②chrony.conf 里的 server/pool 地址是否可解析可达；内网环境需指向内网
+      NTP。
+  - id: done_synced
+    type: done
+    summary: 时间源已选定且在同步。若仍报时间不对，看偏移是否在收敛（chronyc tracking 的 System time），大偏移会缓慢步进对齐。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-system-ntp-unsynced-auto
+  expect_path:
+  - check_service
+  - done_no_service
+feedback:
+  ask: NTP 未同步排查（chrony/ntpd）定位了吗？

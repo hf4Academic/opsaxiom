@@ -1,0 +1,75 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.system.cron-not-firing
+  name: cron 定时任务没跑排查
+  taxonomy: host/system/cron-not-firing
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_daemon
+  nodes:
+  - id: check_daemon
+    type: check
+    title: 确认 cron 服务在运行
+    run:
+      linux: systemctl is-active cron crond 2>/dev/null | grep -c active
+    parser: generic/count-v1
+    branch:
+    - when: output.value == 0
+      goto: done_daemon_down
+    - when: output.value > 0
+      goto: check_logs
+    otherwise: check_logs
+    cautions:
+    - Debian 系服务名是 cron，RHEL 系是 crond，两个都查
+  - id: check_logs
+    type: check
+    title: 查最近是否有该任务的执行记录
+    run:
+      linux: journalctl -u cron -u crond --since '-1h' 2>/dev/null | grep -c CRON
+    parser: generic/count-v1
+    branch:
+    - when: output.value == 0
+      goto: done_not_scheduled
+    - when: output.value > 0
+      goto: done_ran_check_script
+    otherwise: escalate
+    cautions:
+    - cron 环境变量极简（无 PATH/无 shell profile），脚本里用绝对路径，别假设有交互 shell 的环境；输出重定向了才看得到报错
+  - id: done_daemon_down
+    type: done
+    summary: cron 服务没运行——任务当然不跑。启动并设开机自启：systemctl enable --now cron（或 crond）。
+  - id: done_not_scheduled
+    type: done
+    summary: 近 1 小时无该任务执行记录。核对：①crontab 语法（分 时 日 月 周，5 段）；②是不是写在了别的用户的 crontab 下；③文件末尾要有换行，否则最后一行不生效。
+  - id: done_ran_check_script
+    type: done
+    summary: cron 有拉起任务，问题在脚本本身。把命令改成 'bash -lc "你的命令" >>/tmp/cron.log 2>&1' 捕获输出，多半是
+      PATH 或权限问题。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-system-cron-not-firing-auto
+  expect_path:
+  - check_daemon
+  - done_daemon_down
+feedback:
+  ask: cron 定时任务没跑排查定位了吗？

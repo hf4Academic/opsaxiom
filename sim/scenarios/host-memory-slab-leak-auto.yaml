@@ -1,0 +1,17 @@
+skill: skills/host/slab-leak/skill.yaml
+scenario: host.memory.slab-leak 自动求解走查
+expect_path:
+- check_slab
+- top_slab
+- done_found_slab
+node_ctx:
+  check_slab:
+    output:
+      slab_kb: 4000001
+    rows:
+    - {}
+  top_slab:
+    output:
+      row_count: 1
+    rows:
+    - {}

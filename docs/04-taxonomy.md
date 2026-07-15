@@ -100,6 +100,7 @@
 - `host/memory/leak` — "内存只涨不降/怀疑内存泄漏"
 - `host/memory/swap-thrash` — "swap 用满/系统巨慢/si so 很高"
 - `host/memory/cache-pressure` — "available 内存很低但没进程占用/page cache"
+- `host/memory/slab-leak` — "内存被吃但没进程占用/slab 很大"
 - `host/memory/hugepage-misconfig` — "大页配置不对/应用申请大页失败"
 
 **host/storage**
@@ -110,6 +111,7 @@
 - `host/storage/fs-corruption` — "文件系统报错/需要 fsck/坏块"
 - `host/storage/raid-degraded` — "RAID 降级/掉盘/阵列重建"
 - `host/storage/mount-failed` — "挂载失败/开机卡在挂载"
+- `host/storage/inode-exhausted` — "df 有空间却报 No space/inode 用满"
 - `host/storage/smart-failing` — "SMART 告警/dmesg 有 I/O error/怀疑盘要坏"
 
 **host/network-stack**
@@ -125,12 +127,16 @@
 - `host/process/fd-leak` — "进程 fd 泄漏/lsof 数量暴涨"
 - `host/process/unexpected-exit` — "进程莫名退出/服务自己挂了/没日志"
 - `host/process/thread-explosion` — "线程数暴涨/nproc 超限/pthread_create 失败"
+- `host/process/thread-explosion` — "线程数暴涨/pthread_create 失败"
 - `host/process/dstate-hang` — "进程卡 D 状态/kill 不掉/不可中断睡眠"
 
 **host/system**
 - `host/system/journal-disk-full` — "journal 撑满磁盘/journald 占很大"
 - `host/system/clock-drift` — "时间不对/时钟漂移/NTP 不同步"
 - `host/system/systemd-unit-failed` — "服务起不来/systemctl failed/开机某单元报错"
+- `host/system/ntp-unsynced` — "时间不同步/chrony 不 sync/时间源不可达"
+- `host/system/cron-not-firing` — "定时任务没跑/crontab 不生效"
+- `host/system/ulimit-exhausted` — "Too many open files/句柄用满"
 - `host/system/kernel-param-misconfig` — "内核参数不对/sysctl 需要调优"
 - `host/system/cert-expiry` — "证书快过期/TLS 证书到期告警"
 - `host/system/patch-rollout` — "要批量打补丁/内核升级/安全更新"

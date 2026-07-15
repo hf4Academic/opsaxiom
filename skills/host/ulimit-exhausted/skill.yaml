@@ -1,0 +1,74 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.system.ulimit-exhausted
+  name: ulimit 文件句柄打满排查
+  taxonomy: host/system/ulimit-exhausted
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: sys_fd
+  nodes:
+  - id: sys_fd
+    type: check
+    title: 查系统级 fd 使用与上限
+    run:
+      linux: echo "used $(awk '{print $1}' /proc/sys/fs/file-nr) max $(cat /proc/sys/fs/file-max)"
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.used > output.max * 0.8
+      goto: done_system_limit
+    - when: output.used <= output.max * 0.8
+      goto: proc_fd
+    otherwise: proc_fd
+    cautions:
+    - file-nr 第一列是已分配 fd 数；系统级没满不代表进程级没满——进程受 ulimit -n 单独约束
+  - id: proc_fd
+    type: check
+    title: 找 fd 占用最多的进程
+    run:
+      linux: for p in /proc/[0-9]*; do echo "$(ls $p/fd 2>/dev/null|wc -l) ${p##*/}";
+        done | sort -rn | head -5
+    parser: generic/table-v1
+    branch:
+    - when: rows[0].name > 5000
+      goto: done_proc_leak
+    - when: output.row_count > 0
+      goto: escalate
+    otherwise: escalate
+    cautions:
+    - 进程 fd 高但不涨=正常高并发；持续只涨不降=fd 泄漏（打开不关），看是 socket 还是普通文件（ls -l /proc/PID/fd）
+  - id: done_system_limit
+    type: done
+    summary: 系统级 fd 接近 file-max。上调：sysctl -w fs.file-max=<更大值> 并写入 /etc/sysctl.conf
+      永久化。
+  - id: done_proc_leak
+    type: done
+    summary: 某进程 fd 数异常高，多为 fd 泄漏。临时缓解上调该服务的 LimitNOFILE（systemd）或 ulimit -n；根治要修应用（确保
+      close）。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-system-ulimit-exhausted-auto
+  expect_path:
+  - sys_fd
+  - done_system_limit
+feedback:
+  ask: ulimit 文件句柄打满排查定位了吗？

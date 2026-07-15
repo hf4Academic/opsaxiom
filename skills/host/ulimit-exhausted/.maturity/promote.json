@@ -1,14 +1,14 @@
 {
-  "skill": "host.storage.raid-degraded",
+  "skill": "host.system.ulimit-exhausted",
   "action": "promote",
-  "from": "sim_verified",
+  "from": "draft",
   "to": "sim_verified",
-  "at": "2026-07-15T12:49:30",
+  "at": "2026-07-15T12:56:35",
   "validator": "0 ERROR",
   "evidence": "context_walk",
   "scenarios": [
     {
-      "scenario": "host-storage-raid-degraded-auto.yaml",
+      "scenario": "host-system-ulimit-exhausted-auto.yaml",
       "mode": "context_walk",
       "path_ok": true,
       "rollback_ok": null

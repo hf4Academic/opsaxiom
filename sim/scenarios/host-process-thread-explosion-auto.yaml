@@ -1,0 +1,15 @@
+skill: skills/host/thread-explosion/skill.yaml
+scenario: host.process.thread-explosion 自动求解走查
+expect_path:
+- count_threads
+- find_culprit
+- done_single_culprit
+node_ctx:
+  count_threads:
+    output:
+      used: 30001
+    rows:
+    - {}
+  find_culprit:
+    rows:
+    - name: 1001

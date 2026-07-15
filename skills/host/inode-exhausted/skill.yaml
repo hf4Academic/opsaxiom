@@ -1,0 +1,73 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.storage.inode-exhausted
+  name: inode 耗尽排查（空间够却报满）
+  taxonomy: host/storage/inode-exhausted
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_inode
+  nodes:
+  - id: check_inode
+    type: check
+    title: 确认是否 inode 耗尽
+    run:
+      linux: df -i --output=ipcent / | tr -dc '0-9\n' | tail -1
+    parser: generic/count-v1
+    branch:
+    - when: output.value >= 95
+      goto: find_dirs
+    - when: output.value < 95
+      goto: done_not_inode
+    otherwise: find_dirs
+    cautions:
+    - df 显示有空间却报 No space left，几乎总是 inode 耗尽——这是本 Skill 的存在意义
+  - id: find_dirs
+    type: check
+    title: 定位海量小文件目录
+    run:
+      linux: for d in /var /tmp /home; do echo "$(find $d -xdev 2>/dev/null | wc -l)
+        $d"; done | sort -rn | head
+    parser: generic/table-v1
+    branch:
+    - when: rows[0].name > 100000
+      goto: done_found_dir
+    - when: output.row_count > 0
+      goto: escalate
+    otherwise: escalate
+    cautions:
+    - 典型元凶：session 文件、mail 队列、未清的临时文件、大量小日志。处置走隔离/归档，别一把 rm -rf（可能误删业务），最终删除永远经过人
+  - id: done_not_inode
+    type: done
+    summary: inode 未耗尽（<95%）。报 No space 若非容量满，可能是磁盘配额（quota）或 reserved blocks，转查这两项。
+  - id: done_found_dir
+    type: done
+    summary: 定位到海量小文件目录。确认业务不再需要后归档/清理该目录下的碎小文件；配 logrotate 或定期清理防复发。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-storage-inode-exhausted-auto
+  expect_path:
+  - check_inode
+  - find_dirs
+  - done_found_dir
+feedback:
+  ask: inode 耗尽排查（空间够却报满）定位了吗？

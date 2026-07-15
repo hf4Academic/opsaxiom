@@ -1,0 +1,11 @@
+skill: skills/host/ntp-unsynced/skill.yaml
+scenario: host.system.ntp-unsynced 自动求解走查
+expect_path:
+- check_service
+- done_no_service
+node_ctx:
+  check_service:
+    output:
+      value: 0
+    rows:
+    - {}

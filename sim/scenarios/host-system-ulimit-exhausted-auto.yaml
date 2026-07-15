@@ -1,0 +1,12 @@
+skill: skills/host/ulimit-exhausted/skill.yaml
+scenario: host.system.ulimit-exhausted 自动求解走查
+expect_path:
+- sys_fd
+- done_system_limit
+node_ctx:
+  sys_fd:
+    output:
+      used: true
+      max: true
+    rows:
+    - {}

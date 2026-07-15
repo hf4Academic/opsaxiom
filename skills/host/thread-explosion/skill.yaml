@@ -1,0 +1,76 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.process.thread-explosion
+  name: 线程数暴涨排查
+  taxonomy: host/process/thread-explosion
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: count_threads
+  nodes:
+  - id: count_threads
+    type: check
+    title: 统计系统线程总数与上限
+    run:
+      linux: echo "used $(ps -eLf | wc -l) max $(cat /proc/sys/kernel/threads-max)"
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.used > 30000
+      goto: find_culprit
+    - when: output.used <= 30000
+      goto: done_not_high
+    otherwise: find_culprit
+    cautions:
+    - 线程也占 PID，可能先撞 pid_max 而非 threads-max；两个上限都要看
+  - id: find_culprit
+    type: check
+    title: 找线程最多的进程
+    run:
+      linux: ps -eLf | awk '{print $2}' | sort | uniq -c | sort -rn | head -5
+    parser: generic/table-v1
+    branch:
+    - when: rows[0].name > 1000
+      goto: done_single_culprit
+    - when: output.row_count > 0
+      goto: done_spread
+    otherwise: escalate
+    cautions:
+    - 单进程线程数远超核数=线程池配置过大或线程泄漏（用完不回收），常见于每请求起一个线程且没上限的老代码
+  - id: done_not_high
+    type: done
+    summary: 系统线程总数不高，pthread_create 失败多为单进程触碰了 ulimit -u（用户进程/线程上限）——查该用户的 nproc
+      软限制。
+  - id: done_single_culprit
+    type: done
+    summary: 某单进程线程数异常高，是线程泄漏或线程池无上限。定位该进程后从应用侧限制线程池大小；紧急可重启该进程释放。
+  - id: done_spread
+    type: done
+    summary: 线程分散在多进程。核对是否某类框架/服务共性问题，或系统整体并发确实高需要上调 threads-max 与相关 ulimit。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-process-thread-explosion-auto
+  expect_path:
+  - count_threads
+  - find_culprit
+  - done_single_culprit
+feedback:
+  ask: 线程数暴涨排查定位了吗？
