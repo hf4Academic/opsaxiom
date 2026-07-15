@@ -295,6 +295,15 @@
 - `aicomp/scheduling/gpu-fragmentation` — "GPU 碎片化/整机分配不出来"
 
 ### 5.5 middleware
+**新引擎（H-push 第三批）**
+- `middleware/postgres/connection-exhausted` — "PG too many clients/连接耗尽/idle in txn"
+- `middleware/postgres/autovacuum-lag` — "PG 表膨胀/autovacuum 跟不上/事务ID回卷"
+- `middleware/redis/replication-break` — "Redis 主从断开/master_link down/全量重同步"
+- `middleware/kafka/rebalance-storm` — "消费组频繁 rebalance/消费停停走走"
+- `middleware/zookeeper/quorum-loss` — "ZK 失去多数派/不可写/依赖服务集体异常"
+- `middleware/mongodb/replica-lag` — "Mongo 从节点延迟/读到旧数据/选举风险"
+- `middleware/haproxy/backend-down` — "HAProxy 503/后端全 DOWN/健康检查失败"
+
 - `middleware/redis/aof-rewrite-storm` — "Redis 周期性卡顿/AOF 重写延迟尖刺/fork 慢"
 - `middleware/redis/slowlog-high` — "Redis 响应慢/有慢命令/延迟高"
 - `middleware/kafka/isr-shrink` — "Kafka ISR 收缩/副本不同步/under-replicated"

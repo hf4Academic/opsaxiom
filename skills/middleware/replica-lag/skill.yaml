@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.mongodb.replica-lag
+  name: MongoDB 副本集延迟排查
+  taxonomy: middleware/mongodb/replica-lag
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_lag
+  nodes:
+  - id: check_lag
+    type: check
+    title: 查从节点复制延迟(秒)
+    run:
+      linux: mongosh --quiet --eval 'rs.status().members.filter(m=>m.state==2).map(m=>m.optimeDate).forEach(d=>print(Math.round((rs.status().date-d)/1000)))'
+        2>/dev/null | sort -rn | head -1
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 30
+      goto: check_health
+    - when: output.value <= 30
+      goto: done_lag_ok
+    otherwise: check_health
+    cautions:
+    - 副本延迟大=从节点数据落后主节点;延迟内的 secondary 读会读到旧数据,且主挂时延迟太大的从选上来会丢数据。先看延迟秒数再定严重性
+  - id: check_health
+    type: check
+    title: 看从节点是否健康(非 down/recovering)
+    run:
+      linux: mongosh --quiet --eval 'print(rs.status().members.filter(m=>m.health!=1||m.state==3||m.state==6).length)'
+        2>/dev/null
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_member_unhealthy
+    - when: output.value == 0
+      goto: done_slow_apply
+    otherwise: escalate
+    cautions:
+    - 从节点 RECOVERING/不健康会持续落后甚至掉出副本集;区分是节点本身有病(磁盘/网络/正在初始同步)还是只是应用 oplog 慢跟不上写入速度
+  - id: done_lag_ok
+    type: done
+    summary: 副本延迟在可接受范围。读到旧数据可能是 readPreference=secondary 的预期行为;需强一致就读 primary 或设
+      readConcern。
+  - id: done_member_unhealthy
+    type: done
+    summary: 有从节点不健康(down/recovering)导致落后。查该节点磁盘/网络/是否在初始同步,恢复其健康;长期跟不上考虑重做初始同步或扩其资源。
+  - id: done_slow_apply
+    type: done
+    summary: 节点健康但 oplog 应用跟不上写入(延迟大)。查从节点磁盘 IO/负载是否成瓶颈、主库写入是否突增;必要时升级从节点硬件或分流读负载,缩小延迟窗口。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: middleware-mongodb-replica-lag-auto
+  expect_path:
+  - check_lag
+  - check_health
+  - done_member_unhealthy
+feedback:
+  ask: MongoDB 副本集延迟排查定位了吗？

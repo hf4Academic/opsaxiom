@@ -1,0 +1,80 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.kafka.rebalance-storm
+  name: Kafka 消费组频繁 rebalance 排查
+  taxonomy: middleware/kafka/rebalance-storm
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_rebalance
+  nodes:
+  - id: check_rebalance
+    type: check
+    title: 查消费者日志里的 rebalance 频次
+    run:
+      linux: tail -1000 /var/log/kafka/consumer.log 2>/dev/null | grep -ic 'Rebalancing\|Revoke
+        partitions\|Attempt.*join group'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 10
+      goto: check_timeout
+    - when: output.value <= 10
+      goto: done_rebalance_ok
+    otherwise: check_timeout
+    cautions:
+    - 每次 rebalance 期间整组消费都暂停(stop-the-world),频繁 rebalance=消费一直在停停走走;根因多是消费者被判定'掉线'反复踢出再加入
+  - id: check_timeout
+    type: check
+    title: 看是否因处理慢触发会话/轮询超时
+    run:
+      linux: tail -1000 /var/log/kafka/consumer.log 2>/dev/null | grep -ic 'max.poll.interval\|session.timeout\|leaving
+        group'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_poll_slow
+    - when: output.value == 0
+      goto: done_member_flap
+    otherwise: escalate
+    cautions:
+    - 单批消息处理时间超过 max.poll.interval.ms,消费者来不及下次 poll 就被判死踢出,触发 rebalance;越踢越慢形成风暴。调大该参数或减小
+      max.poll.records 是常见解
+  - id: done_rebalance_ok
+    type: done
+    summary: rebalance 不频繁。消费卡顿另查(分区 Leader 变动/broker 负载/生产端积压)。
+  - id: done_poll_slow
+    type: done
+    summary: 处理慢导致轮询/会话超时被踢触发 rebalance。调大 max.poll.interval.ms、减小 max.poll.records
+      让单批更快处理完,或异步化重逻辑;稳住后 rebalance 平息。
+  - id: done_member_flap
+    type: done
+    summary: 成员反复进出但非 poll 超时,查消费者实例是否频繁重启/GC 长停顿/网络抖动导致心跳丢失;稳定消费者进程与到 broker 的网络,必要时调
+      session.timeout.ms。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: middleware-kafka-rebalance-storm-auto
+  expect_path:
+  - check_rebalance
+  - check_timeout
+  - done_poll_slow
+feedback:
+  ask: Kafka 消费组频繁 rebalance 排查定位了吗？

@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.zookeeper.quorum-loss
+  name: ZooKeeper 失去多数派排查
+  taxonomy: middleware/zookeeper/quorum-loss
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_mode
+  nodes:
+  - id: check_mode
+    type: check
+    title: 查本节点 ZK 角色是否正常
+    run:
+      linux: 'echo srvr | nc -w2 localhost 2181 2>/dev/null | grep -ic ''Mode: leader\|Mode:
+        follower'''
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_followers
+    - when: output.value == 0
+      goto: done_no_role
+    otherwise: check_followers
+    cautions:
+    - ZK 靠多数派(quorum)选主:5 节点挂 3 就没 quorum,整个集群拒绝写、只能只读甚至不可用;先确认本节点是 leader/follower
+      还是掉成了 looking(选不出主)
+  - id: check_followers
+    type: check
+    title: 查 leader 视角的存活 follower 数
+    run:
+      linux: echo mntr | nc -w2 localhost 2181 2>/dev/null | awk -F'\t' '/zk_followers|zk_synced_followers/{print
+        "followers", $2}' | head -1
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.followers > 0
+      goto: done_quorum_ok
+    - when: output.followers == 0
+      goto: done_isolated
+    otherwise: escalate
+    cautions:
+    - 同步的 follower 数决定 quorum 是否成立;数量不足要逐个查挂掉的 ZK 节点(进程/磁盘/网络分区),别只重启本节点了事
+  - id: done_no_role
+    type: done
+    summary: 本节点无正常角色(可能 looking/不可用)。查本节点 ZK 进程与日志、myid/zoo.cfg 配置、到其它节点网络;它选不出主往往因多数节点已失联。
+  - id: done_quorum_ok
+    type: done
+    summary: 本节点有角色且有同步 follower,quorum 大体成立。依赖服务异常另查其自身到 ZK 的连接/会话超时;若曾抖动,核对各节点稳定性。
+  - id: done_isolated
+    type: done
+    summary: 疑似 quorum 不足(无同步 follower)。逐个恢复挂掉的 ZK 节点(进程/磁盘/网络分区),凑够多数派集群才恢复可写;检查是否网络分区把集群切成了少数派。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: middleware-zookeeper-quorum-loss-auto
+  expect_path:
+  - check_mode
+  - check_followers
+  - done_quorum_ok
+feedback:
+  ask: ZooKeeper 失去多数派排查定位了吗？

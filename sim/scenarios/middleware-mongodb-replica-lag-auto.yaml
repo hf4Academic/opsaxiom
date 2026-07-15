@@ -1,0 +1,17 @@
+skill: skills/middleware/replica-lag/skill.yaml
+scenario: middleware.mongodb.replica-lag 自动求解走查
+expect_path:
+- check_lag
+- check_health
+- done_member_unhealthy
+node_ctx:
+  check_lag:
+    output:
+      value: 31
+    rows:
+    - {}
+  check_health:
+    output:
+      value: 1
+    rows:
+    - {}

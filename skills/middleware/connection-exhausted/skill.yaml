@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.postgres.connection-exhausted
+  name: PostgreSQL 连接耗尽排查
+  taxonomy: middleware/postgres/connection-exhausted
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_used
+  nodes:
+  - id: check_used
+    type: check
+    title: 查当前连接数
+    run:
+      linux: psql -tAc 'SELECT count(*) FROM pg_stat_activity' 2>/dev/null
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 90
+      goto: check_idle
+    - when: output.value <= 90
+      goto: done_conn_ok
+    otherwise: check_idle
+    cautions:
+    - PG 每个连接是一个进程,连接数打满不只是拒新连,还很吃内存;max_connections 调太大反而伤性能——正解常是前面挂连接池(pgbouncer)而非一味调大
+  - id: check_idle
+    type: check
+    title: 看有多少是 idle in transaction 僵连接
+    run:
+      linux: psql -tAc "SELECT count(*) FROM pg_stat_activity WHERE state='idle in
+        transaction'" 2>/dev/null
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_idle_in_txn
+    - when: output.value == 0
+      goto: done_real_load
+    otherwise: escalate
+    cautions:
+    - '''idle in transaction''=开了事务不提交也不回滚,既占连接又持锁还阻塞 vacuum——多为应用忘了 commit 或连接池归还前没结束事务,是连接被白占的头号原因'
+  - id: done_conn_ok
+    type: done
+    summary: 连接数不高。连不上另查(网络/pg_hba 认证/监听地址/服务是否在跑)。
+  - id: done_idle_in_txn
+    type: done
+    summary: 大量 idle in transaction 僵连接占满槽位。定位来源应用修复其事务收尾(及时 commit/rollback)、设 idle_in_transaction_session_timeout
+      兜底;前置 pgbouncer 复用连接。
+  - id: done_real_load
+    type: done
+    summary: 连接确为真实活跃负载打满。前面加连接池(pgbouncer)复用、优化慢查询缩短占用、评估后适度上调 max_connections(注意内存);别让每个客户端直连吃满进程数。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: middleware-postgres-connection-exhausted-auto
+  expect_path:
+  - check_used
+  - check_idle
+  - done_idle_in_txn
+feedback:
+  ask: PostgreSQL 连接耗尽排查定位了吗？

@@ -1,0 +1,79 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.redis.replication-break
+  name: Redis 主从复制中断排查
+  taxonomy: middleware/redis/replication-break
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_link
+  nodes:
+  - id: check_link
+    type: check
+    title: 查从库到主的复制链路状态
+    run:
+      linux: redis-cli info replication 2>/dev/null | grep -c 'master_link_status:down'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_backlog
+    - when: output.value == 0
+      goto: done_link_up
+    otherwise: check_backlog
+    cautions:
+    - master_link_status:down=从库当前连不上主;区分是网络断、认证(masterauth)错、还是主库负载高拒绝同步——info 的
+      master_last_io_seconds_ago 能看多久没通信了
+  - id: check_backlog
+    type: check
+    title: 看是否频繁全量重同步
+    run:
+      linux: 'redis-cli info stats 2>/dev/null | awk -F: ''/sync_full/{print "full",
+        $2}'''
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.full > 3
+      goto: done_full_resync
+    - when: output.full <= 3
+      goto: done_link_flap
+    otherwise: escalate
+    cautions:
+    - sync_full 频繁增长=一直在做代价高昂的全量同步(而非增量)——多因复制积压缓冲区(repl-backlog-size)太小,断连稍久就只能全量;调大
+      backlog 可让短暂断连走增量
+  - id: done_link_up
+    type: done
+    summary: 主从链路正常(up)。从库读到旧数据另查(复制延迟/客户端连错节点/一致性预期)。
+  - id: done_full_resync
+    type: done
+    summary: 频繁全量重同步,代价高且期间从库不可用。调大主库 repl-backlog-size 与repl-backlog-ttl 让短断连走增量;排查网络抖动根因,别让它反复断。
+  - id: done_link_flap
+    type: done
+    summary: 链路 down 但非频繁全量,当前是断开态。查网络连通、masterauth 是否正确、主库是否内存/负载过高拒绝同步;主恢复后观察 master_link_status
+      是否回 up。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: middleware-redis-replication-break-auto
+  expect_path:
+  - check_link
+  - check_backlog
+  - done_full_resync
+feedback:
+  ask: Redis 主从复制中断排查定位了吗？

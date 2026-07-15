@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.postgres.autovacuum-lag
+  name: PostgreSQL 表膨胀/autovacuum 滞后排查
+  taxonomy: middleware/postgres/autovacuum-lag
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_deadtup
+  nodes:
+  - id: check_deadtup
+    type: check
+    title: 查死元组最多的表
+    run:
+      linux: psql -tAc 'SELECT max(n_dead_tup) FROM pg_stat_user_tables' 2>/dev/null
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 100000
+      goto: check_wraparound
+    - when: output.value <= 100000
+      goto: done_bloat_ok
+    otherwise: check_wraparound
+    cautions:
+    - 死元组(update/delete 留下的旧版本)堆积=表膨胀,查询要扫更多页变慢;autovacuum 清不过来多因高频写、autovacuum 太保守、或长事务挡住回收
+  - id: check_wraparound
+    type: check
+    title: 查事务ID年龄(回卷风险)
+    run:
+      linux: psql -tAc 'SELECT max(age(datfrozenxid)) FROM pg_database' 2>/dev/null
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 1000000000
+      goto: done_wraparound_risk
+    - when: output.value <= 1000000000
+      goto: done_tune_autovacuum
+    otherwise: escalate
+    cautions:
+    - 事务ID年龄接近 20 亿会触发回卷保护,PG 为防数据损坏会强制停止写入——这是可导致全库不可写的严重事故;age 高时必须尽快 vacuum(freeze),别拖
+  - id: done_bloat_ok
+    type: done
+    summary: 死元组不多,膨胀不明显。变慢另查(缺索引/统计信息过期需 ANALYZE/查询本身重)。
+  - id: done_wraparound_risk
+    type: done
+    summary: 事务ID年龄偏高,有回卷风险(严重)。尽快对高龄表 VACUUM(FREEZE),排查是否有长事务/未提交 prepared transaction
+      挡住 freeze;这是高优先级隐患。
+  - id: done_tune_autovacuum
+    type: done
+    summary: 膨胀明显但暂无回卷风险。对膨胀表手动 VACUUM、调激进 autovacuum 参数(降 scale_factor、提 max_workers/成本上限)、清理长事务;必要时
+      pg_repack 在线整理。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: middleware-postgres-autovacuum-lag-auto
+  expect_path:
+  - check_deadtup
+  - check_wraparound
+  - done_wraparound_risk
+feedback:
+  ask: PostgreSQL 表膨胀/autovacuum 滞后排查定位了吗？

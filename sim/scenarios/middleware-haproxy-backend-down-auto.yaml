@@ -1,0 +1,17 @@
+skill: skills/middleware/backend-down/skill.yaml
+scenario: middleware.haproxy.backend-down 自动求解走查
+expect_path:
+- check_down
+- check_up
+- done_all_down
+node_ctx:
+  check_down:
+    output:
+      value: 1
+    rows:
+    - {}
+  check_up:
+    output:
+      value: 0
+    rows:
+    - {}

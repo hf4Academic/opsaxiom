@@ -1,0 +1,17 @@
+skill: skills/middleware/rebalance-storm/skill.yaml
+scenario: middleware.kafka.rebalance-storm 自动求解走查
+expect_path:
+- check_rebalance
+- check_timeout
+- done_poll_slow
+node_ctx:
+  check_rebalance:
+    output:
+      value: 11
+    rows:
+    - {}
+  check_timeout:
+    output:
+      value: 1
+    rows:
+    - {}

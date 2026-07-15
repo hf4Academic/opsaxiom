@@ -1,0 +1,17 @@
+skill: skills/middleware/autovacuum-lag/skill.yaml
+scenario: middleware.postgres.autovacuum-lag 自动求解走查
+expect_path:
+- check_deadtup
+- check_wraparound
+- done_wraparound_risk
+node_ctx:
+  check_deadtup:
+    output:
+      value: 100001
+    rows:
+    - {}
+  check_wraparound:
+    output:
+      value: 1000000001
+    rows:
+    - {}

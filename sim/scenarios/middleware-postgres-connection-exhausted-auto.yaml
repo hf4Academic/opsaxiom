@@ -1,0 +1,17 @@
+skill: skills/middleware/connection-exhausted/skill.yaml
+scenario: middleware.postgres.connection-exhausted 自动求解走查
+expect_path:
+- check_used
+- check_idle
+- done_idle_in_txn
+node_ctx:
+  check_used:
+    output:
+      value: 91
+    rows:
+    - {}
+  check_idle:
+    output:
+      value: 1
+    rows:
+    - {}

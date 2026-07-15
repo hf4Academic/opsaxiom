@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: middleware.haproxy.backend-down
+  name: HAProxy 后端不可用排查
+  taxonomy: middleware/haproxy/backend-down
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_down
+  nodes:
+  - id: check_down
+    type: check
+    title: 查 DOWN 状态的后端数
+    run:
+      linux: echo 'show stat' | socat stdio /run/haproxy/admin.sock 2>/dev/null |
+        awk -F, '$18=="DOWN"{c++} END{print c+0}'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_up
+    - when: output.value == 0
+      goto: done_all_up
+    otherwise: check_up
+    cautions:
+    - 后端 DOWN 是 HAProxy 主动健康检查判定的;先分清是后端真挂了,还是健康检查配置本身有问题(检查路径/端口/超时不对)把好的也判成 DOWN
+  - id: check_up
+    type: check
+    title: 看是否还有存活后端
+    run:
+      linux: echo 'show stat' | socat stdio /run/haproxy/admin.sock 2>/dev/null |
+        awk -F, '$18=="UP"{c++} END{print c+0}'
+    parser: generic/count-v1
+    branch:
+    - when: output.value == 0
+      goto: done_all_down
+    - when: output.value > 0
+      goto: done_partial_down
+    otherwise: escalate
+    cautions:
+    - 一个存活后端都没有=前端必然 503;此时优先恢复至少一个后端保住可用性,再从容排查其余
+  - id: done_all_up
+    type: done
+    summary: 后端均 UP。仍报 503 另查(前端 maxconn/ACL 路由/后端返回的真 503/超时配置)。
+  - id: done_all_down
+    type: done
+    summary: 后端全 DOWN,前端必然 503(高优先)。核实后端服务是否真挂(逐个直连测),同时排查是否健康检查配置误判;先拉起一个后端恢复服务,再补齐其余。
+  - id: done_partial_down
+    type: done
+    summary: 部分后端 DOWN,容量下降有过载风险。逐个查 DOWN 后端(进程/端口/网络),或核对健康检查参数是否过严误判;恢复后端数量到能承载流量的水平。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: middleware-haproxy-backend-down-auto
+  expect_path:
+  - check_down
+  - check_up
+  - done_all_down
+feedback:
+  ask: HAProxy 后端不可用排查定位了吗？
