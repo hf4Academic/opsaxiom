@@ -1,0 +1,81 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.workload.init-container-stuck
+  name: Init 容器卡住排查
+  taxonomy: k8s/workload/init-container-stuck
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - platform: kubernetes
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  params:
+  - name: ns
+    source: alert
+    desc: 命名空间
+  - name: pod
+    source: alert
+    desc: Pod 名
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - kubectl
+  facts:
+  - k8s.version
+tree:
+  entry: check_init_status
+  nodes:
+  - id: check_init_status
+    type: check
+    title: 查 Init 容器状态
+    run:
+      kubectl: kubectl -n {{ns}} get pod {{pod}} -o jsonpath='{.status.initContainerStatuses[*].state}'
+        2>/dev/null | grep -ic 'waiting\|running'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_logs
+    - when: output.value == 0
+      goto: done_init_done
+    otherwise: check_logs
+    cautions:
+    - Init 容器串行执行，前一个不成功后面和主容器都不起——Init:0/2 表示卡在第 1 个
+  - id: check_logs
+    type: check
+    title: 查卡住的 Init 容器日志
+    run:
+      kubectl: kubectl -n {{ns}} logs {{pod}} -c $(kubectl -n {{ns}} get pod {{pod}}
+        -o jsonpath='{.spec.initContainers[0].name}') 2>/dev/null | grep -ic 'error\|waiting\|timeout\|refused'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_init_blocked
+    - when: output.value == 0
+      goto: escalate
+    otherwise: escalate
+    cautions:
+    - Init 容器常做'等依赖就绪'(等 DB/等 Service)——依赖不来它就永远等；看它在等什么，问题在被等的那个依赖
+  - id: done_init_done
+    type: done
+    summary: Init 容器已完成，卡住在主容器。转查主容器(镜像/探针/资源)。
+  - id: done_init_blocked
+    type: done
+    summary: Init 容器日志显示在等待/报错。定位它依赖什么(DB/Service/配置)，解决被等的依赖；或 Init 逻辑本身有 bug(连错地址/超时太短)。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: k8s-workload-init-container-stuck-auto
+  expect_path:
+  - check_init_status
+  - check_logs
+  - done_init_blocked
+feedback:
+  ask: Init 容器卡住排查定位了吗？

@@ -1,0 +1,81 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.workload.image-pull-slow
+  name: 镜像拉取慢/超时排查
+  taxonomy: k8s/workload/image-pull-slow
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - platform: kubernetes
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  params:
+  - name: ns
+    source: alert
+    desc: 命名空间
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - kubectl
+  facts:
+  - k8s.version
+tree:
+  entry: check_events
+  nodes:
+  - id: check_events
+    type: check
+    title: 查镜像拉取相关事件
+    run:
+      kubectl: kubectl -n {{ns}} get events --field-selector reason=Pulling,reason=Failed
+        2>/dev/null | grep -ic 'pull\|timeout\|toomanyrequests'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_ratelimit
+    - when: output.value == 0
+      goto: done_no_pull_event
+    otherwise: check_ratelimit
+    cautions:
+    - ContainerCreating 卡住不一定是拉镜像——也可能是挂卷/CNI 分配 IP 慢，看 events 才能确认
+  - id: check_ratelimit
+    type: check
+    title: 看是否触发仓库限流
+    run:
+      kubectl: kubectl -n {{ns}} get events 2>/dev/null | grep -ic 'toomanyrequests\|rate
+        limit\|429'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_ratelimit
+    - when: output.value == 0
+      goto: done_slow_registry
+    otherwise: escalate
+    cautions:
+    - Docker Hub 对匿名拉取限流(每 IP 每 6 小时若干次)，大集群共用出口 IP 极易撞——上镜像加速器或私有仓库缓存是根治手段
+  - id: done_no_pull_event
+    type: done
+    summary: 无镜像拉取事件，卡住多在挂卷或 CNI。describe Pod 看 Events定位是 volume 挂载还是网络分配。
+  - id: done_ratelimit
+    type: done
+    summary: 触发了仓库限流(toomanyrequests)。配镜像加速器/私有仓库缓存、或给节点配置带认证的拉取凭证提高配额。
+  - id: done_slow_registry
+    type: done
+    summary: 拉取慢但未限流，多为仓库带宽/网络路径慢或镜像太大。考虑就近部署仓库、精简镜像层、预热常用镜像到节点。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: k8s-workload-image-pull-slow-auto
+  expect_path:
+  - check_events
+  - check_ratelimit
+  - done_ratelimit
+feedback:
+  ask: 镜像拉取慢/超时排查定位了吗？

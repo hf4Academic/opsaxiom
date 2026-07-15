@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.control-plane.apiserver-throttling
+  name: apiserver 限流(429)排查
+  taxonomy: k8s/control-plane/apiserver-throttling
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - platform: kubernetes
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - kubectl
+  facts:
+  - k8s.version
+tree:
+  entry: check_flowcontrol
+  nodes:
+  - id: check_flowcontrol
+    type: check
+    title: 查 apiserver 优先级与公平队列
+    run:
+      kubectl: kubectl get --raw /debug/api_priority_and_fairness/dump_priority_levels
+        2>/dev/null | grep -ic 'rejected'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_who
+    - when: output.value == 0
+      goto: done_no_reject
+    otherwise: check_who
+    cautions:
+    - 1.20+ 用 APF(API Priority and Fairness)做限流，rejected 计数说明有请求被丢；别再靠老的 --max-requests-inflight
+      判断
+  - id: check_who
+    type: check
+    title: 看是否某控制器/客户端狂发请求
+    run:
+      kubectl: kubectl get events -A 2>/dev/null | wc -l
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 1000
+      goto: done_client_storm
+    - when: output.value <= 1000
+      goto: done_apf_tune
+    otherwise: escalate
+    cautions:
+    - 失控的 controller/operator(reconcile 死循环)或大量 list-watch 是 apiserver 压力主因；先找狂发请求的源，而非一味调大
+      apiserver 配额
+  - id: done_no_reject
+    type: done
+    summary: APF 无拒绝。kubectl 慢另查(网络/etcd/大对象 list)。
+  - id: done_client_storm
+    type: done
+    summary: 疑似某客户端/控制器请求风暴。用 apiserver 审计日志或 APF 的 flow schema 定位高频来源，修复其请求行为(加缓存/降频/修死循环)。
+  - id: done_apf_tune
+    type: done
+    summary: 请求量不算极端但仍被限。可为关键工作负载调整 APF 的 FlowSchema/PriorityLevelConfiguration 提高其配额，保障核心请求。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: k8s-control-plane-apiserver-throttling-auto
+  expect_path:
+  - check_flowcontrol
+  - check_who
+  - done_client_storm
+feedback:
+  ask: apiserver 限流(429)排查定位了吗？

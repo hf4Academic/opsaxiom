@@ -102,8 +102,14 @@ def generate(spec, promote=True):
     l1 = spec["taxonomy"].split("/")[0]
     leaf = spec["taxonomy"].split("/")[-1]
     d = ROOT / "skills" / l1 / leaf
-    d.mkdir(parents=True, exist_ok=True)
     skill_path = d / "skill.yaml"
+    # 叶名冲突防护：目录已存在且是别的 id → 拒绝，绝不覆盖既有 Skill（H-4 踩坑）
+    if skill_path.exists():
+        old = yaml.safe_load(skill_path.read_text(encoding="utf-8"))
+        if old.get("metadata", {}).get("id") != spec["id"]:
+            return skill_path, (f"✘ 叶名冲突：{d} 已被 {old['metadata']['id']} 占用，"
+                                f"换 taxonomy 叶名或复用既有 Skill")
+    d.mkdir(parents=True, exist_ok=True)
     skill_path.write_text(yaml.safe_dump(skill, allow_unicode=True, sort_keys=False),
                           encoding="utf-8")
     # 校验

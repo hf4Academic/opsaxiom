@@ -1,0 +1,81 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.storage.pvc-terminating-stuck
+  name: PVC/PV 卡 Terminating 排查
+  taxonomy: k8s/storage/pvc-terminating-stuck
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - platform: kubernetes
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  params:
+  - name: ns
+    source: alert
+    desc: 命名空间
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - kubectl
+  facts:
+  - k8s.version
+tree:
+  entry: check_pvc
+  nodes:
+  - id: check_pvc
+    type: check
+    title: 查卡 Terminating 的 PVC
+    run:
+      kubectl: kubectl -n {{ns}} get pvc 2>/dev/null | grep -c Terminating
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_users
+    - when: output.value == 0
+      goto: done_no_stuck
+    otherwise: check_users
+    cautions:
+    - PVC 卡 Terminating 几乎总是 finalizer 在等——kubernetes.io/pvc-protection 要求没有 Pod 还在用它才放行
+  - id: check_users
+    type: check
+    title: 看是否还有 Pod 在用该 PVC
+    run:
+      kubectl: kubectl -n {{ns}} get pods -o json 2>/dev/null | grep -ic 'persistentVolumeClaim'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_still_used
+    - when: output.value == 0
+      goto: done_finalizer
+    otherwise: escalate
+    cautions:
+    - 强删 finalizer(patch 掉)是最后手段——底层存储可能还没释放，可能导致数据/卷泄漏，务必先确认真没人用
+  - id: done_no_stuck
+    type: done
+    summary: 无卡 Terminating 的 PVC。存储问题另查(绑定/容量/CSI)。
+  - id: done_still_used
+    type: done
+    summary: PVC 仍被 Pod 引用——这就是删不掉的原因(pvc-protection finalizer)。先删/迁走引用它的 Pod，PVC
+      会自动完成删除。
+  - id: done_finalizer
+    type: done
+    summary: 无 Pod 引用但仍卡，多为 CSI 驱动侧未完成卸载或 finalizer 残留。查 CSI 控制器日志；确认底层卷已释放后，才可作为最后手段移除
+      finalizer。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: k8s-storage-pvc-terminating-stuck-auto
+  expect_path:
+  - check_pvc
+  - check_users
+  - done_still_used
+feedback:
+  ask: PVC/PV 卡 Terminating 排查定位了吗？

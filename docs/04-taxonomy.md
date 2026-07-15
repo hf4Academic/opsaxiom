@@ -211,6 +211,8 @@
 
 ### 5.3 k8s / svc
 **k8s/workload**
+- `k8s/workload/image-pull-slow` — "Pod 卡 ContainerCreating/镜像拉取慢"
+- `k8s/workload/init-container-stuck` — "Pod 卡 Init/主容器起不来"
 - `k8s/workload/cronjob-not-running` — "CronJob 到点不跑/没生成 Job"
 - `k8s/workload/crashloop` — "Pod 一直重启/CrashLoopBackOff"
 - `k8s/workload/image-pull-fail` — "拉不了镜像/ImagePullBackOff/ErrImagePull"
@@ -234,10 +236,12 @@
 - `k8s/networking/networkpolicy-block` — "NetworkPolicy 拦了/Pod 间不通"
 
 **k8s/storage**
+- `k8s/storage/pvc-terminating-stuck` — "PVC 卡 Terminating/PV 不释放"
 - `k8s/storage/pvc-pending` — "PVC 一直 Pending/绑不上 PV"
 - `k8s/storage/volume-mount-fail` — "挂卷失败/FailedMount/多重挂载冲突"
 
 **k8s/control-plane**
+- `k8s/control-plane/apiserver-throttling` — "kubectl 慢/429 限流"
 - `k8s/control-plane/etcd-nospace` — "etcd 空间满/NOSPACE/集群只读"
 - `k8s/control-plane/apiserver-slow` — "kubectl 很慢/apiserver 超时/429"
 - `k8s/control-plane/etcd-unhealthy` — "etcd 不健康/告警/空间满"
