@@ -1,0 +1,17 @@
+skill: skills/host/iowait-high/skill.yaml
+scenario: host.cpu.iowait-high 自动求解走查
+expect_path:
+- check_iowait
+- find_io
+- done_found_io
+node_ctx:
+  check_iowait:
+    output:
+      wa: 21
+    rows:
+    - {}
+  find_io:
+    output:
+      row_count: 1
+    rows:
+    - {}

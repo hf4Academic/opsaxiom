@@ -1,0 +1,17 @@
+skill: skills/host/mount-failed/skill.yaml
+scenario: host.storage.mount-failed 自动求解走查
+expect_path:
+- check_failed
+- check_device
+- done_device_gone
+node_ctx:
+  check_failed:
+    output:
+      value: 1
+    rows:
+    - {}
+  check_device:
+    output:
+      value: 1
+    rows:
+    - {}

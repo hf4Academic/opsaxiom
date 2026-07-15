@@ -1,0 +1,17 @@
+skill: skills/host/tcp-retrans-high/skill.yaml
+scenario: host.network-stack.tcp-retrans-high 自动求解走查
+expect_path:
+- check_retrans
+- check_where
+- done_active_retrans
+node_ctx:
+  check_retrans:
+    output:
+      retrans: 10001
+    rows:
+    - {}
+  check_where:
+    output:
+      value: 1
+    rows:
+    - {}

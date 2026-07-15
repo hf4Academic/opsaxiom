@@ -1,0 +1,17 @@
+skill: skills/host/dmesg-hardware-error/skill.yaml
+scenario: host.system.dmesg-hardware-error 自动求解走查
+expect_path:
+- scan_dmesg
+- classify
+- done_mem_ce
+node_ctx:
+  scan_dmesg:
+    output:
+      value: 1
+    rows:
+    - {}
+  classify:
+    output:
+      value: 1
+    rows:
+    - {}

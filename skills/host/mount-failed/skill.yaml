@@ -1,0 +1,76 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.storage.mount-failed
+  name: 挂载失败/开机卡挂载排查
+  taxonomy: host/storage/mount-failed
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_failed
+  nodes:
+  - id: check_failed
+    type: check
+    title: 查有无失败的 mount 单元
+    run:
+      linux: systemctl --failed --type=mount 2>/dev/null | grep -c '\.mount'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_device
+    - when: output.value == 0
+      goto: done_no_fail
+    otherwise: check_device
+    cautions:
+    - fstab 里挂载项写错会让开机卡进 emergency mode——加 nofail 选项可让非关键盘挂不上也不阻塞开机
+  - id: check_device
+    type: check
+    title: 确认设备/UUID 是否存在
+    run:
+      linux: for u in $(awk '!/^#/ && /UUID/{print $1}' /etc/fstab); do blkid | grep
+        -c "$u"; done | grep -c '^0'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_device_gone
+    - when: output.value == 0
+      goto: done_fs_or_opts
+    otherwise: escalate
+    cautions:
+    - 设备名 /dev/sdb 会因插拔顺序变，fstab 用 UUID 才稳；UUID 找不到=盘掉了或换了
+  - id: done_no_fail
+    type: done
+    summary: 没有失败的挂载单元。若手动 mount 报错，看具体错误（文件系统类型不对/选项非法/目标目录不存在）。
+  - id: done_device_gone
+    type: done
+    summary: fstab 里某 UUID 对应设备不存在——盘掉了、换了或没插好。确认硬件后更新 fstab；非关键盘加 nofail 防止阻塞开机。
+  - id: done_fs_or_opts
+    type: done
+    summary: 设备在但挂不上，多为文件系统损坏（需 fsck）或挂载选项非法。先 fsck 检查，再核对 fstab 的类型与 options。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-storage-mount-failed-auto
+  expect_path:
+  - check_failed
+  - check_device
+  - done_device_gone
+feedback:
+  ask: 挂载失败/开机卡挂载排查定位了吗？

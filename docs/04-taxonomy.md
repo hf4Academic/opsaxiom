@@ -93,6 +93,7 @@
 - `host/cpu/steal-high` — "云主机 CPU 被偷/st 很高/性能忽高忽低"
 - `host/cpu/softlockup` — "内核 soft lockup/CPU stuck/系统 hang 住"
 - `host/cpu/single-core-saturated` — "某个核 100% 其他核空闲/单线程打满"
+- `host/cpu/iowait-high` — "iowait 高/CPU 等 IO/系统慢"
 - `host/cpu/throttled` — "CPU 降频/cgroup 限流/容器 CPU 被 throttle"
 
 **host/memory**
@@ -112,6 +113,7 @@
 - `host/storage/raid-degraded` — "RAID 降级/掉盘/阵列重建"
 - `host/storage/mount-failed` — "挂载失败/开机卡在挂载"
 - `host/storage/inode-exhausted` — "df 有空间却报 No space/inode 用满"
+- `host/storage/mount-failed` — "挂载失败/开机卡挂载/emergency mode"
 - `host/storage/smart-failing` — "SMART 告警/dmesg 有 I/O error/怀疑盘要坏"
 
 **host/network-stack**
@@ -120,6 +122,8 @@
 - `host/network-stack/fd-exhausted-socket` — "Too many open files/socket 建不了"
 - `host/network-stack/dns-resolve-fail` — "域名解析失败/DNS 超时/间歇解析不了"
 - `host/network-stack/dns-flaky` — "DNS 偶发慢/有时 5 秒才通/重试就好/间歇性 Name or service not known"
+- `host/network-stack/arp-table-full` — "neighbour table overflow/ARP 表满"
+- `host/network-stack/tcp-retrans-high` — "TCP 重传多/吞吐上不去"
 - `host/network-stack/packet-drop-local` — "本机丢包/ethtool 计数增长/ring buffer 满"
 
 **host/process**
@@ -137,6 +141,8 @@
 - `host/system/ntp-unsynced` — "时间不同步/chrony 不 sync/时间源不可达"
 - `host/system/cron-not-firing` — "定时任务没跑/crontab 不生效"
 - `host/system/ulimit-exhausted` — "Too many open files/句柄用满"
+- `host/system/systemd-restart-loop` — "服务反复重启/start-limit-hit"
+- `host/system/dmesg-hardware-error` — "dmesg 有 Hardware Error/MCE/EDAC"
 - `host/system/kernel-param-misconfig` — "内核参数不对/sysctl 需要调优"
 - `host/system/cert-expiry` — "证书快过期/TLS 证书到期告警"
 - `host/system/patch-rollout` — "要批量打补丁/内核升级/安全更新"

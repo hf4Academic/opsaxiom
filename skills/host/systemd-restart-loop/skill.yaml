@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.system.systemd-restart-loop
+  name: systemd 服务反复重启排查
+  taxonomy: host/system/systemd-restart-loop
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_restarts
+  nodes:
+  - id: check_restarts
+    type: check
+    title: 查该单元近期重启次数
+    run:
+      linux: systemctl show SERVICE -p NRestarts --value
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 5
+      goto: check_exit
+    - when: output.value <= 5
+      goto: done_stable
+    otherwise: check_exit
+    cautions:
+    - Restart=always 时崩了会被拉起，掩盖真问题——NRestarts 高才暴露；撞到 StartLimitBurst 会进 failed 且不再拉起（start-limit-hit）
+  - id: check_exit
+    type: check
+    title: 查最后一次退出原因
+    run:
+      linux: systemctl show SERVICE -p ExecMainStatus -p Result | grep -c 'Result=exit-code\|ExecMainStatus=[1-9]'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_app_crash
+    - when: output.value == 0
+      goto: done_oom_or_signal
+    otherwise: escalate
+    cautions:
+    - Result=oom-kill 说明被 OOM 杀（关联 memory/oom-kill）；signal 类退出看 journalctl -u 的堆栈，别只盯
+      systemd 状态
+  - id: done_stable
+    type: done
+    summary: 重启次数不高，服务基本稳定。若仍偶发，观察是否周期性（如内存缓慢泄漏后被杀），配合 journal 看时间规律。
+  - id: done_app_crash
+    type: done
+    summary: 以非零码退出=应用自身崩溃。看 journalctl -u SERVICE 的最后几十行定位崩溃点；临时用 RestartSec 拉长重启间隔避免
+      CPU 打满，根治靠修应用。
+  - id: done_oom_or_signal
+    type: done
+    summary: 非退出码型异常（信号/OOM）。查是否 Result=oom-kill；是则该服务内存超限，调 MemoryMax 或修泄漏；否则看信号来源。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-system-systemd-restart-loop-auto
+  expect_path:
+  - check_restarts
+  - check_exit
+  - done_app_crash
+feedback:
+  ask: systemd 服务反复重启排查定位了吗？

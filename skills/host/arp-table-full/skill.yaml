@@ -1,0 +1,76 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.network-stack.arp-table-full
+  name: 本机 ARP/邻居表满排查
+  taxonomy: host/network-stack/arp-table-full
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: count_neigh
+  nodes:
+  - id: count_neigh
+    type: check
+    title: 统计邻居表项数与 gc 阈值
+    run:
+      linux: echo "entries $(ip neigh | wc -l) thresh3 $(cat /proc/sys/net/ipv4/neigh/default/gc_thresh3)"
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.entries > output.thresh3 * 0.8
+      goto: check_stale
+    - when: output.entries <= output.thresh3 * 0.8
+      goto: done_not_full
+    otherwise: check_stale
+    cautions:
+    - gc_thresh3 是硬上限，超了内核直接丢新邻居并 dmesg 报 overflow；大二层/大量 VIP 环境容易撞
+  - id: check_stale
+    type: check
+    title: 看是否大量 FAILED/STALE 表项
+    run:
+      linux: ip neigh | grep -c 'FAILED\|INCOMPLETE'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 100
+      goto: done_scan_or_fail
+    - when: output.value <= 100
+      goto: done_legit_scale
+    otherwise: escalate
+    cautions:
+    - 大量 FAILED 常因扫描/探测把不存在的 IP 塞进表；真实规模大则是网段设计问题
+  - id: done_not_full
+    type: done
+    summary: 邻居表未接近上限，偶发不通另有原因，转查 conntrack 或丢包。
+  - id: done_scan_or_fail
+    type: done
+    summary: 大量 FAILED/INCOMPLETE 表项挤占空间。排查谁在扫描不存在的 IP；临时上调 gc_thresh1/2/3（sysctl
+      net.ipv4.neigh.default.gc_thresh*）。
+  - id: done_legit_scale
+    type: done
+    summary: 表项多为有效邻居=网段内主机确实多。上调 gc_thresh3 并写入 sysctl.conf；长期考虑拆网段缩小广播/邻居域。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-network-stack-arp-table-full-auto
+  expect_path:
+  - count_neigh
+  - check_stale
+  - done_scan_or_fail
+feedback:
+  ask: 本机 ARP/邻居表满排查定位了吗？

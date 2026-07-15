@@ -1,0 +1,17 @@
+skill: skills/host/systemd-restart-loop/skill.yaml
+scenario: host.system.systemd-restart-loop 自动求解走查
+expect_path:
+- check_restarts
+- check_exit
+- done_app_crash
+node_ctx:
+  check_restarts:
+    output:
+      value: 6
+    rows:
+    - {}
+  check_exit:
+    output:
+      value: 1
+    rows:
+    - {}

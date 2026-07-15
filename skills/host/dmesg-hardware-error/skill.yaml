@@ -1,0 +1,76 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.system.dmesg-hardware-error
+  name: 内核硬件报错排查（MCE/EDAC）
+  taxonomy: host/system/dmesg-hardware-error
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: scan_dmesg
+  nodes:
+  - id: scan_dmesg
+    type: check
+    title: 扫描内核硬件错误关键字
+    run:
+      linux: dmesg -l err,crit 2>/dev/null | grep -icE 'Hardware Error|Machine check|EDAC|mce'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: classify
+    - when: output.value == 0
+      goto: done_no_hw_err
+    otherwise: classify
+    cautions:
+    - dmesg 时间戳是相对开机的，配合 -T 转成人类时间判断是不是近期发生
+  - id: classify
+    type: check
+    title: 区分内存还是 CPU/PCIe 错误
+    run:
+      linux: dmesg 2>/dev/null | grep -iE 'memory|DIMM|EDAC' | grep -icE 'corrected|CE'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_mem_ce
+    - when: output.value == 0
+      goto: done_other_hw
+    otherwise: escalate
+    cautions:
+    - CE(Corrected Error)是已纠正的可容忍错误，但持续增长预示 DIMM 将坏；UE(Uncorrected)是致命错误必须立即换件。别把
+      CE 当 UE 慌，也别忽视 CE 的趋势
+  - id: done_no_hw_err
+    type: done
+    summary: 内核日志无硬件错误。问题不在硬件层，转查软件/驱动。
+  - id: done_mem_ce
+    type: done
+    summary: 有内存可纠正错误(CE)。单发无害，但同一 DIMM 持续 CE 预示劣化——用 edac-util/mcelog 定位到具体 DIMM，纳入巡检，频繁则计划性更换。
+  - id: done_other_hw
+    type: done
+    summary: 非内存类硬件错误（CPU/PCIe/总线）。收集完整 dmesg 与 mcelog，对照厂商工具（如 IPMI SEL）定位部件，多数需报修。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-system-dmesg-hardware-error-auto
+  expect_path:
+  - scan_dmesg
+  - classify
+  - done_mem_ce
+feedback:
+  ask: 内核硬件报错排查（MCE/EDAC）定位了吗？

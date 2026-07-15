@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.network-stack.tcp-retrans-high
+  name: TCP 重传率高排查
+  taxonomy: host/network-stack/tcp-retrans-high
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_retrans
+  nodes:
+  - id: check_retrans
+    type: check
+    title: 查 TCP 重传段计数
+    run:
+      linux: nstat -az 2>/dev/null | awk '/TcpRetransSegs/{print "retrans", $2} /TcpOutSegs/{print
+        "out", $2}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.retrans > 10000
+      goto: check_where
+    - when: output.retrans <= 10000
+      goto: done_low
+    otherwise: check_where
+    cautions:
+    - nstat 计数是自开机累计，第一次看基数大是正常的——关键看增长速率，或用 nstat 两次间隔取差
+  - id: check_where
+    type: check
+    title: 看是本机发送侧还是接收侧丢
+    run:
+      linux: ss -ti 2>/dev/null | grep -c 'retrans:'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_active_retrans
+    - when: output.value == 0
+      goto: done_check_peer
+    otherwise: escalate
+    cautions:
+    - ss -ti 能看到每连接的 retrans/rtt；重传集中在少数连接=特定路径问题，普遍重传=链路/网卡/中间设备丢包
+  - id: done_low
+    type: done
+    summary: 重传计数不高，吞吐问题另有原因（窗口/RTT/应用），看 ss -ti 的 cwnd 与 rtt。
+  - id: done_active_retrans
+    type: done
+    summary: 本机有活跃重传连接。定位到具体对端/路径后逐跳查丢包；网卡侧看 ethtool -S 的 drop/error 计数，排除 ring buffer
+      满。
+  - id: done_check_peer
+    type: done
+    summary: 本机侧未见活跃重传，可能是接收侧或对端问题。在对端同样查重传，或抓包看是谁在重传。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-network-stack-tcp-retrans-high-auto
+  expect_path:
+  - check_retrans
+  - check_where
+  - done_active_retrans
+feedback:
+  ask: TCP 重传率高排查定位了吗？

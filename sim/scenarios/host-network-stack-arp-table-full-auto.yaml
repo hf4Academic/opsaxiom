@@ -1,0 +1,18 @@
+skill: skills/host/arp-table-full/skill.yaml
+scenario: host.network-stack.arp-table-full 自动求解走查
+expect_path:
+- count_neigh
+- check_stale
+- done_scan_or_fail
+node_ctx:
+  count_neigh:
+    output:
+      entries: true
+      thresh3: true
+    rows:
+    - {}
+  check_stale:
+    output:
+      value: 101
+    rows:
+    - {}

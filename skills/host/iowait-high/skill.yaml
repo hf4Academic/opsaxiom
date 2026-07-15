@@ -1,0 +1,73 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: host.cpu.iowait-high
+  name: CPU iowait 高排查
+  taxonomy: host/cpu/iowait-high
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_iowait
+  nodes:
+  - id: check_iowait
+    type: check
+    title: 确认 iowait 占比
+    run:
+      linux: top -bn1 | awk '/Cpu\(s\)/{for(i=1;i<=NF;i++) if($i ~ /wa/) print "wa",
+        $(i-1)}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.wa > 20
+      goto: find_io
+    - when: output.wa <= 20
+      goto: done_not_io
+    otherwise: find_io
+    cautions:
+    - iowait 高只说明 CPU 在等 IO，不等于 IO 一定是瓶颈（也可能核少放大了占比）；要结合实际 IOPS/await 判断
+  - id: find_io
+    type: check
+    title: 找占 IO 最多的进程
+    run:
+      linux: iotop -bon1 2>/dev/null | head -8 || pidstat -d 1 1 | sort -k5 -rn |
+        head
+    parser: generic/table-v1
+    branch:
+    - when: output.row_count > 0
+      goto: done_found_io
+    otherwise: escalate
+    cautions:
+    - iotop 需 root 和 CONFIG_TASK_IO_ACCOUNTING；没有则用 pidstat -d。常见元凶：日志狂写、大文件拷贝、数据库
+      checkpoint、内存不足导致 swap IO
+  - id: done_not_io
+    type: done
+    summary: iowait 不高，慢的原因不在 IO 等待。转查 CPU 负载、单核饱和或应用自身。
+  - id: done_found_io
+    type: done
+    summary: 定位到 IO 大户。区分：是正常业务 IO（考虑限速/错峰/换更快盘）还是异常（日志狂写/swap 抖动——后者先解决内存问题）。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: host-cpu-iowait-high-auto
+  expect_path:
+  - check_iowait
+  - find_io
+  - done_found_io
+feedback:
+  ask: CPU iowait 高排查定位了吗？
