@@ -114,7 +114,6 @@
 - `host/storage/iops-latency-mismatch` — "磁盘 await 高但 util 不满/IO 不多却慢"
 - `host/storage/mount-failed` — "挂载失败/开机卡在挂载"
 - `host/storage/inode-exhausted` — "df 有空间却报 No space/inode 用满"
-- `host/storage/mount-failed` — "挂载失败/开机卡挂载/emergency mode"
 - `host/storage/smart-failing` — "SMART 告警/dmesg 有 I/O error/怀疑盘要坏"
 
 **host/network-stack**
@@ -132,8 +131,6 @@
 - `host/process/fd-leak` — "进程 fd 泄漏/lsof 数量暴涨"
 - `host/process/unexpected-exit` — "进程莫名退出/服务自己挂了/没日志"
 - `host/process/thread-explosion` — "线程数暴涨/nproc 超限/pthread_create 失败"
-- `host/process/thread-explosion` — "线程数暴涨/pthread_create 失败"
-- `host/process/unexpected-exit` — "进程莫名退出没日志/服务自己挂了"
 - `host/process/dstate-hang` — "进程卡 D 状态/kill 不掉/不可中断睡眠"
 
 **host/system**
@@ -162,7 +159,6 @@
 - `network/reachability/latency-high` — "网络延迟大/rtt 高/访问慢"
 - `network/reachability/mtu-blackhole` — "大包不通小包通/MTU 黑洞/ping 通但传文件卡"
 - `network/reachability/asymmetric-route` — "回包走了别的路/非对称路由/单向不通"
-- `network/reachability/latency-high` — "网络延迟大/慢在哪一跳"
 - `network/reachability/path-trace` — "不知道断在哪一跳/要逐跳排查"
 
 **network/routing**
