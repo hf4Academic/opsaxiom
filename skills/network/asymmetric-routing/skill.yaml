@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.reachability.asymmetric-routing
+  name: 非对称路由排查(单向不通)
+  taxonomy: network/reachability/asymmetric-routing
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_route
+  nodes:
+  - id: check_route
+    type: check
+    title: 查去往目的的路由路径
+    run:
+      cisco_ios: show ip route | include via|Gateway
+      huawei_vrp: display ip routing-table | include NextHop|Direct
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_multipath
+    - when: output.value == 0
+      goto: done_no_route
+    otherwise: check_multipath
+    cautions:
+    - 非对称路由本身在纯路由网络里合法(去回走不同路),问题出在有状态设备(防火墙/NAT)上——它只看到单向流量,认为是非法连接而丢弃。先确认路径上有没有有状态设备
+  - id: check_multipath
+    type: check
+    title: 看是否存在多条等价/冗余路径
+    run:
+      cisco_ios: show ip route | include equal|ECMP|via
+      huawei_vrp: display ip routing-table | include NextHop
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 1
+      goto: done_asymmetric
+    - when: output.value <= 1
+      goto: done_single_path
+    otherwise: escalate
+    cautions:
+    - 多条路径/双出口是非对称的温床:去走 A 回走 B,途经的防火墙各看半程会 drop;解法是让去回经同一有状态设备,或在防火墙间做会话同步
+  - id: done_no_route
+    type: done
+    summary: 没有到目的的路由。补/修路由(缺省路由/明细路由/重分发),先解决可达性再谈方向。
+  - id: done_asymmetric
+    type: done
+    summary: 存在多路径导致非对称,途经有状态设备(防火墙/NAT)只见单向而丢弃。让去回流量经同一设备(策略路由/调整 metric),或在冗余防火墙间开会话同步。
+  - id: done_single_path
+    type: done
+    summary: 单路径却单向不通,多为反向路由缺失或 uRPF/ACL 挡了回包。检查目的侧到源的回程路由、uRPF 检查、以及沿途 ACL 是否只放行了单向。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-reachability-asymmetric-routing-auto
+  expect_path:
+  - check_route
+  - check_multipath
+  - done_asymmetric
+feedback:
+  ask: 非对称路由排查(单向不通)定位了吗？

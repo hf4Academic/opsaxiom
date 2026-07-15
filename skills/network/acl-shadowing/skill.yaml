@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.security-policy.acl-shadowing
+  name: ACL 规则遮蔽排查
+  taxonomy: network/security-policy/acl-shadowing
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_hits
+  nodes:
+  - id: check_hits
+    type: check
+    title: 查各 ACL 表项命中计数
+    run:
+      cisco_ios: show access-lists | include matches|permit|deny
+      huawei_vrp: display acl all | include rule|match
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_zero_hit
+    - when: output.value == 0
+      goto: done_no_acl
+    otherwise: check_zero_hit
+    cautions:
+    - ACL 按顺序自上而下匹配,命中即停;某条规则命中数一直为 0,很可能被上面更宽的规则遮蔽了(shadowing)——看命中计数是发现遮蔽最直接的手段
+  - id: check_zero_hit
+    type: check
+    title: 看是否有始终零命中的规则
+    run:
+      cisco_ios: show access-lists | include 0 matches
+      huawei_vrp: display acl all | include 0 times
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_shadowed
+    - when: output.value == 0
+      goto: done_order_ok
+    otherwise: escalate
+    cautions:
+    - 零命中未必都是遮蔽(也可能确实没这类流量),但配合业务预期看:本该生效却零命中的,基本就是被前面规则吃掉了。调整顺序把更具体的规则前置
+  - id: done_no_acl
+    type: done
+    summary: 该处无 ACL 或无命中数据。规则不生效另查(是否应用到接口/方向对不对/VTY)。
+  - id: done_shadowed
+    type: done
+    summary: 存在零命中规则,疑似被前面更宽规则遮蔽。核对本应生效的规则,把更具体的(窄网段/特定端口)移到宽规则前面;遮蔽也可能导致'以为拒了实际放行'的安全隐患。
+  - id: done_order_ok
+    type: done
+    summary: 无异常零命中,顺序大体合理。若某规则仍不达预期,核对匹配条件(网段掩码/端口/协议)是否写对、以及 ACL 是否真的挂到了目标接口的正确方向。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-security-policy-acl-shadowing-auto
+  expect_path:
+  - check_hits
+  - check_zero_hit
+  - done_shadowed
+feedback:
+  ask: ACL 规则遮蔽排查定位了吗？

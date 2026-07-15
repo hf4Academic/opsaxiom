@@ -153,6 +153,14 @@
 - `host/provision/baseline-harden` — "安全基线加固/等保整改/CIS 基线"
 
 ### 5.2 network
+**network（H-push 第四批）**
+- `network/routing/bgp-max-prefix` — "BGP 前缀超限断邻居/max-prefix 触发/邻居 Idle"
+- `network/reachability/asymmetric-routing` — "非对称路由/单向不通/防火墙丢半程"
+- `network/security-policy/acl-shadowing` — "ACL 规则遮蔽/后面规则零命中/顺序不对"
+- `network/switching/storm-control-triggered` — "风暴抑制触发/接口被压/多播误伤"
+- `network/traffic/microburst` — "带宽没满却丢包/output drops/微突发"
+- `network/physical/duplex-mismatch` — "双工不匹配/late collision/CRC/半双工"
+
 **network/reachability**
 - `network/reachability/packet-loss` — "丢包/网络时好时坏/ping 有丢"
 - `network/reachability/arp-storm` — "ARP 报文异常多/CPU 被打高"

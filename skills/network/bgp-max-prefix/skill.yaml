@@ -1,0 +1,79 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.routing.bgp-max-prefix
+  name: BGP 前缀数超限排查
+  taxonomy: network/routing/bgp-max-prefix
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_log
+  nodes:
+  - id: check_log
+    type: check
+    title: 查是否有 max-prefix 触发日志
+    run:
+      cisco_ios: show logging | include MAXPFX|max-prefix|prefix limit
+      huawei_vrp: display logbuffer | include maximum|prefix|EXCEED
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_peer
+    - when: output.value == 0
+      goto: done_no_maxpfx
+    otherwise: check_peer
+    cautions:
+    - max-prefix 是保护机制:邻居发来的前缀数超过配置上限时,为防内存/表爆炸主动断开该邻居——断的是'收太多'的那一侧,根因在对端为何突然通告海量前缀
+  - id: check_peer
+    type: check
+    title: 查该邻居当前状态与前缀数
+    run:
+      cisco_ios: show ip bgp summary | include Idle|Active
+      huawei_vrp: display bgp peer | include Idle|Active
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_peer_down
+    - when: output.value == 0
+      goto: done_near_limit
+    otherwise: escalate
+    cautions:
+    - 被 max-prefix 断开的邻居常卡在 Idle,且很多实现不会自动恢复(需手动 clear 或配 restart)——光调大上限没用,得先确认对端通告合理再恢复邻居
+  - id: done_no_maxpfx
+    type: done
+    summary: 无 max-prefix 触发。邻居异常另查(链路/认证/hold 超时/AS 配置)。
+  - id: done_peer_down
+    type: done
+    summary: 邻居因超限被断(Idle)。先核实对端为何通告海量前缀(误配/泄漏/去汇总),解决源头或用前缀过滤/汇总收敛;确认合理后调整上限并手动 clear
+      恢复邻居。
+  - id: done_near_limit
+    type: done
+    summary: 有触发迹象但邻居暂存活,可能接近上限。核对前缀数增长是否正常,配 max-prefix 的告警阈值(warning-only)提前预警,避免直接断邻居。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-routing-bgp-max-prefix-auto
+  expect_path:
+  - check_log
+  - check_peer
+  - done_peer_down
+feedback:
+  ask: BGP 前缀数超限排查定位了吗？

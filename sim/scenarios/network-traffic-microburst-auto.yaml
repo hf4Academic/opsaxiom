@@ -1,0 +1,17 @@
+skill: skills/network/microburst/skill.yaml
+scenario: network.traffic.microburst 自动求解走查
+expect_path:
+- check_drops
+- check_util
+- done_microburst
+node_ctx:
+  check_drops:
+    output:
+      value: 1
+    rows:
+    - {}
+  check_util:
+    output:
+      value: 1
+    rows:
+    - {}

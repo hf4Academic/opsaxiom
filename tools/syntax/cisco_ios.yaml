@@ -43,3 +43,5 @@ prefixes:
   - show ip nat translations
   - show processes cpu
   - show environment
+  # H-push network batch4 扩展（Cisco IOS Command Reference，只读）
+  - show storm-control

@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.switching.storm-control-triggered
+  name: 风暴抑制触发排查
+  taxonomy: network/switching/storm-control-triggered
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_sc
+  nodes:
+  - id: check_sc
+    type: check
+    title: 查风暴抑制是否触发
+    run:
+      cisco_ios: show storm-control | include Forwarding|Blocking|Link
+      huawei_vrp: display storm-control | include over|discard|block
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_type
+    - when: output.value == 0
+      goto: done_not_triggered
+    otherwise: check_type
+    cautions:
+    - storm-control 触发说明某类报文(广播/多播/未知单播)超过了设定阈值被压制;先确认是真风暴(环路/异常主机)还是阈值设太低误伤了正常的多播业务(如视频组播)
+  - id: check_type
+    type: check
+    title: 看是哪类报文超阈值
+    run:
+      cisco_ios: show interfaces counters broadcast | include broadcast|multicast
+      huawei_vrp: display interface | include broadcast|multicast
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_real_storm
+    - when: output.value == 0
+      goto: done_threshold_low
+    otherwise: escalate
+    cautions:
+    - 广播/未知单播暴涨多为二层环路或主机异常(根因要查);而多播暴涨可能是正常组播业务,此时是阈值配得太严,该调高阈值而非一味压制
+  - id: done_not_triggered
+    type: done
+    summary: 风暴抑制未触发。接口异常另查(err-disable 其它原因/物理/双工)。
+  - id: done_real_storm
+    type: done
+    summary: 广播/未知单播超阈值=疑似真风暴。查二层环路(STP 状态/新接入设备)或异常主机,根治环路/隔离异常源;storm-control 是止血,不能替代查根因。
+  - id: done_threshold_low
+    type: done
+    summary: 疑似阈值过严误伤正常业务(如组播视频)。核对该接口承载的多播业务量,适当调高对应报文类型的抑制阈值,或对组播单独放行,避免误压正常流量。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-switching-storm-control-triggered-auto
+  expect_path:
+  - check_sc
+  - check_type
+  - done_real_storm
+feedback:
+  ask: 风暴抑制触发排查定位了吗？

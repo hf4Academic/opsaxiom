@@ -1,0 +1,75 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.traffic.microburst
+  name: 微突发丢包排查
+  taxonomy: network/traffic/microburst
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_drops
+  nodes:
+  - id: check_drops
+    type: check
+    title: 查接口输出队列丢包
+    run:
+      cisco_ios: show interfaces | include output drops|total output drops
+      huawei_vrp: display interface | include Output.*drop|discard
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_util
+    - when: output.value == 0
+      goto: done_no_drop
+    otherwise: check_util
+    cautions:
+    - output drops 增长但平均带宽不高=典型微突发:流量在毫秒级瞬时打满端口缓冲,而秒级平均看不出来——别被'利用率不高'迷惑,看的是瞬时而非平均
+  - id: check_util
+    type: check
+    title: 看平均利用率是否其实不高
+    run:
+      cisco_ios: show interfaces | include rate|load
+      huawei_vrp: display interface | include rate|Load
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_microburst
+    - when: output.value == 0
+      goto: escalate
+    otherwise: escalate
+    cautions:
+    - 微突发的缓解手段有限:加大接口 buffer/队列深度、把突发大的流量做整形(shaping)平滑、或升速端口;监控上要用高频采样(秒级以下)才抓得到
+  - id: done_no_drop
+    type: done
+    summary: 接口无输出丢包。偶发丢包另查(链路错包/对端/上层重传)。
+  - id: done_microburst
+    type: done
+    summary: 有输出丢包但平均利用率不高=微突发。缓解:加大端口缓冲/队列深度、对突发源做流量整形平滑峰值、或提升端口速率;用高频采样确认突发形态,别只看秒级平均。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-traffic-microburst-auto
+  expect_path:
+  - check_drops
+  - check_util
+  - done_microburst
+feedback:
+  ask: 微突发丢包排查定位了吗？

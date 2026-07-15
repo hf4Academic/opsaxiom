@@ -38,3 +38,5 @@ prefixes:
   - display traffic-policy
   - display nat session
   - display cpu-usage
+  # H-push network batch4 扩展（Huawei VRP Command Reference，只读）
+  - display storm-control

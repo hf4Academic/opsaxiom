@@ -1,0 +1,80 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.physical.duplex-mismatch
+  name: 双工不匹配排查
+  taxonomy: network/physical/duplex-mismatch
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_duplex
+  nodes:
+  - id: check_duplex
+    type: check
+    title: 查接口是否协商成半双工
+    run:
+      cisco_ios: show interfaces | include half-duplex|Half
+      huawei_vrp: display interface | include Half|half
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_errors
+    - when: output.value == 0
+      goto: done_full_duplex
+    otherwise: check_errors
+    cautions:
+    - 现代链路正常都应全双工;出现半双工多因一端写死速率/双工、另一端自协商,协商结果降级为半双工——双工不匹配是 late collision 和 CRC
+      的经典元凶
+  - id: check_errors
+    type: check
+    title: 看是否伴随冲突/错包
+    run:
+      cisco_ios: show interfaces | include late collision|CRC|runts
+      huawei_vrp: display interface | include CRC|Collision|Runts
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_mismatch
+    - when: output.value == 0
+      goto: done_half_no_err
+    otherwise: escalate
+    cautions:
+    - late collision(迟到冲突)几乎就是双工不匹配的确诊指标——全双工不该有冲突;两端配置要一致:要么都自协商,要么都写死同样的速率/双工
+  - id: done_full_duplex
+    type: done
+    summary: 接口全双工。慢/错包另查(线缆/光功率/速率协商/对端)。
+  - id: done_mismatch
+    type: done
+    summary: 半双工且有 late collision/CRC=双工不匹配确诊。统一两端配置:都改自协商,或都写死相同速率/双工;修正后 late collision
+      应消失、吞吐恢复。
+  - id: done_half_no_err
+    type: done
+    summary: 协商成半双工但暂无明显错包。仍建议统一两端为全双工/自协商避免隐患;核对是否有一端被手工写死导致协商降级。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-physical-duplex-mismatch-auto
+  expect_path:
+  - check_duplex
+  - check_errors
+  - done_mismatch
+feedback:
+  ask: 双工不匹配排查定位了吗？
