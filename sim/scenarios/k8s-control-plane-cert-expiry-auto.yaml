@@ -1,0 +1,17 @@
+skill: skills/k8s/cert-expiry/skill.yaml
+scenario: k8s.control-plane.cert-expiry 自动求解走查
+expect_path:
+- check_kubeadm
+- check_kubelet
+- done_kubelet_cert
+node_ctx:
+  check_kubeadm:
+    output:
+      value: 1
+    rows:
+    - {}
+  check_kubelet:
+    output:
+      value: 1
+    rows:
+    - {}

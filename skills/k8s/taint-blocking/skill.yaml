@@ -1,0 +1,82 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.scheduling.taint-blocking
+  name: 污点阻塞调度排查
+  taxonomy: k8s/scheduling/taint-blocking
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - platform: kubernetes
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  params:
+  - name: ns
+    source: alert
+    desc: 命名空间
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - kubectl
+  facts:
+  - k8s.version
+tree:
+  entry: check_events
+  nodes:
+  - id: check_events
+    type: check
+    title: 查是否因污点无法调度
+    run:
+      kubectl: kubectl -n {{ns}} get events --field-selector reason=FailedScheduling
+        2>/dev/null | grep -ic 'taint'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_taints
+    - when: output.value == 0
+      goto: done_not_taint
+    otherwise: check_taints
+    cautions:
+    - '''had taints that the pod didn''t tolerate''=节点有污点而 Pod 没配对应容忍;先分清是该节点本就该被保护(如
+      master/专用节点)还是污点是意外残留(如节点异常自动打的污点没清)'
+  - id: check_taints
+    type: check
+    title: 查集群里带污点的节点数
+    run:
+      kubectl: kubectl get nodes -o json 2>/dev/null | grep -icE '"effect":"(NoSchedule|NoExecute)"'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_taint_found
+    - when: output.value == 0
+      goto: done_no_taint_now
+    otherwise: escalate
+    cautions:
+    - 节点异常(NotReady/压力)时,K8s 会自动打 NoExecute 污点驱逐 Pod;这类污点是'症状'——该去修节点,而不是给 Pod 加容忍硬塞上去
+  - id: done_not_taint
+    type: done
+    summary: 非污点导致的调度失败。查其它原因(资源不足/亲和/节点选择器/PVC 拓扑)。
+  - id: done_taint_found
+    type: done
+    summary: 节点污点阻止了调度。区分处理:若该 Pod 确实应上这类节点,加对应 toleration;若污点是节点异常自动打的,去修节点(而非加容忍);若污点是误配,kubectl
+      taint 移除。
+  - id: done_no_taint_now
+    type: done
+    summary: 有污点调度事件但当前查不到污点,可能污点已被清或节点已恢复。重新观察 Pod 是否已调度;若仍 Pending 转查资源/亲和等其它调度约束。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: k8s-scheduling-taint-blocking-auto
+  expect_path:
+  - check_events
+  - check_taints
+  - done_taint_found
+feedback:
+  ask: 污点阻塞调度排查定位了吗？

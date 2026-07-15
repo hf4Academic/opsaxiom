@@ -1,0 +1,83 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.workload.configmap-not-applied
+  name: ConfigMap/Secret 更新未生效排查
+  taxonomy: k8s/workload/configmap-not-applied
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - platform: kubernetes
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  params:
+  - name: ns
+    source: alert
+    desc: 命名空间
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - kubectl
+  facts:
+  - k8s.version
+tree:
+  entry: check_mount_type
+  nodes:
+  - id: check_mount_type
+    type: check
+    title: 查 Pod 是以 env 还是 volume 方式用配置
+    run:
+      kubectl: kubectl -n {{ns}} get pods -o json 2>/dev/null | grep -icE 'configMapKeyRef|secretKeyRef'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_restart
+    - when: output.value == 0
+      goto: done_volume_mount
+    otherwise: check_restart
+    cautions:
+    - ConfigMap 以环境变量(envFrom/valueFrom)注入的,改了 ConfigMap 不会自动更新——环境变量在容器启动时就定死了,必须重建
+      Pod 才生效;以 volume 挂载的才会自动同步(有延迟)
+  - id: check_restart
+    type: check
+    title: 看 Pod 是否在配置变更后重建过
+    run:
+      kubectl: kubectl -n {{ns}} get pods --no-headers 2>/dev/null | awk '{print $5}'
+        | grep -icE '^[0-9]+d|[0-9]+h'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_need_rollout
+    - when: output.value == 0
+      goto: done_recently_restarted
+    otherwise: escalate
+    cautions:
+    - env 方式的配置更新必须滚动重启工作负载(kubectl rollout restart)才生效;很多人改完 ConfigMap 就等,结果 Pod
+      一直用旧值——它不会自己重启
+  - id: done_volume_mount
+    type: done
+    summary: 配置以 volume 挂载,会自动同步但有延迟(kubelet 同步周期,约分钟级)。稍等或确认 subPath 挂载(subPath 不会自动更新);仍不生效再查应用是否热加载配置文件。
+  - id: done_need_rollout
+    type: done
+    summary: 配置以 env 注入且 Pod 未重建=还在用旧值。执行 kubectl rollout restart触发滚动重启让新配置生效;这是 env
+      方式配置更新的必备步骤。
+  - id: done_recently_restarted
+    type: done
+    summary: Pod 较新(疑似已重建)但仍不生效。核对 ConfigMap 是否真的更新了、工作负载引用的 ConfigMap 名/key 是否正确、应用是否缓存了配置。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: k8s-workload-configmap-not-applied-auto
+  expect_path:
+  - check_mount_type
+  - check_restart
+  - done_need_rollout
+feedback:
+  ask: ConfigMap/Secret 更新未生效排查定位了吗？

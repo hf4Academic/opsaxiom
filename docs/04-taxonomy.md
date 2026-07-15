@@ -258,6 +258,13 @@
 - `k8s/control-plane/apiserver-slow` — "kubectl 很慢/apiserver 超时/429"
 - `k8s/control-plane/etcd-unhealthy` — "etcd 不健康/告警/空间满"
 
+**k8s（H-push 第四批）**
+- `k8s/workload/configmap-not-applied` — "改了 ConfigMap 没生效/env 未更新/需 rollout"
+- `k8s/scheduling/taint-blocking` — "污点阻止调度/didn't tolerate taints"
+- `k8s/networking/service-external-unreachable` — "NodePort/LB 外部不通/EXTERNAL-IP pending"
+- `k8s/storage/pvc-resize-stuck` — "PVC 扩容不生效/FileSystemResizePending"
+- `k8s/control-plane/cert-expiry` — "集群证书过期/x509 expired/节点 NotReady"
+
 **k8s/workload · scheduling · networking · resource · storage（H-push 第三批）**
 - `k8s/workload/readiness-probe-failing` — "Running 但 Ready 0/1/流量不进"
 - `k8s/workload/liveness-restart-loop` — "反复重启/liveness 误杀"

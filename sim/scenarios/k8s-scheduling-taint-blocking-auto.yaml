@@ -1,0 +1,17 @@
+skill: skills/k8s/taint-blocking/skill.yaml
+scenario: k8s.scheduling.taint-blocking 自动求解走查
+expect_path:
+- check_events
+- check_taints
+- done_taint_found
+node_ctx:
+  check_events:
+    output:
+      value: 1
+    rows:
+    - {}
+  check_taints:
+    output:
+      value: 1
+    rows:
+    - {}

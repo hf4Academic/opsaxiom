@@ -1,0 +1,86 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.networking.service-external-unreachable
+  name: Service 外部访问不通排查
+  taxonomy: k8s/networking/service-external-unreachable
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - platform: kubernetes
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  params:
+  - name: ns
+    source: alert
+    desc: 命名空间
+  - name: svc
+    source: alert
+    desc: Service 名
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - kubectl
+  facts:
+  - k8s.version
+tree:
+  entry: check_type
+  nodes:
+  - id: check_type
+    type: check
+    title: 查 Service 类型与外部 IP 状态
+    run:
+      kubectl: kubectl -n {{ns}} get svc {{svc}} -o wide 2>/dev/null | grep -ic 'pending'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_lb_pending
+    - when: output.value == 0
+      goto: check_endpoints
+    otherwise: check_endpoints
+    cautions:
+    - LoadBalancer 的 EXTERNAL-IP 卡 <pending>=云厂商 LB 没配好或缺 cloud-controller-manager(自建集群没有
+      LB 实现);先分清是 LB 分配问题还是后端/网络问题
+  - id: check_endpoints
+    type: check
+    title: 查 Service 是否有健康后端
+    run:
+      kubectl: kubectl -n {{ns}} get endpoints {{svc}} -o jsonpath='{.subsets[*].addresses[*].ip}'
+        2>/dev/null | wc -w
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_check_firewall
+    - when: output.value == 0
+      goto: done_no_endpoints
+    otherwise: escalate
+    cautions:
+    - Service 没有 endpoints(后端为空),外部访问必然不通;多因 selector 不匹配或后端 Pod 未 Ready——先确认有健康后端,再谈外部网络
+  - id: done_lb_pending
+    type: done
+    summary: LoadBalancer 外部 IP 卡 pending。自建集群需装 LB 实现(MetalLB 等)或改用 NodePort/Ingress;云上则查
+      cloud-controller-manager、LB 配额与子网/安全组配置。
+  - id: done_no_endpoints
+    type: done
+    summary: Service 无健康后端。核对 selector 与 Pod label 是否匹配、后端 Pod 是否 Ready(见 readiness
+      探针);后端补齐后外部才可能访问到。
+  - id: done_check_firewall
+    type: done
+    summary: 有后端但外部不通,问题在网络路径。查 NodePort 端口是否被云安全组/防火墙放行、externalTrafficPolicy 设置、kube-proxy
+      规则、以及节点到 Pod 的转发。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: k8s-networking-service-external-unreachable-auto
+  expect_path:
+  - check_type
+  - done_lb_pending
+feedback:
+  ask: Service 外部访问不通排查定位了吗？

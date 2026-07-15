@@ -1,0 +1,82 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.storage.pvc-resize-stuck
+  name: PVC 在线扩容卡住排查
+  taxonomy: k8s/storage/pvc-resize-stuck
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - platform: kubernetes
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  params:
+  - name: ns
+    source: alert
+    desc: 命名空间
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - kubectl
+  facts:
+  - k8s.version
+tree:
+  entry: check_condition
+  nodes:
+  - id: check_condition
+    type: check
+    title: 查是否卡在文件系统扩容待处理
+    run:
+      kubectl: kubectl -n {{ns}} get pvc -o json 2>/dev/null | grep -icE 'FileSystemResizePending|Resizing'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_sc
+    - when: output.value == 0
+      goto: done_no_resize
+    otherwise: check_sc
+    cautions:
+    - PVC 扩容分两步:底层卷扩容(存储侧)+文件系统扩容(节点侧);FileSystemResizePending 表示卷已扩,但文件系统还没扩——很多驱动需要
+      Pod 重启或重新挂载才触发文件系统扩容
+  - id: check_sc
+    type: check
+    title: 查 StorageClass 是否允许扩容
+    run:
+      kubectl: kubectl get storageclass -o json 2>/dev/null | grep -ic 'allowVolumeExpansion.*true'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_restart_pod
+    - when: output.value == 0
+      goto: done_expansion_disabled
+    otherwise: escalate
+    cautions:
+    - 'StorageClass 必须 allowVolumeExpansion: true 才支持扩容;为 false 时改 PVC 大小根本不会触发扩容,且这个开关不能事后随便改现有
+      PVC——需确认驱动支持'
+  - id: done_no_resize
+    type: done
+    summary: PVC 无扩容待处理状态。看不到新空间另查(是否真改了 PVC size、应用是否缓存了旧容量)。
+  - id: done_restart_pod
+    type: done
+    summary: 卷已扩但文件系统扩容待处理(SC 支持扩容)。多数 CSI 需重启用该 PVC 的 Pod触发文件系统在线/离线扩容;重启后 Pod 内应看到新容量。
+  - id: done_expansion_disabled
+    type: done
+    summary: StorageClass 未开启 allowVolumeExpansion,无法扩容。确认底层驱动支持后由管理员开启该选项(对新 PVC
+      生效);现有卷可能需迁移到支持扩容的 SC。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: k8s-storage-pvc-resize-stuck-auto
+  expect_path:
+  - check_condition
+  - check_sc
+  - done_restart_pod
+feedback:
+  ask: PVC 在线扩容卡住排查定位了吗？

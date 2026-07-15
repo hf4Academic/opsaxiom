@@ -1,0 +1,79 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.control-plane.cert-expiry
+  name: 集群证书临期排查
+  taxonomy: k8s/control-plane/cert-expiry
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - platform: kubernetes
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - kubectl
+  facts:
+  - k8s.version
+tree:
+  entry: check_kubeadm
+  nodes:
+  - id: check_kubeadm
+    type: check
+    title: 查控制面证书剩余有效期
+    run:
+      kubectl: kubeadm certs check-expiration 2>/dev/null | grep -icE '<invalid>|expired|
+        [0-9]d '
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_kubelet
+    - when: output.value == 0
+      goto: done_certs_ok
+    otherwise: check_kubelet
+    cautions:
+    - kubeadm 集群的控制面证书默认 1 年有效期,到期 apiserver/controller 之间通信失败,集群瘫痪——这是'集群用了快一年突然崩'的经典原因,必须提前轮换
+  - id: check_kubelet
+    type: check
+    title: 查节点是否报证书相关错误
+    run:
+      kubectl: kubectl get nodes -o json 2>/dev/null | grep -icE 'x509|certificate
+        has expired|unable to verify'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_kubelet_cert
+    - when: output.value == 0
+      goto: done_cp_cert_expiring
+    otherwise: escalate
+    cautions:
+    - kubelet 证书通常能自动轮换(rotateCertificates),但若轮换没开或 CA 出问题会到期;节点 NotReady 且报 x509
+      就要查 kubelet 证书,别只盯着网络
+  - id: done_certs_ok
+    type: done
+    summary: 控制面证书有效期充足。仍有异常另查(网络/etcd/具体组件);建议纳入证书到期巡检提前预警。
+  - id: done_kubelet_cert
+    type: done
+    summary: 节点报证书错误(疑似 kubelet 证书过期)。确认 kubelet 证书自动轮换是否开启,手动为节点重新签发/审批 CSR;修复后节点恢复与
+      apiserver 通信。
+  - id: done_cp_cert_expiring
+    type: done
+    summary: 控制面证书临期(高优先)。用 kubeadm certs renew all 轮换控制面证书并重启相关静态 Pod;同步更新 kubeconfig;规划到期前的自动化轮换避免复发。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: k8s-control-plane-cert-expiry-auto
+  expect_path:
+  - check_kubeadm
+  - check_kubelet
+  - done_kubelet_cert
+feedback:
+  ask: 集群证书临期排查定位了吗？

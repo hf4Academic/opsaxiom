@@ -1,0 +1,11 @@
+skill: skills/k8s/service-external-unreachable/skill.yaml
+scenario: k8s.networking.service-external-unreachable 自动求解走查
+expect_path:
+- check_type
+- done_lb_pending
+node_ctx:
+  check_type:
+    output:
+      value: 1
+    rows:
+    - {}
