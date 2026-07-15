@@ -158,6 +158,7 @@
 ### 5.2 network
 **network/reachability**
 - `network/reachability/packet-loss` — "丢包/网络时好时坏/ping 有丢"
+- `network/reachability/arp-storm` — "ARP 报文异常多/CPU 被打高"
 - `network/reachability/latency-high` — "网络延迟大/rtt 高/访问慢"
 - `network/reachability/mtu-blackhole` — "大包不通小包通/MTU 黑洞/ping 通但传文件卡"
 - `network/reachability/asymmetric-route` — "回包走了别的路/非对称路由/单向不通"
@@ -169,6 +170,7 @@
 - `network/routing/bgp-route-missing` — "BGP 收不到路由/前缀没通告过来"
 - `network/routing/ospf-adjacency-stuck` — "OSPF 邻居卡 ExStart/Init/邻接建不起来"
 - `network/routing/route-leak` — "路由泄漏/学到不该有的路由/环路风险"
+- `network/routing/route-flapping` — "路由表频繁变动/前缀时有时无"
 - `network/routing/vrrp-flapping` — "VRRP 主备频繁切换/网关时通时断"
 - `network/routing/default-route-missing` — "出不了外网/默认路由没了" — "默认路由丢了/出不去外网"
 
@@ -183,11 +185,13 @@
 **network/physical**
 - `network/physical/optic-fault` — "光模块告警/光衰/收发光功率异常"
 - `network/physical/interface-errors` — "接口错包/CRC 错误/input errors 增长"
+- `network/physical/optic-power-degrading` — "光功率下降/光模块老化"
 - `network/physical/link-flap` — "接口 up down 抖动/链路不稳"
 
 **network/security-policy**
 - `network/security-policy/acl-block` — "被 ACL 拦了/策略不通/加白名单"
 - `network/security-policy/nat-issue` — "NAT 不对/映射不通/源地址不对"
+- `network/security-policy/nat-session-full` — "NAT 会话表满/新连接建不了"
 - `network/security-policy/dhcp-snooping-drop` — "客户端拿不到 IP/DHCP 被丢"
 - `network/security-policy/port-security-violation` — "端口安全违规/接入不通"
 - `network/security-policy/firewall-session` — "防火墙会话满/策略命中排查"
@@ -196,10 +200,12 @@
 - `network/traffic/anomaly-detect` — "流量异常/突发大流量/带宽打满不知道谁"
 - `network/traffic/ddos-suspect` — "疑似被攻击/大量异常连接/DDoS"
 - `network/traffic/elephant-flow` — "个别大象流占满带宽/单流打满"
+- `network/traffic/qos-drops` — "某类流量丢包/QoS 队列 drop"
 - `network/traffic/broadcast-storm` — "广播风暴/广播包异常多"
 
 **network/config-mgmt**
 - `network/config-mgmt/config-audit` — "全网配置审计/一致性检查"
+- `network/config-mgmt/config-drift` — "配置被改过/和基线不一致/未保存"
 - `network/config-mgmt/baseline-diff` — "配置和基线对比/谁改了配置"
 - `network/config-mgmt/bulk-deploy` — "批量下发配置/多台设备统一改"
 

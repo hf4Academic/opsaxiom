@@ -1,0 +1,17 @@
+skill: skills/network/arp-storm/skill.yaml
+scenario: network.reachability.arp-storm 自动求解走查
+expect_path:
+- check_arp_count
+- check_cpu
+- done_arp_storm
+node_ctx:
+  check_arp_count:
+    output:
+      value: 5001
+    rows:
+    - {}
+  check_cpu:
+    output:
+      value: 1
+    rows:
+    - {}

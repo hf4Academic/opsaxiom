@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.security-policy.nat-session-full
+  name: NAT 会话表满排查
+  taxonomy: network/security-policy/nat-session-full
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_sessions
+  nodes:
+  - id: check_sessions
+    type: check
+    title: 查 NAT 会话数
+    run:
+      cisco_ios: show ip nat translations | count
+      huawei_vrp: display nat session | include total|Total
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 50000
+      goto: check_top
+    - when: output.value <= 50000
+      goto: done_not_full
+    otherwise: check_top
+    cautions:
+    - NAT 会话有硬上限，满了新连接直接建不了；PAT(端口复用)下单公网 IP 也只有 6 万余端口，高并发环境容易撞
+  - id: check_top
+    type: check
+    title: 看是否单主机占用异常多会话
+    run:
+      cisco_ios: show ip nat translations | include tcp|udp
+      huawei_vrp: display nat session | include Src
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_found_hog
+    - when: output.value == 0
+      goto: done_scale
+    otherwise: escalate
+    cautions:
+    - 单主机会话暴多常因 P2P/爬虫/病毒/连接泄漏(不复用连接)——先定位这类源；全局都高则是真并发大，需扩公网 IP 或缩短会话老化时间
+  - id: done_not_full
+    type: done
+    summary: NAT 会话未满。上网时断另查(路由/线路/上游)。
+  - id: done_found_hog
+    type: done
+    summary: 有主机占用会话异常多。定位该主机排查(P2P/病毒/连接泄漏)；临时可对其限制会话数，根治在主机侧。
+  - id: done_scale
+    type: done
+    summary: 会话普遍高=真实并发大。缓解：缩短 NAT 会话老化时间(尤其 TCP time-wait)、增加公网 IP 扩大 PAT 端口池、或分流。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-security-policy-nat-session-full-auto
+  expect_path:
+  - check_sessions
+  - check_top
+  - done_found_hog
+feedback:
+  ask: NAT 会话表满排查定位了吗？

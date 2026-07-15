@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.reachability.arp-storm
+  name: ARP 风暴排查
+  taxonomy: network/reachability/arp-storm
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_arp_count
+  nodes:
+  - id: check_arp_count
+    type: check
+    title: 查 ARP 表项规模
+    run:
+      cisco_ios: show ip arp | count Internet
+      huawei_vrp: display arp | include Dynamic
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 5000
+      goto: check_cpu
+    - when: output.value <= 5000
+      goto: done_normal_scale
+    otherwise: check_cpu
+    cautions:
+    - ARP 表项数只是规模指标，风暴的关键是 ARP 报文速率——表大不等于风暴，但大表 + CPU 高才是风暴特征。别把大二层的正常规模误判成风暴
+  - id: check_cpu
+    type: check
+    title: 查 CPU 是否被 ARP 处理打高
+    run:
+      cisco_ios: show processes cpu | include ARP|IP Input
+      huawei_vrp: display cpu-usage | include ARP|SOCK
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_arp_storm
+    - when: output.value == 0
+      goto: done_high_scale_ok
+    otherwise: escalate
+    cautions:
+    - ARP 风暴常源于：环路放大广播、扫描器扫全网段、或代理 ARP 配置不当。止血可对接入口做 ARP 限速(rate-limit)，根因还是查环路/扫描源
+  - id: done_normal_scale
+    type: done
+    summary: ARP 表规模正常。网关慢另查(转发/上行/会话)。
+  - id: done_high_scale_ok
+    type: done
+    summary: 表大但 CPU 未被 ARP 打高，是正常的大二层规模。长期建议拆分广播域缩小 ARP 表，非紧急。
+  - id: done_arp_storm
+    type: done
+    summary: ARP 表大且 CPU 被处理打高=ARP 风暴。定位报文源(哪个接入口涌入)，先做 ARP 限速止血；排查是环路广播放大还是主机异常/扫描。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-reachability-arp-storm-auto
+  expect_path:
+  - check_arp_count
+  - check_cpu
+  - done_arp_storm
+feedback:
+  ask: ARP 风暴排查定位了吗？

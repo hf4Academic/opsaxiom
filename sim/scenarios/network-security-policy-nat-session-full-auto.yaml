@@ -1,0 +1,17 @@
+skill: skills/network/nat-session-full/skill.yaml
+scenario: network.security-policy.nat-session-full 自动求解走查
+expect_path:
+- check_sessions
+- check_top
+- done_found_hog
+node_ctx:
+  check_sessions:
+    output:
+      value: 50001
+    rows:
+    - {}
+  check_top:
+    output:
+      value: 1
+    rows:
+    - {}

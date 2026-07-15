@@ -38,3 +38,8 @@ prefixes:
   - show port-security
   - show interfaces trunk
   - show ip dhcp snooping
+  # H-3 network batch3 扩展（Cisco IOS Command Reference，只读）
+  - show policy-map
+  - show ip nat translations
+  - show processes cpu
+  - show environment

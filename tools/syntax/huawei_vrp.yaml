@@ -33,3 +33,8 @@ prefixes:
   - display port-security
   - display dhcp snooping
   - display port vlan
+  # H-3 network batch3 扩展（Huawei VRP Command Reference，只读）
+  - display qos
+  - display traffic-policy
+  - display nat session
+  - display cpu-usage

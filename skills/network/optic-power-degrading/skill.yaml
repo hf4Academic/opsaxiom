@@ -1,0 +1,75 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.physical.optic-power-degrading
+  name: 光模块光功率劣化趋势排查
+  taxonomy: network/physical/optic-power-degrading
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_power
+  nodes:
+  - id: check_power
+    type: check
+    title: 读光模块收发光功率
+    run:
+      cisco_ios: show interfaces transceiver | include Rx|Tx|dBm
+      huawei_vrp: display transceiver | include Rx|Tx|Power
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_errors
+    - when: output.value == 0
+      goto: escalate
+    otherwise: check_errors
+    cautions:
+    - 接收光功率(Rx)低于模块灵敏度阈值会误码；不同模块阈值不同(单模/多模/长距)，要对照该模块的 DDM 告警门限判断，不是绝对值越大越好
+  - id: check_errors
+    type: check
+    title: 看是否已伴随错包
+    run:
+      cisco_ios: show interfaces | include CRC|input errors
+      huawei_vrp: display interface | include CRC|errors
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_power_bad
+    - when: output.value == 0
+      goto: done_power_watch
+    otherwise: escalate
+    cautions:
+    - 光功率接近门限但还没错包=劣化早期，此时更换成本最低；等到大量 CRC 才换已影响业务
+  - id: done_power_bad
+    type: done
+    summary: 光功率异常且已有错包。立即处置：先清洁光纤接头(脏污是首因)，无改善则换光模块，再不行查光纤链路衰减(距离/熔接点)。
+  - id: done_power_watch
+    type: done
+    summary: 光功率偏离但暂无错包，处于劣化早期。纳入趋势监控，择机(业务低峰)清洁接头或预防性更换，避免恶化到影响业务。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-physical-optic-power-degrading-auto
+  expect_path:
+  - check_power
+  - check_errors
+  - done_power_bad
+feedback:
+  ask: 光模块光功率劣化趋势排查定位了吗？

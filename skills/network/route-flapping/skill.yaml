@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.routing.route-flapping
+  name: 路由震荡排查
+  taxonomy: network/routing/route-flapping
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_log
+  nodes:
+  - id: check_log
+    type: check
+    title: 查路由/邻居震荡日志
+    run:
+      cisco_ios: show logging | include BGP|OSPF|ADJCHANGE|flap
+      huawei_vrp: display logbuffer | include BGP|OSPF|Neighbor
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 10
+      goto: check_neighbor
+    - when: output.value <= 10
+      goto: done_stable
+    otherwise: check_neighbor
+    cautions:
+    - 路由震荡多由底层链路/邻居抖动引起——先看是不是接口 flap 带动了协议震荡，根在物理层
+  - id: check_neighbor
+    type: check
+    title: 查邻居稳定性
+    run:
+      cisco_ios: show ip bgp summary | include never|00:0|00:1
+      huawei_vrp: display bgp peer | include 00:0|00:1
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_neighbor_flap
+    - when: output.value == 0
+      goto: done_route_only
+    otherwise: escalate
+    cautions:
+    - 邻居 uptime 很短(几分钟内)=邻居在反复重建；BGP 可用 route dampening 抑制震荡但那是缓解，根因在链路/邻居
+  - id: done_stable
+    type: done
+    summary: 路由日志无频繁震荡。前缀时有时无另查(通告策略/汇总)。
+  - id: done_neighbor_flap
+    type: done
+    summary: 邻居在反复重建导致路由震荡。定位邻居抖动根因(链路 flap/超时配置/MTU)；先稳住邻居，必要时配 dampening 抑制扩散。
+  - id: done_route_only
+    type: done
+    summary: 邻居稳定但路由仍变，多为通告侧策略震荡或某前缀源不稳。到通告方查该前缀的产生源(重分发/汇总条件)是否在抖动。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-routing-route-flapping-auto
+  expect_path:
+  - check_log
+  - check_neighbor
+  - done_neighbor_flap
+feedback:
+  ask: 路由震荡排查定位了吗？

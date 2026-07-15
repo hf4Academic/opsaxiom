@@ -1,0 +1,75 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.config-mgmt.config-drift
+  name: 设备配置漂移排查
+  taxonomy: network/config-mgmt/config-drift
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_unsaved
+  nodes:
+  - id: check_unsaved
+    type: check
+    title: 查运行配置是否未保存
+    run:
+      cisco_ios: show running-config | include Last configuration
+      huawei_vrp: display current-configuration | include time
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_baseline
+    - when: output.value == 0
+      goto: check_baseline
+    otherwise: check_baseline
+    cautions:
+    - 运行配置(running)改了没保存(startup)，重启就丢——先确认改动是否有意，有意则保存，无意则回退
+  - id: check_baseline
+    type: check
+    title: 抽查关键配置项是否偏离基线
+    run:
+      cisco_ios: show running-config | include enable secret|aaa|snmp-server community
+      huawei_vrp: display current-configuration | include aaa|snmp-agent community
+    parser: generic/count-v1
+    branch:
+    - when: output.value == 0
+      goto: done_baseline_gap
+    - when: output.value > 0
+      goto: done_config_present
+    otherwise: escalate
+    cautions:
+    - 明文 community/弱认证是安全基线红线；抽查这些项能快速发现被降级的安全配置
+  - id: done_baseline_gap
+    type: done
+    summary: 关键安全配置项缺失或被改。对照基线补齐(认证/SNMP/AAA)；查配置变更记录(谁在什么时候改的)，走变更流程恢复。
+  - id: done_config_present
+    type: done
+    summary: 抽查项存在。全量比对建议用配置管理工具对 running-config与基线做 diff；本 Skill 只做快速抽检并提醒保存未保存的改动。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-config-mgmt-config-drift-auto
+  expect_path:
+  - check_unsaved
+  - check_baseline
+  - done_baseline_gap
+feedback:
+  ask: 设备配置漂移排查定位了吗？

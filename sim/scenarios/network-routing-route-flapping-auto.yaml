@@ -1,0 +1,17 @@
+skill: skills/network/route-flapping/skill.yaml
+scenario: network.routing.route-flapping 自动求解走查
+expect_path:
+- check_log
+- check_neighbor
+- done_neighbor_flap
+node_ctx:
+  check_log:
+    output:
+      value: 11
+    rows:
+    - {}
+  check_neighbor:
+    output:
+      value: 1
+    rows:
+    - {}

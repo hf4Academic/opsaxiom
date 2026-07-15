@@ -1,0 +1,75 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: network.traffic.qos-drops
+  name: QoS 队列丢包排查
+  taxonomy: network/traffic/qos-drops
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - device: cisco_ios
+  - device: huawei_vrp
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - netconf
+  facts:
+  - os.family
+tree:
+  entry: check_policy
+  nodes:
+  - id: check_policy
+    type: check
+    title: 查 QoS 策略队列丢包
+    run:
+      cisco_ios: show policy-map interface | include drop|Drop
+      huawei_vrp: display qos | include drop|discard
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_queue
+    - when: output.value == 0
+      goto: done_no_drop
+    otherwise: check_queue
+    cautions:
+    - QoS 丢包发生在带宽没满时=某个队列的配额(bandwidth/priority)太小，不是链路拥塞——这是 QoS 配置问题不是容量问题
+  - id: check_queue
+    type: check
+    title: 看是哪类队列在丢
+    run:
+      cisco_ios: show policy-map interface | include Class|priority|bandwidth
+      huawei_vrp: display traffic-policy | include queue|cir
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_queue_config
+    - when: output.value == 0
+      goto: escalate
+    otherwise: escalate
+    cautions:
+    - 优先级队列(priority/LLQ)超过配额也会被丢——语音流超了 priority 带宽照样丢，别以为进了优先队列就绝对不丢
+  - id: done_no_drop
+    type: done
+    summary: QoS 队列无丢包。业务卡另查(端到端时延/抖动/对端)。
+  - id: done_queue_config
+    type: done
+    summary: 定位到丢包的队列。核对该类流量的队列配额是否够(bandwidth/priority 值)；配额不足则调大，或核对分类(class-map)是否把流量错分到了小队列。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: network-traffic-qos-drops-auto
+  expect_path:
+  - check_policy
+  - check_queue
+  - done_queue_config
+feedback:
+  ask: QoS 队列丢包排查定位了吗？
