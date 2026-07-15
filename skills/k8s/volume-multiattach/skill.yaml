@@ -1,0 +1,82 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.storage.volume-multiattach
+  name: 卷多挂冲突排查(RWO 卷被抢)
+  taxonomy: k8s/storage/volume-multiattach
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - platform: kubernetes
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  params:
+  - name: ns
+    source: alert
+    desc: 命名空间
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - kubectl
+  facts:
+  - k8s.version
+tree:
+  entry: check_multiattach
+  nodes:
+  - id: check_multiattach
+    type: check
+    title: 查是否有 Multi-Attach 错误事件
+    run:
+      kubectl: kubectl -n {{ns}} get events 2>/dev/null | grep -ic 'Multi-Attach\|volume
+        is already exclusively attached\|already used by pod'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_terminating
+    - when: output.value == 0
+      goto: done_no_multiattach
+    otherwise: check_terminating
+    cautions:
+    - RWO(ReadWriteOnce)卷同一时刻只能被一个节点挂载;滚动更新/故障转移时,新 Pod 在别的节点起、旧 Pod 还没完全释放卷,就报 Multi-Attach——本质是'旧的没放手,新的抢不到'
+  - id: check_terminating
+    type: check
+    title: 看是否有旧 Pod 卡 Terminating 占着卷
+    run:
+      kubectl: kubectl -n {{ns}} get pods --no-headers 2>/dev/null | grep -c Terminating
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_stuck_old_pod
+    - when: output.value == 0
+      goto: done_node_gone
+    otherwise: escalate
+    cautions:
+    - 旧 Pod 卡 Terminating(节点失联/优雅退出卡住)会一直占着 RWO 卷,新 Pod 永远挂不上;强删旧 Pod 前要确认它真的没在写卷,否则可能损坏数据
+  - id: done_no_multiattach
+    type: done
+    summary: 无 Multi-Attach 错误。卷挂不上另查(CSI 驱动/StorageClass/PV 绑定/节点无插件)。
+  - id: done_stuck_old_pod
+    type: done
+    summary: 旧 Pod 卡 Terminating 占着 RWO 卷。先让它正常结束(查它为何卡:节点失联/finalizer/优雅退出超时);确认无写入后再强删,卷释放后新
+      Pod 即可挂载。RWO 场景避免同时多副本。
+  - id: done_node_gone
+    type: done
+    summary: 无卡住 Pod 但仍报多挂,多为原节点异常(NotReady/宕机)使卷未被干净卸载。确认原节点状态,必要时由 CSI/存储侧强制 detach;考虑用
+      RWX 卷或改部署策略避免争抢。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: k8s-storage-volume-multiattach-auto
+  expect_path:
+  - check_multiattach
+  - check_terminating
+  - done_stuck_old_pod
+feedback:
+  ask: 卷多挂冲突排查(RWO 卷被抢)定位了吗？

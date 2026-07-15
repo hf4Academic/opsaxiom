@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.scheduling.node-not-ready
+  name: 节点 NotReady 排查
+  taxonomy: k8s/scheduling/node-not-ready
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - platform: kubernetes
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - kubectl
+  facts:
+  - k8s.version
+tree:
+  entry: check_notready
+  nodes:
+  - id: check_notready
+    type: check
+    title: 查 NotReady 节点数
+    run:
+      kubectl: kubectl get nodes --no-headers 2>/dev/null | grep -c NotReady
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_cond
+    - when: output.value == 0
+      goto: done_all_ready
+    otherwise: check_cond
+    cautions:
+    - 节点 NotReady 先分清是 kubelet 挂了(节点整体失联)还是节点压力(磁盘/内存/PID)触发的状况——两者处置完全不同,看 node conditions
+      才能定位
+  - id: check_cond
+    type: check
+    title: 查节点异常状况(压力类)
+    run:
+      kubectl: kubectl get nodes -o json 2>/dev/null | grep -icE '"type":"(MemoryPressure|DiskPressure|PIDPressure)","status":"True"'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_pressure
+    - when: output.value == 0
+      goto: done_kubelet_lost
+    otherwise: escalate
+    cautions:
+    - 有 *Pressure=True 说明是资源压力(盘满/内存/PID 耗尽)导致 kubelet 上报异常;无压力却 NotReady=多为 kubelet
+      进程/网络/容器运行时(containerd)问题
+  - id: done_all_ready
+    type: done
+    summary: 所有节点 Ready。若有 Pod 异常另查(调度/镜像/探针),非节点问题。
+  - id: done_pressure
+    type: done
+    summary: 节点资源压力(磁盘/内存/PID)触发 NotReady。登上节点清理压力源(清盘/查内存大户/降 PID),压力解除后节点自动恢复 Ready;根治要给节点留足余量。
+  - id: done_kubelet_lost
+    type: done
+    summary: 无资源压力但 NotReady,多为 kubelet/容器运行时/网络问题。登节点看kubelet 与 containerd 服务状态与日志、到
+      apiserver 的网络连通,重启对应服务。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: k8s-scheduling-node-not-ready-auto
+  expect_path:
+  - check_notready
+  - check_cond
+  - done_pressure
+feedback:
+  ask: 节点 NotReady 排查定位了吗？

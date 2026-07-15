@@ -1,0 +1,79 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.resource.quota-exceeded
+  name: ResourceQuota 超限排查
+  taxonomy: k8s/resource/quota-exceeded
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - platform: kubernetes
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  params:
+  - name: ns
+    source: alert
+    desc: 命名空间
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - kubectl
+  facts:
+  - k8s.version
+tree:
+  entry: check_quota
+  nodes:
+  - id: check_quota
+    type: check
+    title: 查该命名空间是否设了配额
+    run:
+      kubectl: kubectl -n {{ns}} get resourcequota --no-headers 2>/dev/null | wc -l
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_events
+    - when: output.value == 0
+      goto: done_no_quota
+    otherwise: check_events
+    cautions:
+    - 建不了资源先确认是不是撞了 ResourceQuota;有配额时,Pod 必须声明 requests/limits 否则直接被拒(配额生效的命名空间强制要求资源声明)
+  - id: check_events
+    type: check
+    title: 看是否有 exceeded quota 拒绝事件
+    run:
+      kubectl: kubectl -n {{ns}} get events 2>/dev/null | grep -ic 'exceeded quota\|forbidden.*quota'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_quota_hit
+    - when: output.value == 0
+      goto: done_quota_ok
+    otherwise: escalate
+    cautions:
+    - 报错会写明超了哪一项(cpu/memory/pods/pvc 数);对症才有效——是真不够用要提配额,还是有僵尸资源没回收占着额度
+  - id: done_no_quota
+    type: done
+    summary: 该命名空间无 ResourceQuota。建不了资源另查(RBAC 权限/准入控制器/节点资源)。
+  - id: done_quota_hit
+    type: done
+    summary: 撞了 ResourceQuota。看超的是哪一项:清理该命名空间的僵尸/闲置资源腾额度,或评估后由管理员上调配额;确认新建资源都声明了 requests/limits。
+  - id: done_quota_ok
+    type: done
+    summary: 有配额但近期无超限拒绝。用 kubectl describe quota 看各项已用/上限余量,若接近上限提前扩额或清理,避免临界时创建失败。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: k8s-resource-quota-exceeded-auto
+  expect_path:
+  - check_quota
+  - check_events
+  - done_quota_hit
+feedback:
+  ask: ResourceQuota 超限排查定位了吗？

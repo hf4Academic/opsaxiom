@@ -1,0 +1,17 @@
+{
+  "skill": "k8s.networking.networkpolicy-block",
+  "action": "promote",
+  "from": "draft",
+  "to": "sim_verified",
+  "at": "2026-07-15T16:13:06",
+  "validator": "0 ERROR",
+  "evidence": "context_walk",
+  "scenarios": [
+    {
+      "scenario": "k8s-networking-networkpolicy-block-auto.yaml",
+      "mode": "context_walk",
+      "path_ok": true,
+      "rollback_ok": null
+    }
+  ]
+}

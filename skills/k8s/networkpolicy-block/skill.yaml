@@ -1,0 +1,83 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.networking.networkpolicy-block
+  name: NetworkPolicy 误封流量排查
+  taxonomy: k8s/networking/networkpolicy-block
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - platform: kubernetes
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  params:
+  - name: ns
+    source: alert
+    desc: 命名空间
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - kubectl
+  facts:
+  - k8s.version
+tree:
+  entry: check_np
+  nodes:
+  - id: check_np
+    type: check
+    title: 查该命名空间是否有 NetworkPolicy
+    run:
+      kubectl: kubectl -n {{ns}} get networkpolicy --no-headers 2>/dev/null | wc -l
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_default_deny
+    - when: output.value == 0
+      goto: done_no_np
+    otherwise: check_default_deny
+    cautions:
+    - NetworkPolicy 是'白名单'模型:一旦某 Pod 被任一 policy 选中,未明确放行的流量全被拒——'加了策略就不通'几乎都是漏配了必要的
+      ingress/egress 放行
+  - id: check_default_deny
+    type: check
+    title: 查是否存在 default-deny 策略
+    run:
+      kubectl: kubectl -n {{ns}} get networkpolicy -o json 2>/dev/null | grep -icE
+        '"podSelector":\{\}'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_default_deny
+    - when: output.value == 0
+      goto: done_specific_np
+    otherwise: escalate
+    cautions:
+    - podSelector:{} 选中命名空间内所有 Pod=default-deny,极易误伤;引入它后必须为每类必要通信(DNS、到 DB、健康检查)显式放行,尤其别忘了放行
+      kube-dns 的 UDP/TCP 53
+  - id: done_no_np
+    type: done
+    summary: 该命名空间无 NetworkPolicy。不通另查(Service/CNI/kube-proxy/目标 Pod 未 Ready)。
+  - id: done_default_deny
+    type: done
+    summary: 存在 default-deny(全选)策略。核对是否为受影响流量配了放行规则;常见漏项是 DNS(53)与到依赖服务的 egress。按需补
+      ingress/egress 白名单。
+  - id: done_specific_np
+    type: done
+    summary: 有针对性策略在生效。核对其 podSelector/namespaceSelector/端口是否覆盖了当前被拒的通信;用 label 精确匹配源与目标,补齐缺失的放行项。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: k8s-networking-networkpolicy-block-auto
+  expect_path:
+  - check_np
+  - check_default_deny
+  - done_default_deny
+feedback:
+  ask: NetworkPolicy 误封流量排查定位了吗？

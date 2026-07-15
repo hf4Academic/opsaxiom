@@ -242,6 +242,14 @@
 - `k8s/control-plane/apiserver-slow` — "kubectl 很慢/apiserver 超时/429"
 - `k8s/control-plane/etcd-unhealthy` — "etcd 不健康/告警/空间满"
 
+**k8s/workload · scheduling · networking · resource · storage（H-push 第三批）**
+- `k8s/workload/readiness-probe-failing` — "Running 但 Ready 0/1/流量不进"
+- `k8s/workload/liveness-restart-loop` — "反复重启/liveness 误杀"
+- `k8s/scheduling/node-not-ready` — "节点 NotReady/kubelet 失联"
+- `k8s/networking/networkpolicy-block` — "NetworkPolicy 误封/Pod 间不通"
+- `k8s/resource/quota-exceeded` — "exceeded quota/建不了资源"
+- `k8s/storage/volume-multiattach` — "Multi-Attach/RWO 卷被抢/挂不上"
+
 **k8s/release**
 - `k8s/release/rollout-stuck` — "发布卡住/rollout 不进/新版本起不来"
 - `k8s/release/rollback` — "要回滚上一个版本/发新版出问题"

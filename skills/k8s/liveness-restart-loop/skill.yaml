@@ -1,0 +1,84 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.workload.liveness-restart-loop
+  name: liveness 探针误杀重启排查
+  taxonomy: k8s/workload/liveness-restart-loop
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - platform: kubernetes
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  params:
+  - name: ns
+    source: alert
+    desc: 命名空间
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - kubectl
+  facts:
+  - k8s.version
+tree:
+  entry: check_restarts
+  nodes:
+  - id: check_restarts
+    type: check
+    title: 查高重启次数的 Pod
+    run:
+      kubectl: kubectl -n {{ns}} get pods --no-headers 2>/dev/null | awk '{if($4+0>5)
+        c++} END{print c+0}'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_killed
+    - when: output.value == 0
+      goto: done_no_restart
+    otherwise: check_killed
+    cautions:
+    - 高重启要分清是崩溃(CrashLoop,应用自己退)还是被杀(liveness kill/OOMKill)——看容器 lastState 的 reason;应用日志正常却反复重启,高度怀疑
+      liveness 误杀
+  - id: check_killed
+    type: check
+    title: 看是否有 liveness 探针失败事件
+    run:
+      kubectl: kubectl -n {{ns}} get events --field-selector reason=Unhealthy 2>/dev/null
+        | grep -ic 'Liveness probe failed'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_liveness_kill
+    - when: output.value == 0
+      goto: done_other_restart
+    otherwise: escalate
+    cautions:
+    - liveness 探针超时会 kill 容器重启——若应用在 GC/加载/高负载时短暂不响应探针,就被反复误杀,陷入'越重启越忙越被杀'的循环;调大 timeoutSeconds/failureThreshold
+      是常见解法
+  - id: done_no_restart
+    type: done
+    summary: 无高重启 Pod。稳定性另查(偶发重启/节点驱逐历史)。
+  - id: done_liveness_kill
+    type: done
+    summary: liveness 探针在杀容器(误杀)。放宽探针(调大 timeoutSeconds/periodSeconds/failureThreshold)、给慢启动配
+      startupProbe、确认探针检的是'真死'而非'暂时忙';避免越杀越糟。
+  - id: done_other_restart
+    type: done
+    summary: 高重启但非 liveness 失败,查容器 lastState reason:OOMKilled(调内存)、Error(应用崩,看退出码与日志)、或节点驱逐。对症处理。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: k8s-workload-liveness-restart-loop-auto
+  expect_path:
+  - check_restarts
+  - check_killed
+  - done_liveness_kill
+feedback:
+  ask: liveness 探针误杀重启排查定位了吗？

@@ -1,0 +1,84 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: k8s.workload.readiness-probe-failing
+  name: readiness 探针失败排查(流量不进)
+  taxonomy: k8s/workload/readiness-probe-failing
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - platform: kubernetes
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  params:
+  - name: ns
+    source: alert
+    desc: 命名空间
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - kubectl
+  facts:
+  - k8s.version
+tree:
+  entry: check_notready
+  nodes:
+  - id: check_notready
+    type: check
+    title: 查有多少 Pod 卡在未 Ready
+    run:
+      kubectl: kubectl -n {{ns}} get pods --no-headers 2>/dev/null | awk '{split($2,a,"/");
+        if(a[1]<a[2] && $3=="Running") c++} END{print c+0}'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_events
+    - when: output.value == 0
+      goto: done_all_ready
+    otherwise: check_events
+    cautions:
+    - Running 但 Ready 0/1=容器起来了但 readiness 探针没过——Service 只把流量给 Ready 的 Pod,所以'进程在却没流量'多半是
+      readiness 卡住,不是进程挂了
+  - id: check_events
+    type: check
+    title: 看是否有 readiness 探针失败事件
+    run:
+      kubectl: kubectl -n {{ns}} get events --field-selector reason=Unhealthy 2>/dev/null
+        | grep -ic 'Readiness probe failed'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_probe_fail
+    - when: output.value == 0
+      goto: done_ready_gate
+    otherwise: escalate
+    cautions:
+    - readiness 探针失败常因:探针路径/端口配错、应用启动慢但 initialDelay 太短、依赖(DB/下游)没就绪应用自报未 ready——看应用日志确认它为啥说自己没好
+  - id: done_all_ready
+    type: done
+    summary: Pod 均 Ready。流量不进另查(Service selector/端口/kube-proxy/NetworkPolicy)。
+  - id: done_probe_fail
+    type: done
+    summary: readiness 探针在失败。核对探针配置(路径/端口/协议)、initialDelaySeconds 是否够应用启动、应用是否因依赖未就绪自报未
+      ready;修正后 Pod 进入 Ready 才会被加入 endpoints。
+  - id: done_ready_gate
+    type: done
+    summary: 未 Ready 但无探针失败事件,可能是 readinessGates/自定义条件未满足或探针刚开始。describe Pod 看 Conditions
+      与 readinessGates,确认卡在哪个门槛。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: k8s-workload-readiness-probe-failing-auto
+  expect_path:
+  - check_notready
+  - check_events
+  - done_probe_fail
+feedback:
+  ask: readiness 探针失败排查(流量不进)定位了吗？

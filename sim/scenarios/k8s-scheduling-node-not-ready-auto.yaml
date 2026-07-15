@@ -1,0 +1,17 @@
+skill: skills/k8s/node-not-ready/skill.yaml
+scenario: k8s.scheduling.node-not-ready 自动求解走查
+expect_path:
+- check_notready
+- check_cond
+- done_pressure
+node_ctx:
+  check_notready:
+    output:
+      value: 1
+    rows:
+    - {}
+  check_cond:
+    output:
+      value: 1
+    rows:
+    - {}
