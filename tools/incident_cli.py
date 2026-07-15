@@ -112,9 +112,9 @@ def add_incident(sub):
     ap.add_argument("--target", default="local")
     ap.add_argument("--top", type=int, default=3)
     ap.add_argument("--grant", action="store_true",
-                    help="授权本机只读自动取证（写 trust.yaml）")
+                    help="允许在本机自动运行只看不改的命令来收集信息")
     ap.add_argument("--ingest-file", dest="ingest_file",
-                    help="远端目标：回灌粘贴块输出文件")
-    ap.add_argument("--nonce", help="与 plan 配套的会话校验码")
+                    help="远端排查：把你在目标机器上跑完命令的输出存成文件传给它")
+    ap.add_argument("--nonce", help="与命令清单配套的一次性校验码")
     ap.add_argument("--json", action="store_true")
     ap.set_defaults(fn=cmd_incident)

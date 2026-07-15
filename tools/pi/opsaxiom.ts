@@ -138,13 +138,13 @@ function capybaraHeader(theme: any): string[] {
   return [
     "",
     `  ${a("   ∩      ∩")}       ${a("◆ OpsAxiom")} ${d("× pi")}   ${m("把运维专家的判断，编译成可回滚的资产")}`,
-    `  ${a(" (  -    -  )")}      ${m("直接说你的故障（磁盘满了 / xid 79 / kafka 积压），我取证出诊断卷宗。")}`,
+    `  ${a(" (  -    -  )")}      ${m("直接说你的故障（磁盘满了 / xid 79 / kafka 积压），我查清楚再给你结论。")}`,
     `  ${a(" (    ᴥ     )")}`,
-    `  ${a(" (          )")}      ${num("1")} ${m("/login")}    对接 API 模型（选服务商 → 输 Key → 当场选模型）`,
-    `  ${a("  \\________/")}       ${num("2")} ${m("/skill")}    学怎么写一个 Skill（三种捕获通道 + 缺口清单）`,
-    `  ${a("   u u  u u")}        ${num("3")} ${m("/publish")}  把你的 Skill 发布到社区 Hub`,
-    `  ${a("           ")}        ${num("4")} ${m("/pull")}     从社区下载 Skill：搜索→↑↓选→自动校验（三道安全门）`,
-    `  ${d("             命令与判读永远出自已验证 Skill；写操作过审批门 · /axiom 看状态")}`,
+    `  ${a(" (          )")}      ${num("1")} ${m("/login")}    接一个 AI 模型（选家 → 填 Key → 选模型）`,
+    `  ${a("  \\________/")}       ${num("2")} ${m("/skill")}    把你的排查经验做成一个可复用的排查方案`,
+    `  ${a("   u u  u u")}        ${num("3")} ${m("/publish")}  把你的排查方案分享到社区`,
+    `  ${a("           ")}        ${num("4")} ${m("/pull")}     从社区下载别人的排查方案（下载后本地自动校验）`,
+    `  ${d("             给的命令和判断都来自验证过的排查方案；要改系统会先等你批准 · /axiom 看状态")}`,
     "",
   ];
 }
@@ -293,14 +293,14 @@ export default function (pi: ExtensionAPI) {
       if (out.needs_grant) {
         const ok = ctx.hasUI
           ? await ctx.ui.confirm(
-              "OpsAxiom 本机取证授权",
-              `将自动执行 ${out.auto_count} 条只读命令（均出自已验证 Skill，绝无写操作）。允许？`,
+              "允许在这台机器上自动查看？",
+              `我会自动运行 ${out.auto_count} 条只看不改的命令来收集信息（都来自验证过的排查方案，不会改动系统）。允许吗？`,
             )
           : false;
         if (!ok)
           return {
             content: [
-              { type: "text", text: "用户未授权本机自动取证。可改用远端粘贴块流程。" },
+              { type: "text", text: "好，那我不自动运行。我可以把要执行的命令列给你，你自己在机器上跑完把结果贴回来。" },
             ],
             details: {},
           };
@@ -717,7 +717,7 @@ export default function (pi: ExtensionAPI) {
   };
   for (const name of ["pull", "install"]) {
     pi.registerCommand(name, {
-      description: "从社区下载 Skill：搜索 → 上下键选 → 自动三道安全门校验",
+      description: "从社区下载排查方案：搜关键词 → 上下键选 → 下载后自动在本地重新校验一遍才用",
       handler: doPull,
     });
   }
