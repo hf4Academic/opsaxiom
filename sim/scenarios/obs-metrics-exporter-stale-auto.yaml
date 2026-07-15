@@ -1,0 +1,17 @@
+skill: skills/obs/exporter-stale/skill.yaml
+scenario: obs.metrics.exporter-stale 自动求解走查
+expect_path:
+- check_fresh
+- check_scrape_err
+- done_collector_fail
+node_ctx:
+  check_fresh:
+    output:
+      sec: 3001
+    rows:
+    - {}
+  check_scrape_err:
+    output:
+      value: 1
+    rows:
+    - {}

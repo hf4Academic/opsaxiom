@@ -1,0 +1,80 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: obs.tracing.sampling-gap
+  name: 链路追踪采样丢失排查(trace 不完整)
+  taxonomy: obs/tracing/sampling-gap
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_drop
+  nodes:
+  - id: check_drop
+    type: check
+    title: 查 collector 是否在丢 span
+    run:
+      linux: curl -s localhost:8888/metrics 2>/dev/null | awk '/otelcol_processor_dropped_spans|refused_spans/{s+=$2}
+        END{print "dropped", s+0}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.dropped > 0
+      goto: check_queue
+    - when: output.dropped == 0
+      goto: done_no_drop
+    otherwise: check_queue
+    cautions:
+    - trace 断链先分清是采样策略(本就按比例丢)还是异常丢弃(collector 过载/队列满 refuse)——dropped/refused 指标是异常丢，采样丢不算错
+  - id: check_queue
+    type: check
+    title: 看导出队列是否满
+    run:
+      linux: curl -s localhost:8888/metrics 2>/dev/null | awk '/otelcol_exporter_queue_size/{print
+        "qsize", $2}' | head -1
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.qsize > 1000
+      goto: done_queue_full
+    - when: output.qsize <= 1000
+      goto: done_backend_reject
+    otherwise: escalate
+    cautions:
+    - 导出队列满=后端(Jaeger/Tempo)吃不下或网络慢，collector 只能丢新 span——扩后端或调大队列/批量，别只怪采集端
+  - id: done_no_drop
+    type: done
+    summary: collector 未异常丢 span。trace 不完整多为采样策略(按比例采)或跨服务trace 上下文没透传(缺 header 传播);查各服务是否统一注入/透传
+      traceparent。
+  - id: done_queue_full
+    type: done
+    summary: 导出队列满导致丢 span。扩容追踪后端(Jaeger/Tempo)、调大 exporter 队列与批量、或降低采样率减压;后端跟上后 span
+      不再被丢。
+  - id: done_backend_reject
+    type: done
+    summary: 队列不满但有丢弃,多为后端返回错误(限流/鉴权/格式)。查 collector 到后端的 exporter 报错日志,对症修复;确认后端容量与
+      collector 发送速率匹配。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: obs-tracing-sampling-gap-auto
+  expect_path:
+  - check_drop
+  - check_queue
+  - done_queue_full
+feedback:
+  ask: 链路追踪采样丢失排查(trace 不完整)定位了吗？

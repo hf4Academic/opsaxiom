@@ -1,0 +1,76 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: obs.metrics.exporter-stale
+  name: Exporter 假活排查(进程在但指标不更新)
+  taxonomy: obs/metrics/exporter-stale
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_fresh
+  nodes:
+  - id: check_fresh
+    type: check
+    title: 查 exporter 自身抓取耗时是否异常
+    run:
+      linux: curl -s -o /dev/null -w '%{time_total}' localhost:9100/metrics 2>/dev/null
+        | awk '{print "sec", $1*1000}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.sec > 3000
+      goto: check_scrape_err
+    - when: output.sec <= 3000
+      goto: check_scrape_err
+    otherwise: check_scrape_err
+    cautions:
+    - exporter '假活'最坑：端口通、进程在、/metrics 有输出，但底层采集线程已挂或卡死，指标定格在最后一次成功值——只看进程存活会漏判
+  - id: check_scrape_err
+    type: check
+    title: 看是否有采集子系统报错
+    run:
+      linux: journalctl -u node_exporter --since '-10min' 2>/dev/null | grep -icE
+        'error|failed|timeout|collector.*failed'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_collector_fail
+    - when: output.value == 0
+      goto: done_maybe_stale
+    otherwise: escalate
+    cautions:
+    - 某个 collector 卡住(如坏盘让 diskstats 采集 hang)会拖住整个 exporter 抓取——日志里 collector failed
+      直接点名是哪个子采集器出问题
+  - id: done_collector_fail
+    type: done
+    summary: 某采集子系统报错(如坏盘卡住 diskstats)。定位报错的 collector，修其底层问题(换盘/修权限)或临时禁用该 collector
+      让其余指标恢复更新。
+  - id: done_maybe_stale
+    type: done
+    summary: 无明显报错但疑似僵值。用 up 指标+时间戳新鲜度告警(而非只看进程)确认；重启 exporter 观察指标是否恢复跳动，并加'指标不更新'类活性告警防复发。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: obs-metrics-exporter-stale-auto
+  expect_path:
+  - check_fresh
+  - check_scrape_err
+  - done_collector_fail
+feedback:
+  ask: Exporter 假活排查(进程在但指标不更新)定位了吗？

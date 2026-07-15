@@ -1,0 +1,17 @@
+skill: skills/obs/pipeline-lag/skill.yaml
+scenario: obs.logging.pipeline-lag 自动求解走查
+expect_path:
+- check_backlog
+- check_out
+- done_es_backpressure
+node_ctx:
+  check_backlog:
+    output:
+      value: 1001
+    rows:
+    - {}
+  check_out:
+    output:
+      rejected: 1
+    rows:
+    - {}

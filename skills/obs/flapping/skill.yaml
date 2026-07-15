@@ -1,0 +1,78 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: obs.alerting.flapping
+  name: 告警抖动排查(反复触发恢复)
+  taxonomy: obs/alerting/flapping
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_flap
+  nodes:
+  - id: check_flap
+    type: check
+    title: 查近期同名告警的触发次数
+    run:
+      linux: curl -s 'localhost:9093/api/v2/alerts/groups' 2>/dev/null | grep -oE
+        '"fingerprint":"[a-f0-9]+"' | sort | uniq -c | sort -rn | head -1 | awk '{print
+        "count", $1}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.count > 5
+      goto: check_for
+    - when: output.count <= 5
+      goto: done_not_flap
+    otherwise: check_for
+    cautions:
+    - 告警在阈值附近来回穿越是抖动主因；治本靠告警规则的 for(持续多久才触发)和合理的 recover 迟滞，而不是靠人去静默
+  - id: check_for
+    type: check
+    title: 看规则是否缺少 for 持续时间
+    run:
+      linux: curl -s 'localhost:9090/api/v1/rules' 2>/dev/null | grep -oE '"duration":[0-9]+'
+        | grep -oE '[0-9]+$' | sort -n | head -1
+    parser: generic/count-v1
+    branch:
+    - when: output.value == 0
+      goto: done_no_for
+    - when: output.value > 0
+      goto: done_threshold_edge
+    otherwise: escalate
+    cautions:
+    - for:0(或没写)的规则=指标瞬时越线立刻告警，毛刺就报——加 for 让它'持续 N 分钟才算'，抖动大半能消掉
+  - id: done_not_flap
+    type: done
+    summary: 无明显同名告警抖动。告警多另查(确实批量故障/路由分组配置)。
+  - id: done_no_for
+    type: done
+    summary: 规则缺 for 持续时间，毛刺即报。给抖动规则加 for(如 5m)让它持续越线才触发；配合合理阈值迟滞，抖动可大幅收敛。
+  - id: done_threshold_edge
+    type: done
+    summary: 有 for 但仍抖，多为阈值恰在指标常态波动区间。拉开触发/恢复阈值(迟滞带)、或改用趋势/分位数类判据，避免在常态波动边缘反复穿越。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: obs-alerting-flapping-auto
+  expect_path:
+  - check_flap
+  - check_for
+  - done_no_for
+feedback:
+  ask: 告警抖动排查(反复触发恢复)定位了吗？

@@ -1,0 +1,17 @@
+skill: skills/obs/disk-pressure/skill.yaml
+scenario: obs.logging.disk-pressure 自动求解走查
+expect_path:
+- check_logdir
+- check_rotate
+- done_deleted_held
+node_ctx:
+  check_logdir:
+    output:
+      pct: 86
+    rows:
+    - {}
+  check_rotate:
+    output:
+      value: 1
+    rows:
+    - {}

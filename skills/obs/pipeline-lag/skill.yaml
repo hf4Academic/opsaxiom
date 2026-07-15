@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: obs.logging.pipeline-lag
+  name: 日志管道延迟排查(日志入库慢)
+  taxonomy: obs/logging/pipeline-lag
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_backlog
+  nodes:
+  - id: check_backlog
+    type: check
+    title: 查采集侧缓冲队列积压
+    run:
+      linux: curl -s localhost:9600/_node/stats/pipelines 2>/dev/null | grep -oE '"events":\{[^}]*"queue_push_duration_in_millis":[0-9]+'
+        | grep -oE '[0-9]+$' | sort -rn | head -1
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 1000
+      goto: check_out
+    - when: output.value <= 1000
+      goto: done_no_backlog
+    otherwise: check_out
+    cautions:
+    - 日志滞后先分清堵在哪一段：采集(agent)→缓冲(队列/kafka)→处理(logstash)→入库(ES)——队列 push 耗时高说明下游(处理/入库)吃不下，往下游查
+  - id: check_out
+    type: check
+    title: 看下游入库是否被反压
+    run:
+      linux: curl -s 'localhost:9200/_cat/thread_pool/write?h=queue,rejected' 2>/dev/null
+        | awk '{q+=$1; r+=$2} END{print "rejected", r+0}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.rejected > 0
+      goto: done_es_backpressure
+    - when: output.rejected == 0
+      goto: done_pipeline_slow
+    otherwise: escalate
+    cautions:
+    - ES write 线程池有 rejected=入库端已过载在丢/退，是全链路反压的根——光扩采集端没用，得先让入库跟得上(扩分片/减副本/加节点)
+  - id: done_no_backlog
+    type: done
+    summary: 采集缓冲无明显积压。日志滞后另查(agent 采集延迟/时间戳时区/索引刷新间隔)。
+  - id: done_es_backpressure
+    type: done
+    summary: 入库端(ES write 线程池)有拒绝=下游过载反压全链路。扩容/加分片、临时降副本数或 refresh_interval 提升写入吞吐；入库跟上后积压自然消化。
+  - id: done_pipeline_slow
+    type: done
+    summary: 队列积压但入库未拒绝，多为处理层(grok/解析)太重或并发不足。优化重的 filter、加处理 worker、或把复杂解析下沉到入库前预处理。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: obs-logging-pipeline-lag-auto
+  expect_path:
+  - check_backlog
+  - check_out
+  - done_es_backpressure
+feedback:
+  ask: 日志管道延迟排查(日志入库慢)定位了吗？

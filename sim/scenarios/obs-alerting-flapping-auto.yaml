@@ -1,0 +1,17 @@
+skill: skills/obs/flapping/skill.yaml
+scenario: obs.alerting.flapping 自动求解走查
+expect_path:
+- check_flap
+- check_for
+- done_no_for
+node_ctx:
+  check_flap:
+    output:
+      count: 6
+    rows:
+    - {}
+  check_for:
+    output:
+      value: 0
+    rows:
+    - {}

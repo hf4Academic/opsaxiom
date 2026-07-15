@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: obs.logging.disk-pressure
+  name: 日志撑盘排查(日志占满磁盘)
+  taxonomy: obs/logging/disk-pressure
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_logdir
+  nodes:
+  - id: check_logdir
+    type: check
+    title: 查日志目录占用
+    run:
+      linux: df /var/log 2>/dev/null | awk 'NR==2{print "pct", $5+0}'
+    parser: generic/kv-num-v1
+    branch:
+    - when: output.pct > 85
+      goto: check_rotate
+    - when: output.pct <= 85
+      goto: done_disk_ok
+    otherwise: check_rotate
+    cautions:
+    - 日志撑盘常见根因是轮转没生效(logrotate 没跑/配置漏了新日志)或进程持着已删文件——df 显示满但 du 找不到，多半是删了没释放的句柄
+  - id: check_rotate
+    type: check
+    title: 看是否有进程持着已删除的日志文件
+    run:
+      linux: lsof 2>/dev/null | grep -c '(deleted)'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: done_deleted_held
+    - when: output.value == 0
+      goto: done_rotate_fail
+    otherwise: escalate
+    cautions:
+    - rm 删了日志但进程还开着句柄，空间不释放——必须让进程重开日志(reopen/重启)或用 truncate；这是'删了日志磁盘却没降'的经典坑
+  - id: done_disk_ok
+    type: done
+    summary: 日志目录未撑盘。磁盘满另查(其它目录/大文件/inode 耗尽)。
+  - id: done_deleted_held
+    type: done
+    summary: 有进程持着已删日志文件不放空间。让持有者 reopen 日志(如 nginx -s reopen、systemctl reload)或重启该进程，空间即释放;根治靠
+      logrotate 用 copytruncate/postrotate reopen。
+  - id: done_rotate_fail
+    type: done
+    summary: 日志真占满且非删除句柄问题，多为轮转没生效。检查 logrotate 是否跑(cron/timer)、配置是否覆盖该日志、size/rotate
+      是否合理;先手动清理再修轮转。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: obs-logging-disk-pressure-auto
+  expect_path:
+  - check_logdir
+  - check_rotate
+  - done_deleted_held
+feedback:
+  ask: 日志撑盘排查(日志占满磁盘)定位了吗？

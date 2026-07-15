@@ -1,0 +1,77 @@
+apiVersion: skill/v0.1
+kind: Diagnostic
+metadata:
+  id: obs.grafana.slow-dashboard
+  name: Grafana 面板加载慢排查
+  taxonomy: obs/grafana/slow-dashboard
+  version: 0.1.0
+  maturity: sim_verified
+  platforms:
+  - os: linux
+  authors:
+  - opsagent-core
+  license: Apache-2.0
+  provenance:
+    generated_by: claude-opus-4-8
+    reviewed_by:
+    - claude-fable-5
+  expires_review: '2027-07-01'
+requirements:
+  capability_level: read
+  connectors:
+  - ssh
+  facts:
+  - os.family
+tree:
+  entry: check_query_slow
+  nodes:
+  - id: check_query_slow
+    type: check
+    title: 查数据源查询慢日志
+    run:
+      linux: journalctl -u grafana-server --since '-15min' 2>/dev/null | grep -icE
+        'slow query|query took|context deadline|datasource.*timeout'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 0
+      goto: check_range
+    - when: output.value == 0
+      goto: done_not_query
+    otherwise: check_range
+    cautions:
+    - 面板慢九成是背后查询慢，不是 Grafana 本身——先分清是查询慢还是渲染慢(太多 panel/序列)
+  - id: check_range
+    type: check
+    title: 看是否大时间范围/高频刷新放大了查询
+    run:
+      linux: curl -s 'localhost:9090/api/v1/status/tsdb' 2>/dev/null | grep -oE '"numSeries":[0-9]+'
+        | grep -oE '[0-9]+'
+    parser: generic/count-v1
+    branch:
+    - when: output.value > 1000000
+      goto: done_heavy_query
+    - when: output.value <= 1000000
+      goto: done_dashboard_heavy
+    otherwise: escalate
+    cautions:
+    - 大时间范围(如 30 天原始点)×高基数=查询要扫海量点必然慢；该用 recording rule 预聚合或缩短默认范围，别让大盘每次实时算
+  - id: done_not_query
+    type: done
+    summary: 无查询慢日志。面板慢另查(Grafana 自身资源/浏览器渲染/网络到数据源)。
+  - id: done_heavy_query
+    type: done
+    summary: 高基数×大范围让查询扫太多点。用 recording rule 预聚合常用指标、缩短面板默认时间范围、降低自动刷新频率；治本减少高基数指标。
+  - id: done_dashboard_heavy
+    type: done
+    summary: 序列不算爆炸但面板重，多为单页 panel 过多或每个 panel 查询过重。拆分大盘、合并相似 panel、给重查询加缓存。
+  - id: escalate
+    type: escalate
+    summary: 打包升级：已采集的事实与走过的路径。
+tests:
+- scenario: obs-grafana-slow-dashboard-auto
+  expect_path:
+  - check_query_slow
+  - check_range
+  - done_heavy_query
+feedback:
+  ask: Grafana 面板加载慢排查定位了吗？

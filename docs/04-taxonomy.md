@@ -335,6 +335,12 @@
 - `obs/logging/pipeline-loss` — "日志丢了/采集管道断/日志不全"
 - `obs/oncall/incident-timeline` — "生成事件时间线/整理故障过程"
 - `obs/oncall/postmortem-draft` — "写复盘报告/故障总结初稿"
+- `obs/logging/pipeline-lag` — "日志入库慢/滞后/查不到最新日志"
+- `obs/metrics/exporter-stale` — "exporter 假活/进程在但指标不更新"
+- `obs/grafana/slow-dashboard` — "Grafana 面板加载慢/查询超时"
+- `obs/alerting/flapping` — "告警抖动/反复触发恢复/告警风暴"
+- `obs/logging/disk-pressure` — "日志撑盘/var 满/轮转失效"
+- `obs/tracing/sampling-gap` — "trace 断链/span 丢失/采样异常"
 
 ### 5.7 sec
 - `sec/access/abnormal-login` — "异常登录/可疑登录/异地登录排查"
