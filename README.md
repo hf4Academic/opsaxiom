@@ -45,8 +45,8 @@
 
 ## 项目状态
 
-- **73 个 Skill**（host 20 / k8s 10 / network 11 / middleware 10 / aicomp 10 / obs 5 / sec 4 / proc 3），
-  49 个 `sim_verified`。
+- **205 个 Skill**（host 46 / network 38 / middleware 31 / k8s 30 / aicomp 28 / obs 15 / sec 14 / proc 3），
+  **205 个全部 `sim_verified`**（每个都有可复算的仿真证据；含 action 的还通过了回滚往返验证）。
 - 完整工具链：校验器（结构 + 语义 S1–S13 + 投影语义 + 字段契约 + 命令语法树）、
   解析器库、仿真执行器（context_walk + 真实靶机，含 kubectl 只读白名单）、
   **maturity 流水线（sim_verified → field_verified，≥3 份独立签名 attestation）**、
@@ -85,7 +85,7 @@ kubectl，只影响 k8s 域的真实执行，**导航档不受影响**）。
 
 ```bash
 $ opsaxiom
-OpsAxiom v0.1 · 73 个 Skill（49 已验证）· 输入你遇到的问题，或 help 看用法
+OpsAxiom v0.1 · 205 个 Skill（205 已验证）· 输入你遇到的问题，或 help 看用法
 axiom> 磁盘满了但 df 显示还有空间 mount=/data
   假设 3 个（按相关度）：inode 耗尽 / 已删除未释放 / …
   本机可自动执行 5 条只读取证命令（均出自已验证 Skill）。授权？[y/N]: y

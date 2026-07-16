@@ -39,9 +39,32 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
 
 ## 当前状态（由最后工作的模型更新）
 
-- **更新时间**：2026-07-14（Opus 第十二轮 G-1~G-7 完成）
-- **更新者**：Opus 4.8
-- **阶段**：**第十二轮（G 系列：Skill 扩容 + 发布实战）全部完成，交接 Fable 评审**
+- **更新时间**：2026-07-16（第十三轮 H 系列完成，发布收尾）
+- **更新者**：Fable 5（规划/评审/回滚沙箱）+ Opus 4.8（批量生成）
+- **阶段**：**第十三轮（H 系列：上线冲刺 200）完成——205 Skill / 205 sim_verified / 0 draft**
+- **第十三轮交付（H 系列）**：
+  - **规模**：141 → 205 Skill（+64），全部 sim_verified。分布：host 46 / network 38 /
+    middleware 31 / k8s 30 / aicomp 28 / obs 15 / sec 14 / proc 3。
+  - **批量流水线**（关键杠杆）：tools/authoring/gen_skill.py（spec→生成→校验→场景→晋级，
+    三层撞名防护）+ scenario_solver.py（前向走树自动合成 node_ctx）+ generic 解析器族。
+    spec 文件在 tools/authoring/specs/（16 个批次留档可复算）。
+  - **回滚沙箱补全（H-7）**：docs/02 四种回滚类型现全部有 sim 往返验证——新增
+    opsaxiom-svcstate（service_restore）/opsaxiom-fsnapshot（snapshot）/opsaxiom-txn
+    （transaction）三个 mock + run_sim 三种 real_action_kind；5 个存量 action draft
+    （fs-readonly/systemd-unit-failed/clock-drift/k8s-rollback/bgp-neighbor-down）
+    借此全部晋级。
+  - **诊断质量**：diagnose.py 加噪声地板 1.0（单 bigram 偶然重合不再浮出为假设）；
+    修复 H-4 撞名事故遗留（k8s.release.hpa-not-scaling 场景补回）。
+  - 语法库扩展：cisco show storm-control、huawei display storm-control/ospf interface
+    （均对照厂商 Command Reference）。docs/04 §5 全部批次已回填。
+  - 全量回归：**663 pytest 全绿 + 4 skipped（3 无 kubectl + 1 库内无 draft 可测）、
+    205 校验 0 ERROR**。
+- **发布状态**：registry（--no-draft）与网站已重建推送（见下方发布记录）。
+- **交接给**：发起人验收；后续任务书待发起人定向。
+---
+
+## 历史状态存档（第十二轮，G 系列）
+
 - **第十二轮交付（G 系列）**：
   - **5 个新 Skill 全部 sim_verified**：host.cpu.throttled（cgroup 限流）、
     host.network-stack.dns-flaky（DNS 间歇）、host.storage.smart-failing（SMART，CRC≠坏盘）、

@@ -1,0 +1,11 @@
+skill: skills/k8s/hpa-not-scaling/skill.yaml
+scenario: 指标健康但未到扩容阈值（H-4 撞名事故后补回的场景，对齐 tests 声明路径）
+expect_path: [read_metrics, check_threshold, below_threshold_exit]
+node_ctx:
+  read_metrics:
+    lines: ['cpu: 35%/70%']
+  check_threshold:
+    current_util: 35
+    target_util: 70
+    current_replicas: 2
+    max_replicas: 10
