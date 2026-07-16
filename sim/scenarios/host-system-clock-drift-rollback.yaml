@@ -1,0 +1,11 @@
+skill: skills/host/clock-drift/skill.yaml
+scenario: 时间同步服务未跑，启动修复（含真实 restart→restore 回滚往返，service_restore 型）
+expect_path: [check_sync, check_daemon, start_timesync, done_ok]
+real_action: start_timesync
+real_action_kind: svcstate
+node_ctx:
+  check_sync:
+    lines: ['NTP=no']
+  check_daemon:
+    # 注意不能用 "inactive"（含子串 active 会误命中 matches 'active'）
+    lines: ['Unit chronyd.service could not be found.']

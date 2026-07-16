@@ -5,7 +5,7 @@ metadata:
   name: 文件系统变只读排查与恢复
   taxonomy: host/storage/fs-readonly
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms:
   - {os: linux}
   authors: [opsagent-core]

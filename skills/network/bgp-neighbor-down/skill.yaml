@@ -10,7 +10,7 @@ metadata:
   name: BGP 邻居中断排查与恢复
   taxonomy: network/routing/bgp-neighbor-down
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms:
     - {device: cisco_ios}
     - {device: huawei_vrp}

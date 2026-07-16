@@ -1,0 +1,11 @@
+skill: skills/host/systemd-unit-failed/skill.yaml
+scenario: 瞬时故障重启修复（含真实 restart→restore 回滚往返，service_restore 型）
+expect_path: [read_state, read_logs, try_restart, done_ok]
+real_action: try_restart
+real_action_kind: svcstate
+node_ctx:
+  read_state:
+    result: exit-code
+  read_logs:
+    # 日志无权限/缺文件/端口/配置四类特征 → otherwise 走 try_restart
+    lines: ['Main process exited, code=exited, status=1/FAILURE']

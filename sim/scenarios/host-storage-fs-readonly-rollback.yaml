@@ -1,0 +1,13 @@
+skill: skills/host/fs-readonly/skill.yaml
+scenario: 数据盘元数据损坏离线修复（含真实 snap→改动→restore 回滚往返，snapshot 型）
+expect_path: [confirm_ro, find_cause, assess_disk, offline_fsck, done_ok]
+real_action: offline_fsck
+real_action_kind: snapshot
+sandbox_file: datavol.img
+node_ctx:
+  confirm_ro:
+    lines: ['ro,relatime']
+  find_cause:
+    lines: ['EXT4-fs error (device sdb1): metadata corruption']
+  assess_disk:
+    lines: ['NOT_ROOT']

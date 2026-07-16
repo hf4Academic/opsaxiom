@@ -16,6 +16,13 @@
 
 **不存在 `type: none`。** 写不出回滚方案的操作不允许成为可执行的 action 节点。
 
+四种类型在仿真中都有对应的沙箱往返验证（`sim/run_sim.py` 的 `real_action_kind`）：
+`inverse` → `mysqlvar`（set→restore 还原旧值）/`quarantine`/`deploy`；
+`snapshot` → `snapshot`（snap→改动→restore 逐字节一致）；
+`transaction` → `txn`（begin→revert 精确回到变更前修订）；
+`service_restore` → `svcstate`（restart→restore 还原动作前状态）。
+含 action 的 Skill 晋级 sim_verified 时，须至少一个场景真实通过对应往返（promote S8）。
+
 ## 2. 不可逆操作的改造模式（核心设计）
 
 天然不可逆的操作必须先改造成可逆形态。标准改造模式：

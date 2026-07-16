@@ -30,6 +30,9 @@ import exprlang  # noqa: E402
 QUARANTINE_BIN = ROOT / "tools" / "bin" / "opsaxiom-quarantine"
 DEPLOY_BIN = ROOT / "tools" / "bin" / "opsaxiom-deploy"
 MYSQLVAR_BIN = ROOT / "tools" / "bin" / "opsaxiom-mysqlvar"
+SVCSTATE_BIN = ROOT / "tools" / "bin" / "opsaxiom-svcstate"
+FSNAPSHOT_BIN = ROOT / "tools" / "bin" / "opsaxiom-fsnapshot"
+TXN_BIN = ROOT / "tools" / "bin" / "opsaxiom-txn"
 
 
 class SimError(Exception):
@@ -200,8 +203,61 @@ def _real_mysqlvar_roundtrip(notes):
         return True
 
 
+def _real_svcstate_roundtrip(notes):
+    """service_restore 型：restart 改变服务状态→restore 精确还原动作前状态。"""
+    with tempfile.TemporaryDirectory() as td:
+        env = dict(os.environ, OPSAXIOM_SVCSTATE_ROOT=td, OPSAXIOM_SVCSTATE_INIT="failed")
+        def run(*a):
+            return subprocess.run([sys.executable, str(SVCSTATE_BIN), *a],
+                                  env=env, capture_output=True, text=True)
+        run("restart", "app.service")            # 动作（记 before=failed）
+        if run("get", "app.service").stdout.strip() != "active":
+            notes.append("回滚测试失败：restart 未使服务进入 active"); return False
+        run("restore", "app.service")            # 回滚 = 回到动作前状态
+        if run("get", "app.service").stdout.strip() != "failed":
+            notes.append("回滚测试失败：restore 未还原动作前状态 failed"); return False
+        notes.append("回滚往返成功：restart failed→active，restore 精确还原 failed")
+        return True
+
+
+def _real_fsnapshot_roundtrip(sandbox_file, notes):
+    """snapshot 型：先快照→操作改动数据→恢复快照后逐字节一致。"""
+    with tempfile.TemporaryDirectory() as td:
+        env = dict(os.environ, OPSAXIOM_FSNAPSHOT_ROOT=str(pathlib.Path(td) / "snaps"))
+        target = pathlib.Path(td) / sandbox_file
+        target.write_text("fs-metadata-original")
+        def run(*a):
+            return subprocess.run([sys.executable, str(FSNAPSHOT_BIN), *a],
+                                  check=True, env=env, capture_output=True)
+        run("snap", str(target))                 # 操作前快照（前置红线）
+        target.write_text("fs-metadata-mutated-by-fsck")   # 模拟修复操作改动数据
+        run("restore", str(target))              # 回滚 = 恢复快照
+        if target.read_text() != "fs-metadata-original":
+            notes.append("回滚测试失败：restore 后数据与快照不一致"); return False
+        notes.append("回滚往返成功：snap→改动→restore 逐字节还原")
+        return True
+
+
+def _real_txn_roundtrip(notes):
+    """transaction 型：begin 切到目标修订→revert 精确回到变更前修订。"""
+    with tempfile.TemporaryDirectory() as td:
+        env = dict(os.environ, OPSAXIOM_TXN_ROOT=td, OPSAXIOM_TXN_INIT="5")
+        def run(*a):
+            return subprocess.run([sys.executable, str(TXN_BIN), *a],
+                                  env=env, capture_output=True, text=True)
+        run("begin", "deploy", "3")              # 动作：undo 到 rev 3（记 before=5）
+        if run("get", "deploy").stdout.strip() != "3":
+            notes.append("回滚测试失败：begin 未切到目标修订 3"); return False
+        run("revert", "deploy")                  # 超时未确认路径：平台自动回退
+        if run("get", "deploy").stdout.strip() != "5":
+            notes.append("回滚测试失败：revert 未回到变更前修订 5"); return False
+        notes.append("回滚往返成功：rev 5→3（begin），revert 精确回到 5")
+        return True
+
+
 _ROUNDTRIP = {"quarantine": _real_quarantine_roundtrip, "deploy": _real_deploy_roundtrip,
-              "mysqlvar": _real_mysqlvar_roundtrip}
+              "mysqlvar": _real_mysqlvar_roundtrip, "svcstate": _real_svcstate_roundtrip,
+              "snapshot": _real_fsnapshot_roundtrip, "txn": _real_txn_roundtrip}
 
 
 def run(skill_path, scenario_path):
@@ -244,7 +300,9 @@ def run(skill_path, scenario_path):
         elif t == "action":
             if real_action == node:
                 fn = _ROUNDTRIP[real_kind]
-                rollback_ok = fn(sandbox_file, notes) if real_kind == "quarantine" else fn(notes)
+                # 文件级往返（quarantine/snapshot）需要 sandbox_file，其余只要 notes
+                rollback_ok = (fn(sandbox_file, notes)
+                               if real_kind in ("quarantine", "snapshot") else fn(notes))
             node = n.get("goto") or n.get("verify", {}).get("on_fail", "escalate")
         else:
             raise SimError(f"未知节点类型 {t} @ {node}")

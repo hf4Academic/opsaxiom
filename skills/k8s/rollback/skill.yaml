@@ -5,7 +5,7 @@ metadata:
   name: Deployment 回滚到上一版本
   taxonomy: k8s/release/rollback
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms:
   - {platform: kubernetes}
   authors: [opsagent-core]

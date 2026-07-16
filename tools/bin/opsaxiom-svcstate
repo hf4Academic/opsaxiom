@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""
+opsaxiom-svcstate —— service_restore 型回滚的 mock（H-7 依赖）。
+
+"重启/启动服务"没有字面逆操作，但回滚语义是明确的：回到动作前的服务状态
+（docs/02 §service_restore：restart 的 undo = 回到之前的 stopped/failed 态，
+ skill 里的 rollback.run 正是 systemctl stop）。真机上作用于 systemd/BGP 会话，
+sim 里作用于受 OPSAXIOM_SVCSTATE_ROOT 约束的 mock 状态机，从而无需真服务
+就能验证"动作改变了状态 + 回滚精确还原动作前状态"。
+
+子命令（对齐 quarantine/deploy/mysqlvar 的可测品质）：
+  restart <unit>      快照当前状态到 <unit>.before，置状态为 active，代数+1
+  restore <unit>      从 <unit>.before 还原状态（幂等），代数+1
+  get <unit>          打印当前状态（无则打印初值 OPSAXIOM_SVCSTATE_INIT，默认 failed）
+"""
+import os
+import pathlib
+import sys
+
+ROOT = pathlib.Path(os.environ.get("OPSAXIOM_SVCSTATE_ROOT", "/tmp/opsaxiom-svcstate"))
+INIT = os.environ.get("OPSAXIOM_SVCSTATE_INIT", "failed")
+
+
+def _cur(unit):
+    f = ROOT / f"{unit}.state"
+    return f.read_text().strip() if f.exists() else INIT
+
+
+def _bump(unit):
+    g = ROOT / f"{unit}.generation"
+    n = int(g.read_text()) + 1 if g.exists() else 1
+    g.write_text(str(n))
+    return n
+
+
+def main(argv):
+    if not argv:
+        print("用法：opsaxiom-svcstate restart|restore|get <unit>", file=sys.stderr)
+        return 2
+    ROOT.mkdir(parents=True, exist_ok=True)
+    cmd = argv[0]
+    unit = argv[1] if len(argv) > 1 else "app.service"
+    state_f, before_f = ROOT / f"{unit}.state", ROOT / f"{unit}.before"
+    if cmd == "restart":
+        before_f.write_text(_cur(unit))         # 快照动作前状态（*_before）
+        state_f.write_text("active")
+        _bump(unit)
+        print(f"restart {unit}：{before_f.read_text()} → active（动作前状态已快照）")
+        return 0
+    if cmd == "restore":
+        if before_f.exists():
+            state_f.write_text(before_f.read_text())
+            before_f.unlink()
+            _bump(unit)
+        print(f"restore {unit} = {_cur(unit)}")
+        return 0
+    if cmd == "get":
+        print(_cur(unit))
+        return 0
+    print(f"未知子命令 {cmd}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

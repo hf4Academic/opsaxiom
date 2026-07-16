@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""
+opsaxiom-txn —— transaction 型回滚的 mock（H-7 依赖）。
+
+kubectl rollout undo / JunOS commit confirmed 这类平台原生事务：变更进入
+确认窗口，窗口内确认则生效，超时/主动放弃则平台自动回退到变更前
+（docs/02 §transaction）。真机上由平台保证，sim 里作用于受
+OPSAXIOM_TXN_ROOT 约束的 mock 修订存储，从而无需真集群就能验证
+"begin 改到目标修订 + revert 精确回到变更前修订"这对事务语义。
+
+子命令：
+  begin <name> <rev>   记录当前修订到 <name>.before，切到 <rev>，状态 pending
+  confirm <name>       提交：状态 committed，丢弃 before（窗口内确认）
+  revert <name>        回退：恢复 before 修订，状态 reverted（超时未确认路径）
+  get <name>           打印当前修订（无则打印初值 OPSAXIOM_TXN_INIT，默认 5）
+"""
+import os
+import pathlib
+import sys
+
+ROOT = pathlib.Path(os.environ.get("OPSAXIOM_TXN_ROOT", "/tmp/opsaxiom-txn"))
+INIT = os.environ.get("OPSAXIOM_TXN_INIT", "5")
+
+
+def _cur(name):
+    f = ROOT / f"{name}.rev"
+    return f.read_text().strip() if f.exists() else INIT
+
+
+def main(argv):
+    if not argv:
+        print("用法：opsaxiom-txn begin|confirm|revert|get <name> [rev]", file=sys.stderr)
+        return 2
+    ROOT.mkdir(parents=True, exist_ok=True)
+    cmd = argv[0]
+    name = argv[1] if len(argv) > 1 else "deploy"
+    rev_f, before_f, st_f = ROOT / f"{name}.rev", ROOT / f"{name}.before", ROOT / f"{name}.status"
+    if cmd == "begin":
+        before_f.write_text(_cur(name))         # 快照变更前修订
+        rev_f.write_text(argv[2])
+        st_f.write_text("pending")
+        print(f"begin {name}：rev {before_f.read_text()} → {argv[2]}（确认窗口开启）")
+        return 0
+    if cmd == "confirm":
+        st_f.write_text("committed")
+        if before_f.exists():
+            before_f.unlink()
+        print(f"confirm {name}：rev {_cur(name)} 已提交")
+        return 0
+    if cmd == "revert":
+        if before_f.exists():
+            rev_f.write_text(before_f.read_text())
+            before_f.unlink()
+        st_f.write_text("reverted")
+        print(f"revert {name}：已回到 rev {_cur(name)}")
+        return 0
+    if cmd == "get":
+        print(_cur(name))
+        return 0
+    print(f"未知子命令 {cmd}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -135,3 +135,64 @@ def test_f16_kubectl_shell_injection_rejected():
            "kubectl get pod $(reboot)", "kubectl get pod | sh", "kubectl get pod > /etc/x"]
     for c in inj:
         assert not run_sim._is_readonly(c), c
+
+
+# ---- H-7：三种补齐的回滚往返 mock（service_restore / snapshot / transaction）----
+
+SVCBIN = ROOT / "tools" / "bin" / "opsaxiom-svcstate"
+FSBIN = ROOT / "tools" / "bin" / "opsaxiom-fsnapshot"
+TXBIN = ROOT / "tools" / "bin" / "opsaxiom-txn"
+
+
+def test_svcstate_restart_restore_roundtrip():
+    """service_restore：restart 改变状态，restore 精确回到动作前状态。"""
+    with tempfile.TemporaryDirectory() as td:
+        env = dict(os.environ, OPSAXIOM_SVCSTATE_ROOT=td, OPSAXIOM_SVCSTATE_INIT="failed")
+        def run(*a):
+            return subprocess.run([sys.executable, str(SVCBIN), *a],
+                                  env=env, capture_output=True, text=True)
+        run("restart", "u.service")
+        assert run("get", "u.service").stdout.strip() == "active"
+        run("restore", "u.service")
+        assert run("get", "u.service").stdout.strip() == "failed"
+        # 幂等：无 before 时 restore 不应改变状态
+        run("restore", "u.service")
+        assert run("get", "u.service").stdout.strip() == "failed"
+
+
+def test_fsnapshot_snap_mutate_restore_roundtrip():
+    """snapshot：快照→改动→restore 逐字节还原；无快照 restore 退出码 1。"""
+    with tempfile.TemporaryDirectory() as td:
+        env = dict(os.environ, OPSAXIOM_FSNAPSHOT_ROOT=str(pathlib.Path(td) / "s"))
+        f = pathlib.Path(td) / "vol.img"
+        f.write_text("original")
+        def run(*a, check=True):
+            return subprocess.run([sys.executable, str(FSBIN), *a],
+                                  env=env, capture_output=True, check=check)
+        run("snap", str(f))
+        f.write_text("mutated")
+        run("restore", str(f))
+        assert f.read_text() == "original"
+        # 无快照的文件 restore 必须失败而非静默
+        g = pathlib.Path(td) / "no-snap.img"
+        g.write_text("x")
+        r = run("restore", str(g), check=False)
+        assert r.returncode == 1
+
+
+def test_txn_begin_revert_and_confirm():
+    """transaction：begin 切修订，revert 精确回退；confirm 后 revert 不再回退。"""
+    with tempfile.TemporaryDirectory() as td:
+        env = dict(os.environ, OPSAXIOM_TXN_ROOT=td, OPSAXIOM_TXN_INIT="5")
+        def run(*a):
+            return subprocess.run([sys.executable, str(TXBIN), *a],
+                                  env=env, capture_output=True, text=True)
+        run("begin", "d", "3")
+        assert run("get", "d").stdout.strip() == "3"
+        run("revert", "d")
+        assert run("get", "d").stdout.strip() == "5"
+        # 确认后 before 被丢弃，revert 保持当前修订（事务已提交）
+        run("begin", "d", "2")
+        run("confirm", "d")
+        run("revert", "d")
+        assert run("get", "d").stdout.strip() == "2"

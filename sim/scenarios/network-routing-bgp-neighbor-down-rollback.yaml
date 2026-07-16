@@ -1,0 +1,13 @@
+skill: skills/network/bgp-neighbor-down/skill.yaml
+scenario: 会话参数协商卡住经确认后软复位（含真实 restart→restore 回滚往返，service_restore 型）
+expect_path: [peer_state, check_session_params, ask_soft_reset, soft_reset, done_ok]
+real_action: soft_reset
+real_action_kind: svcstate
+answers:
+  ask_soft_reset: soft_reset
+node_ctx:
+  peer_state:
+    state: OpenSent
+    admin_state: up
+  check_session_params:
+    lines: ['notification: hold time expired (4/0)']

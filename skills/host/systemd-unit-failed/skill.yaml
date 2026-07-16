@@ -5,7 +5,7 @@ metadata:
   name: systemd 服务启动失败排查
   taxonomy: host/system/systemd-unit-failed
   version: 0.1.0
-  maturity: draft
+  maturity: sim_verified
   platforms:
   - os: linux
     family: [debian, rhel, suse]

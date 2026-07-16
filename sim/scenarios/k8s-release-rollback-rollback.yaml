@@ -1,0 +1,10 @@
+skill: skills/k8s/rollback/skill.yaml
+scenario: 回滚到上一修订（含真实 begin→revert 事务往返，transaction 型）
+expect_path: [assess_current, identify_target, do_rollback, done_ok]
+real_action: do_rollback
+real_action_kind: txn
+node_ctx:
+  assess_current:
+    revision_count: 3
+  identify_target:
+    lines: ['Image: registry.local/app:1.4.2']

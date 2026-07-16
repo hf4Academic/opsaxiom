@@ -1,0 +1,23 @@
+{
+  "skill": "k8s.release.rollback",
+  "action": "promote",
+  "from": "draft",
+  "to": "sim_verified",
+  "at": "2026-07-16T15:46:25",
+  "validator": "0 ERROR",
+  "evidence": "context_walk",
+  "scenarios": [
+    {
+      "scenario": "k8s-release-rollback-auto.yaml",
+      "mode": "context_walk",
+      "path_ok": true,
+      "rollback_ok": null
+    },
+    {
+      "scenario": "k8s-release-rollback-rollback.yaml",
+      "mode": "context_walk",
+      "path_ok": true,
+      "rollback_ok": true
+    }
+  ]
+}
