@@ -1,0 +1,197 @@
+# 远程接入与凭证管理设计（Access & Credentials）
+
+> 状态：设计稿（Fable 5，2026-07-18）。尚未实现——现状是协驾档只支持本机，
+> 一切远程目标走导航档人工粘贴。本文回答发起人的问题：
+> "让人自己登录机器拷输出回来，还是给我们权限、我们自动去拿？"
+> 结论：**两条都保留，第二条（自动去拿）是本设计的主体**；
+> 导航档永远是零凭证的兜底（气隙/合规禁区/临时救急）。
+
+---
+
+## 0. 一句话架构
+
+```
+targets.yaml(设备清单，只存凭证引用) 
+   → connector(按设备类型拨号：ssh / 网络设备 / kubectl / http)
+   → 凭证解析器(引用 → 凭证，优先复用你已有的：ssh-agent / ~/.ssh/config / kubeconfig)
+   → 执行门(只读白名单 + 注入防护 + 逐目标授权 TTL)
+   → 输出进事实库/卷宗，命令与结果全量留审计
+```
+
+**凭证永远只在操作者自己的机器上，OpsAxiom 不上传、不代管、不建中心凭证库。**
+
+---
+
+## 1. 为什么这么设计（三个根本决定）
+
+### 决定一：凭证不出用户已有的信任边界
+
+"给我们权限、我们自动去拿"最容易走歪的方向是：建一个中心服务替用户保管所有
+设备密码。那会把 OpsAxiom 自己变成全网最值钱的攻击目标，也会让用户第一天就
+面临"要不要把家底交给一个开源工具"的信任决断——大多数人会合理地拒绝。
+
+所以本设计的第一原则：**OpsAxiom 只是"用你已经有的钥匙，替你跑腿"**。
+你的 SSH 私钥本来就在 ~/.ssh，kubeconfig 本来就在 ~/.kube——OpsAxiom 直接
+复用它们，不复制、不搬家、不上云。这和 gitpush.py 用本机密钥"推完即弃"是
+同一条红线的延伸。
+
+### 决定二：诊断只要只读，只读只要低权账号
+
+205 个 Skill 里绝大多数是 Diagnostic——只需要**只读**。这给了安全设计一个
+巨大的红利：给 OpsAxiom 用的账号可以是**没有破坏能力的低权账号**：
+
+- Linux：普通用户 + 精确到命令的 sudo 白名单（见 §5.1 的 opsaxiom-ro 方案）
+- 网络设备：厂商自带的只读级别（Cisco privilege 1 / 华为 monitor level / RBAC 只读角色）
+- k8s：view ClusterRole（或更窄的自定义只读 Role）
+- 中间件 HTTP 接口：只读端点本就无需凭证或用只读 token
+
+**即使凭证泄露，攻击者拿到的也只是"能看"**。这是比任何加密方案都硬的兜底。
+写操作（action 节点）不走这套自动通道——保持现有设计：变更简报 + 人工确认 +
+已验证回滚，用人的高权限会话执行。
+
+### 决定三：授权是"人给的、按目标、会过期"
+
+现有 trust.yaml 的"本机首次授权"模式直接推广到远程：每个目标首次自动执行前，
+明确问一次"允许 OpsAxiom 在 web-01 上自动执行只读命令吗？"，授权带 TTL
+（默认 30 天，可配），到期重新确认。用户随时 `opsaxiom target revoke <目标>` 收回。
+没有"一键授权全部"——批量授权必须逐台列出让人看见。
+
+---
+
+## 2. 设备清单（targets.yaml）：只存引用，不存凭证
+
+`~/.opsaxiom/targets.yaml`——用户可手编，也可用向导生成：
+
+```yaml
+targets:
+  web-01:
+    connector: ssh
+    host: 10.0.1.11
+    user: opsaxiom-ro
+    auth: agent                  # 凭证引用：用 ssh-agent 里的密钥
+  web-02:
+    connector: ssh
+    host: 10.0.1.12
+    auth: ssh_config             # 全权委托 ~/.ssh/config（ProxyJump/IdentityFile 都生效）
+  core-sw-1:
+    connector: network           # 网络设备（ssh 行协议）
+    platform: cisco_ios
+    host: 10.255.0.1
+    user: netops-ro
+    auth: keyring:core-sw-1      # 凭证引用：本机系统钥匙串里的条目
+  prod-cluster:
+    connector: kubectl
+    auth: kubeconfig             # 直接复用 ~/.kube/config 当前上下文
+    context: prod                # 可选：锁定 context，防误连
+  es-log:
+    connector: http
+    base: https://10.0.2.5:9200
+    auth: keyring:es-log-token   # 只读 token
+```
+
+要点：
+
+- **`auth` 字段永远是引用**（agent / ssh_config / kubeconfig / keyring:名字 /
+  file:路径），文件里出现明文密码 → 校验直接报错拒绝加载。
+- 这个文件本身没有秘密，可以进团队 git 仓库共享设备清单——每个人的凭证
+  各自在各自机器上解析。**清单可共享、钥匙不共享**，这就是团队协作的形态。
+- `opsaxiom target import-ssh-config` 一键从 ~/.ssh/config 生成初稿——
+  大多数运维的设备清单其实早就写在那里了。
+
+## 3. 凭证解析器：分级，从"零新概念"到"团队级"
+
+按用户规模分三级，**低级永远可用，高级是可选升级**：
+
+| 级 | 适用 | 机制 | 用户要做什么 |
+|---|---|---|---|
+| **P0 复用现成** | 个人/绝大多数 | ssh-agent、~/.ssh/config、~/.kube/config、环境变量 | 什么都不用做——你能 ssh 上去，OpsAxiom 就能 |
+| **P1 本机钥匙串** | 有密码类凭证的（网络设备/API token） | OS keyring（Linux SecretService/macOS Keychain），无桌面环境退化为 age 加密文件 + 主口令 | `opsaxiom cred set core-sw-1`（交互输入，不进 shell 历史） |
+| **P2 团队短时凭证** | 团队/企业 | ① SSH CA 短期证书（推荐终态）② 堡垒机代跳 ③ Vault 类外部凭证库 | 接入既有企业设施，OpsAxiom 只做消费端 |
+
+P2 三条路线说明（都只做**适配**，不自建）：
+
+- **SSH CA 短期证书**（金标准）：团队维护一个签发端，运维每天/每次拿到
+  几小时时效的证书（含 principal，落审计）。没有私钥分发、离职自动失效、
+  每条审计能对到人。OpsAxiom 侧只需支持 `auth: agent`——证书本来就在 agent 里。
+  **我们后续可以出一个 opsaxiom-ca 参考实现，但它是独立组件，不与主体绑死。**
+- **堡垒机**：国内企业现实。`auth: ssh_config` + ProxyJump 天然支持；
+  堡垒机要求的审计/录像不受影响——OpsAxiom 的连接就是一次普通 ssh。
+- **Vault/凭证库**：`auth: vault:secret/ops/core-sw-1` 形式的引用，
+  首版不做，接口留出（凭证解析器是插件点）。
+
+## 4. 拉通各类设备：连接器矩阵
+
+复用 Skill schema 已有的 connector 声明，执行层补齐四个连接器：
+
+| connector | 覆盖 | 实现 | 只读闸门 |
+|---|---|---|---|
+| `ssh` | Linux/Unix 主机 | paramiko（gitpush 已引入，无新依赖） | `_is_readonly` 白名单（已有）+ 无 tty、禁转发 |
+| `network` | 交换机/路由/防火墙 | paramiko 行协议 + 平台提示符适配（首版 cisco_ios/huawei_vrp，与语法库同源） | **语法库前缀白名单**（S6 已有的那套，运行时再查一遍）；只发 show/display |
+| `kubectl` | k8s 集群 | 本机 kubectl + kubeconfig | kubectl 只读动词白名单 + 注入防护（F-16 已有） |
+| `http` | ES/Prometheus/RabbitMQ 管理接口等 | urllib（零依赖） | 仅 GET + 每 Skill 声明的路径前缀白名单 |
+
+关键点：**四个连接器共用同一个执行门**——白名单校验、param 注入防护（T-3）、
+授权检查、审计落盘，都在门里做一次，连接器只负责"拨通"。新增设备类型 =
+新增一个连接器插件 + 对应语法库，安全逻辑零重复。
+
+采集优先级（自动模式下逐目标）：能自动 → 自动跑并入事实库；拨不通/没授权/
+没凭证 → **该目标自动降级为导航档粘贴块**，混合出现在同一份取证计划里。
+用户体验是"能自动的都自动了，剩下三台贴一下"——而不是全有或全无。
+
+## 5. 安全设计汇总（每条都有已存在的先例）
+
+1. **凭证不出本机**：解析后的凭证只在进程内存在，不写日志、不进事实库、
+   不进卷宗、送模型前 redact（redact.py 已有，扩充凭证 pattern）。
+2. **最小权限账号**（§1 决定二）：文档提供三平台的低权账号开通剧本；
+   `opsaxiom target doctor` 会**主动检测**当前账号权限是否超额并黄牌提醒
+   （"web-01 用的是 root——建议换 opsaxiom-ro，两分钟剧本见 docs"）。
+3. **双白名单**：命令生成端白名单（Skill 树里只有验证过的命令）+ 执行端
+   白名单（`_is_readonly`/语法前缀/GET-only 再查一遍）。模型永远不产命令
+   的红线不变，因此不存在"模型骗执行器"的攻击面。
+4. **逐目标授权 + TTL**（§1 决定三）：trust.yaml 扩展为 per-target 记录
+   `{target, granted_at, ttl, scope: readonly}`。
+5. **全量审计**：每条远程命令 + 原始输出 + 目标 + 时刻，随 incident 卷宗
+   归档（facts.py 已做了一半，补 target 维度即可）。
+6. **Linux 侧 opsaxiom-ro 剧本**（发布为脚本 + 文档）：
+   ```
+   useradd -m -s /bin/bash opsaxiom-ro
+   # sudo 白名单精确到命令（示例节选，与 Skill 库实际用到的命令集同步生成）
+   echo 'opsaxiom-ro ALL=(root) NOPASSWD: /usr/bin/dmesg, /usr/sbin/smartctl -H *, ...' \
+        > /etc/sudoers.d/opsaxiom-ro
+   ```
+   这个 sudoers 白名单可以**从 205 个 Skill 的命令集自动生成**——库里用什么
+   就放行什么，一条不多。Skill 库更新时白名单剧本同步再生成。这是"技能库
+   即权限清单"，是本产品独有的红利。
+
+## 6. 易用性设计（把"配置"变成"确认"）
+
+- **首次向导**：`opsaxiom target add web-01` → 交互问 connector/host/怎么登录，
+  能 ssh 通就自动试探（agent 里有几把钥匙、config 里有没有条目），用户多数时候
+  只需要按回车确认。
+- **批量导入**：`import-ssh-config`（§2）；k8s 直接读 kubeconfig 的 context 列表让选。
+- **体检**：`opsaxiom target doctor` 逐目标测连通/测凭证/测权限级别，
+  🟢🟡🔴 一屏看完。排查中途拨不通不再是玄学——先 doctor。
+- **incident 里零感知**：用户描述故障 → 假设涉及 web-01/core-sw-1 →
+  已授权的自动取证、未授权的当场问一次（授权后立即执行）、给不了权限的
+  出粘贴块。用户不需要理解"连接器/凭证解析器"这些词。
+
+## 7. 边界与不做清单（诚实边界）
+
+- **不做中心凭证托管服务**（§1 决定一）。团队要集中管理 → 走 P2 适配既有设施。
+- **写操作不进自动通道**。action 永远是：变更简报 → 人确认 → 高权会话执行 →
+  验证 + 回滚待命。自动通道的账号根本没有写权限，这是结构性保证。
+- **Windows 主机、SNMP、IPMI/BMC 首版不做**，连接器插件点留好。
+- **密码明文兜底不提供**：连 `auth: password:xxx` 这种字段都不存在，
+  逼着用户至少走 keyring——易用性向安全让步的唯一一处。
+
+## 8. 落地路线（供排期参考）
+
+| 阶段 | 内容 | 依赖 |
+|---|---|---|
+| A-1 | targets.yaml + 凭证解析 P0（agent/ssh_config/kubeconfig）+ ssh 连接器接入执行门 | paramiko 已有 |
+| A-2 | trust.yaml 扩 per-target TTL + 审计补 target 维度 + target doctor | A-1 |
+| A-3 | network 连接器（cisco/huawei，语法库白名单复用）+ http 连接器 | A-1 |
+| A-4 | P1 keyring/age + `opsaxiom cred set` | A-1 |
+| A-5 | opsaxiom-ro sudoers 自动生成器（从 Skill 库命令集）+ 三平台低权账号剧本 | 可并行 |
+| A-6 | 混合取证计划（自动+粘贴块同屏）接入 incident 流 | A-1..A-3 |
+| B 期 | SSH CA 参考实现 / Vault 适配 / 更多连接器 | 按需求 |
