@@ -59,8 +59,12 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
     （均对照厂商 Command Reference）。docs/04 §5 全部批次已回填。
   - 全量回归：**663 pytest 全绿 + 4 skipped（3 无 kubectl + 1 库内无 draft 可测）、
     205 校验 0 ERROR**。
-- **发布状态**：registry（--no-draft）与网站已重建推送（见下方发布记录）。
-- **交接给**：发起人验收；后续任务书待发起人定向。
+- **发布状态**：registry（--no-draft）与网站已重建推送，CI 双绿，Pages 上线。
+- **第十四轮任务书已发（2026-07-19，I 系列：远程接入 + 本地化 Skill）**：
+  设计见 docs/12（接入与凭证）与 docs/13（linkbook/overlay/fork 三层）。
+  Fable 已交付 I-0：docs/03 schema（params source:local）+ tools/access.py
+  金标准（targets 三红线 + 12 条对抗测试）。安全红线与验收标准都写在任务书里。
+- **交接给**：**Opus 4.8 —— 从 TODO-opus.md 第十四轮开始（建议 I-8 热身 → I-1..I-3 主线）**
 ---
 
 ## 历史状态存档（第十二轮，G 系列）
