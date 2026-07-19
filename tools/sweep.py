@@ -202,22 +202,81 @@ def _trust_file():
     return base / "trust.yaml"
 
 
-def is_trusted(target=LOCAL, path=None):
+def _now():
+    import datetime
+    return datetime.datetime.now()
+
+
+def _parse_ts(s):
+    import datetime
+    return datetime.datetime.fromisoformat(s)
+
+
+def _remaining_days(grant, now=None):
+    """授权剩余天数；ttl_days=None（本机）视为永不过期，返回 None。"""
+    if grant.get("ttl_days") is None:
+        return None
+    import datetime
+    now = now or _now()
+    expires = _parse_ts(grant["granted_at"]) + datetime.timedelta(days=grant["ttl_days"])
+    return (expires - now).total_seconds() / 86400.0
+
+
+def _load_trust(path=None):
     f = pathlib.Path(path) if path else _trust_file()
     if not f.exists():
+        return {}, f
+    return (yaml.safe_load(f.read_text(encoding="utf-8")) or {}), f
+
+
+def is_trusted(target=LOCAL, path=None, now=None):
+    """per-target 授权 + TTL（I-2）。grants[target] 未过期即授权；
+    兼容旧格式 auto_exec 列表（视为永不过期）。"""
+    data, _ = _load_trust(path)
+    if target in (data.get("auto_exec") or []):        # 旧格式兼容（LOCAL 等）
+        return True
+    g = (data.get("grants") or {}).get(target)
+    if not g:
         return False
-    data = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
-    return target in (data.get("auto_exec") or [])
+    rem = _remaining_days(g, now=now)
+    return rem is None or rem > 0                       # None=永不过期；>0=未过期
 
 
-def grant_trust(target=LOCAL, path=None):
-    """记录"允许对该目标本机自动执行只读取证"。逐目标累积，非全局开关（R3）。"""
-    f = pathlib.Path(path) if path else _trust_file()
+def grant_trust(target=LOCAL, path=None, ttl_days=None, scope="readonly", now=None):
+    """授权对该目标自动执行只读取证。逐目标累积、带 TTL、可过期（R3 + docs/12 §1 决定三）。
+    ttl_days=None：不过期（本机 LOCAL 默认）；远程目标由调用方传 30。"""
+    data, f = _load_trust(path)
     f.parent.mkdir(parents=True, exist_ok=True)
-    data = yaml.safe_load(f.read_text(encoding="utf-8")) if f.exists() else {}
-    data = data or {}
-    lst = data.setdefault("auto_exec", [])
-    if target not in lst:
-        lst.append(target)
+    grants = data.setdefault("grants", {})
+    grants[target] = {"granted_at": (now or _now()).isoformat(timespec="seconds"),
+                      "ttl_days": ttl_days, "scope": scope}
     f.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
     return f
+
+
+def revoke_trust(target, path=None):
+    """收回对某目标的授权（grants + 旧 auto_exec 两处都清）。返回是否有改动。"""
+    data, f = _load_trust(path)
+    changed = False
+    if target in (data.get("grants") or {}):
+        del data["grants"][target]; changed = True
+    if target in (data.get("auto_exec") or []):
+        data["auto_exec"].remove(target); changed = True
+    if changed:
+        f.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    return changed
+
+
+def list_grants(path=None, now=None):
+    """列出所有授权目标及剩余天数（供 target list）。expired 的仍列出但标记。"""
+    data, _ = _load_trust(path)
+    out = []
+    for t in (data.get("auto_exec") or []):
+        out.append({"target": t, "scope": "readonly", "remaining_days": None,
+                    "expired": False, "legacy": True})
+    for t, g in (data.get("grants") or {}).items():
+        rem = _remaining_days(g, now=now)
+        out.append({"target": t, "scope": g.get("scope", "readonly"),
+                    "remaining_days": rem,
+                    "expired": (rem is not None and rem <= 0), "legacy": False})
+    return out
