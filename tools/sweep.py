@@ -115,6 +115,72 @@ def execute_auto(plan, params, store, now=None, runner=None):
     return report
 
 
+# ---------- 混合取证：本机 + 多远程目标（I-7）----------
+def classify_target(name, targets=None, authorized=None, reachable=None):
+    """把单个目标归类为可自动 / 需粘贴。返回 (mode, reason)。
+
+    mode: 'local' 本机 / 'auto' 远程已授权可自动 / 'paste' 远程需人工粘贴。
+    reachable=None 表示未知（不判），doctor 已过的场景由调用方传入。
+    """
+    if name == LOCAL:
+        return "local", "本机"
+    if authorized and not authorized(name):
+        return "paste", "未授权自动执行（opsaxiom target grant）"
+    if reachable is not None and reachable(name) is False:
+        return "paste", "拨不通（见 target doctor）"
+    return "auto", "远程已授权"
+
+
+def execute_mixed(plan, params, store, *, targets=None, now=None,
+                  local_runner=None, remote_runner=None, authorized=None):
+    """混合取证：本机探针走 bash，远程已授权目标走 gate，未授权/不可达目标跳过
+    （由调用方渲染成粘贴块）。返回 {executed:[...], manual:{target:[probe,...]}}。
+
+    remote_runner: (target_name, cmd, params) -> stdout，默认 gate.run_remote。
+    authorized: name -> bool，默认 gate.is_authorized（读 trust）。
+    """
+    import gate
+    authorized = authorized or gate.is_authorized
+    remote_runner = remote_runner or (
+        lambda tn, cmd, pr: gate.run_remote(tn, cmd, params=pr, now=now))
+    local_runner = local_runner or _default_runner
+    bad = unsafe_values(params)
+    executed, manual = [], {}
+    for p in flatten(plan):
+        tname = p["target"]
+        conn = p.get("connector", "ssh")
+        # 本机探针：沿用 execute_auto 的注入/只读双闸
+        if tname == LOCAL:
+            if not p["auto"] or any(v in p["cmd"] for v in bad) or not _is_readonly(p["cmd"]):
+                manual.setdefault(LOCAL, []).append(p); continue
+            try:
+                out = local_runner(p["cmd"])
+            except Exception as e:                       # noqa: BLE001
+                executed.append({"node": p["node"], "cmd": p["cmd"],
+                                 "status": "error", "err": str(e)})
+                continue
+            parsed = _store_result(store, p, out, now)
+            executed.append({"node": p["node"], "cmd": p["cmd"], "status": "executed",
+                             "target": tname,
+                             "fields": [k for k in parsed if k not in ("rows", "lines")]})
+            continue
+        # 远程目标：只在"已授权且该 connector 可自动"时走 gate，否则降级粘贴
+        mode, _ = classify_target(tname, authorized=authorized)
+        if mode != "auto" or any(v in p["cmd"] for v in bad):
+            manual.setdefault(tname, []).append(p); continue
+        try:
+            out = remote_runner(tname, p["cmd"], params)
+        except Exception as e:                       # noqa: BLE001
+            executed.append({"node": p["node"], "cmd": p["cmd"], "status": "error",
+                             "target": tname, "err": str(e)})
+            continue
+        parsed = _store_result(store, p, out, now)
+        executed.append({"node": p["node"], "cmd": p["cmd"], "status": "executed",
+                         "target": tname,
+                         "fields": [k for k in parsed if k not in ("rows", "lines")]})
+    return {"executed": executed, "manual": manual}
+
+
 # ---------- 导航档：单粘贴块 + collect/ingest ----------
 def make_nonce():
     return secrets.token_hex(8)

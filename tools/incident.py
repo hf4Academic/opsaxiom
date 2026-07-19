@@ -124,6 +124,17 @@ class Incident:
         self._t("auto_sweep", executed=sum(1 for r in rep if r["status"] == "executed"))
         return rep
 
+    def mixed_sweep(self, now=None, remote_runner=None, authorized=None):
+        """混合取证（I-7）：本机 + 已授权远程目标自动执行；未授权/不可达目标留作粘贴。
+        返回 sweep.execute_mixed 的 {executed, manual}。"""
+        plan = evidence.build_plan([(h.skill, h.params) for h in self.hyps],
+                                   target=self.target)
+        res = sweep.execute_mixed(plan, self.params, self.store, now=now,
+                                  remote_runner=remote_runner, authorized=authorized)
+        n = sum(1 for r in res["executed"] if r["status"] == "executed")
+        self._t("mixed_sweep", executed=n, manual_targets=sorted(res["manual"]))
+        return res
+
     def paste_block(self, nonce, only_manual=True):
         return sweep.render_paste_block(self.plan(), nonce, only_manual=only_manual)
 
