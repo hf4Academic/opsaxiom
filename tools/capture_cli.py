@@ -90,7 +90,53 @@ def _cmd_skill(args):
         print(f"  id={base['metadata']['id']} → local.{base['metadata']['id']}"
               f"（visibility:local，徽章清零；本地改完走 validate/promote，永不出门）")
         return 0
+    if sub == "doctor":
+        return _cmd_skill_doctor(args)
     return 2
+
+
+def _cmd_skill_doctor(args):
+    """skill doctor：体检个人层——overlay 失配节点、fork 落后基线。"""
+    import localskill
+    import overlay
+    import yaml
+    from incident import load_skill_by_id
+    issues = 0
+    # ① overlay 体检：引用了不存在的节点 → 黄牌（不阻塞，但要清理）
+    ov_dir = overlay.overlay_path("x").parent
+    if ov_dir.is_dir():
+        for f in sorted(ov_dir.glob("*.yaml")):
+            sid = f.stem
+            try:
+                ov = overlay.load(sid, path=f)
+            except overlay.OverlayError as e:
+                print(f"🟡 {sid}: overlay 违规未加载（{e}）"); issues += 1; continue
+            if not ov:
+                continue
+            _, base = load_skill_by_id(ov.get("base", sid))
+            if not base:
+                print(f"🟡 {sid}: overlay 的基线 Skill 不在库中（{ov.get('base')}）"); issues += 1
+                continue
+            missing = overlay.unmatched_nodes(ov, base)
+            if missing:
+                print(f"🟡 {sid}: overlay 引用了已消失节点 {missing}（基线可能已升级，请核对）")
+                issues += 1
+    # ② fork 体检：落后基线版本 → 提示合并
+    for f in localskill.skills_local_dir().rglob("skill.yaml") if localskill.skills_local_dir().is_dir() else []:
+        m = yaml.safe_load(f.read_text(encoding="utf-8"))["metadata"]
+        derived = m.get("derived_from")
+        if derived:
+            base_id = derived.split("@")[0]
+            _, base = load_skill_by_id(base_id)
+            if base:
+                from_ver = derived.split("@", 1)[-1]
+                cur_ver = base["metadata"].get("version", "?")
+                if cur_ver != from_ver:
+                    print(f"🟡 {m['id']}: 基线已出 {cur_ver}，fork 基于 {from_ver}——"
+                          f"用 git diff 看 {base_id} 的变更后人工合并")
+                    issues += 1
+    print(f"{'🟢 个人层健康' if issues == 0 else f'发现 {issues} 处需注意'}")
+    return 0 if issues == 0 else 1
 
 
 def _cmd_record(args):
@@ -132,6 +178,8 @@ def add_capture(subparsers):
     ln.add_argument("path")
     fk = ssub.add_parser("fork", help="从通用 Skill 派生本地个性化版本（永不出门）")
     fk.add_argument("base_id", help="基线 Skill id，如 middleware.es.disk-watermark")
+    dc = ssub.add_parser("doctor", help="体检个人层：overlay 失配 / fork 落后基线")
+    dc.add_argument("--json", action="store_true")
     sp.set_defaults(fn=_cmd_skill)
 
     rp = subparsers.add_parser("record", help="记录一次没走 Skill 的排查")

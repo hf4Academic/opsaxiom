@@ -314,8 +314,8 @@ class Incident:
                                  for h in self.hyps if h.status == INSUFFICIENT],
                 "timeline": self.timeline}
 
-    def export_report(self, now=None):
-        """故障报告 markdown（docs/09 §1.5）——可直接贴工单，兑现"导航输出即文档"。"""
+    def export_report(self, now=None, share=False):
+        """故障报告 markdown（docs/09 §1.5）。share=True 剥离个人层（📌/内网URL）后导出。"""
         d = self.dossier(now=now)
         lines = [f"# 故障报告：{self.symptom}", "",
                  f"- 目标：{self.target}", ""]
@@ -336,4 +336,8 @@ class Incident:
             for it in d[INSUFFICIENT]:
                 lines.append(f"- {it['name']}：还差 {it['missing'] or '（人工选择）'}")
             lines.append("")
-        return "\n".join(lines)
+        text = "\n".join(lines)
+        if share:
+            import share as _share
+            text = _share.strip_personal(text)
+        return text

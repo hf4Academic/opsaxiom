@@ -270,11 +270,13 @@ class Repl:
                 if sid:
                     print(f"  → 模型建议再看：run {sid}（库内 Skill，徽章以库为准）")
 
-    def _report(self):
+    def _report(self, share=False):
         if not self.last_incident:
             print("  还没有可导出的排查。先描述问题并 sweep。")
             return
-        print(self.last_incident.export_report())
+        if share:
+            print("  （--share：已剥离个人 overlay 注记与内网地址，可放心贴工单/发社区）")
+        print(self.last_incident.export_report(share=share))
 
     def _delegate(self, parts):
         """hub/record/skill/doctor 交给既有 CLI 模块处理（复用，不复制）。"""
