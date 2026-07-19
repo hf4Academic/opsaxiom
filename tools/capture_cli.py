@@ -76,6 +76,20 @@ def _cmd_skill(args):
         else:
             print("\n无缺口，可写 sim 场景并 promote。")
         return 1 if rep.errors or gaps else 0
+    if sub == "fork":
+        import localskill
+        import incident as I
+        bp, base = I.load_skill_by_id(args.base_id)
+        if not base:
+            print(f"找不到基线 Skill：{args.base_id}"); return 1
+        try:
+            sf = localskill.fork(base, bp)
+        except localskill.LocalSkillError as e:
+            print(f"✘ {e}"); return 1
+        print(f"✔ 已派生本地 fork：{sf}")
+        print(f"  id={base['metadata']['id']} → local.{base['metadata']['id']}"
+              f"（visibility:local，徽章清零；本地改完走 validate/promote，永不出门）")
+        return 0
     return 2
 
 
@@ -116,6 +130,8 @@ def add_capture(subparsers):
                     help="从 stdin 读 JSON spec（pi TUI 对话流用）")
     ln = ssub.add_parser("lint", help="校验草稿并列出缺口")
     ln.add_argument("path")
+    fk = ssub.add_parser("fork", help="从通用 Skill 派生本地个性化版本（永不出门）")
+    fk.add_argument("base_id", help="基线 Skill id，如 middleware.es.disk-watermark")
     sp.set_defaults(fn=_cmd_skill)
 
     rp = subparsers.add_parser("record", help="记录一次没走 Skill 的排查")

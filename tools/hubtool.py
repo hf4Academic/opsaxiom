@@ -58,9 +58,11 @@ def build_registry(skills_dir, out_dir, include_draft=True):
     (out / "skills").mkdir(parents=True, exist_ok=True)
     (out / "keyring").mkdir(parents=True, exist_ok=True)
     index = []
+    import localskill
     for sp in sorted(skills_dir.rglob("skill.yaml")):
         s = yaml.safe_load(sp.read_text(encoding="utf-8"))
         m = s["metadata"]
+        localskill.assert_shareable(m, where=str(sp))    # 个人层混进公共库→当场拒绝
         if not include_draft and m.get("maturity") == "draft":
             continue
         ver = m["version"]
@@ -245,10 +247,14 @@ def keyring_export():
 
 def hub_push(skill_id, out_dir=None):
     """打包 skill+tests+attestations 为 bundle（气隙摆渡）；返回 tar 路径。"""
+    import localskill
+    localskill.assert_shareable({"id": skill_id}, where="hub push")  # local. 前缀直接拒
     sp = next((p for p in (ROOT / "skills").rglob("skill.yaml")
                if yaml.safe_load(p.read_text(encoding="utf-8"))["metadata"]["id"] == skill_id), None)
     if not sp:
         raise RuntimeError(f"本地无此 Skill：{skill_id}")
+    localskill.assert_shareable(yaml.safe_load(sp.read_text(encoding="utf-8"))["metadata"],
+                                where="hub push")           # visibility:local 也拒
     out = pathlib.Path(out_dir or (_home() / "hub" / "outbox"))
     out.mkdir(parents=True, exist_ok=True)
     tar = out / f"{skill_id}.tar.gz"
