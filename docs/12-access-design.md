@@ -108,6 +108,36 @@ targets:
 | **P1 本机钥匙串** | 有密码类凭证的（网络设备/API token） | OS keyring（Linux SecretService/macOS Keychain），无桌面环境退化为 age 加密文件 + 主口令 | `opsaxiom cred set core-sw-1`（交互输入，不进 shell 历史） |
 | **P2 团队短时凭证** | 团队/企业 | ① SSH CA 短期证书（推荐终态）② 堡垒机代跳 ③ Vault 类外部凭证库 | 接入既有企业设施，OpsAxiom 只做消费端 |
 
+### 3.5 从零开始：一台新机器的首次开通（enroll）
+
+发起人问题："第一次需要我做什么？是我本机生成 Key 配到远端吗？OpsAxiom 能帮忙吗？"
+——是这个模型（本机生成密钥 → 公钥配到远端），而且 OpsAxiom 把它包成一条命令：
+
+```
+$ opsaxiom target enroll web-01 --host 10.0.1.11
+① 检查本机密钥：~/.ssh/id_ed25519 不存在 → 生成一把（ed25519，可设口令）
+   （已有密钥/ssh-agent 里有 → 跳过，用现成的）
+② 首次上门需要临时用一次密码：
+   请输入 root@10.0.1.11 的密码（只用这一次，不保存）: ****
+③ 远端开通（等价于 ssh-copy-id + 低权账号剧本）：
+   - 创建 opsaxiom-ro 用户 + 写入 sudoers 只读白名单（从 Skill 库命令集生成）
+   - 把你的公钥写进 opsaxiom-ro 的 authorized_keys
+④ 验证：改用密钥以 opsaxiom-ro 登录 → 跑 3 条只读探针 → 🟢
+✔ 已写入 targets.yaml（auth: agent）。今后免密自动采集，密码已丢弃。
+```
+
+要点：
+
+- **密码只在内存里用一次**（paramiko 交互认证），用完即弃，不进任何文件——
+  这是"推完即弃"红线的又一次复用。
+- 不想给 root？`--no-create-ro` 退化成纯 ssh-copy-id（用你现有账号），
+  低权账号以后再补；`target doctor` 会持续黄牌提醒"这台用的是高权账号"。
+- 已经有整套密钥/跳板体系的人**根本不需要 enroll**——`import-ssh-config`
+  即用（P0 的承诺：你能 ssh 通，OpsAxiom 就能）。
+- 批量开通：`enroll --from hosts.txt`，逐台问密码或用同一密码（内存一次性）。
+- 网络设备/HTTP token 不走 enroll（多数不支持密钥），走 P1：
+  `opsaxiom cred set core-sw-1` 存进本机钥匙串。
+
 P2 三条路线说明（都只做**适配**，不自建）：
 
 - **SSH CA 短期证书**（金标准）：团队维护一个签发端，运维每天/每次拿到
