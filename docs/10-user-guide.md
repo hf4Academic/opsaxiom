@@ -208,10 +208,92 @@ opsaxiom hub push <你的skill-id>          # 打成 bundle
 
 ---
 
+## 第五章 · 接入你的设备（让它替你去远端取数）
+
+排查到某台远端机器/交换机/集群时，与其你登录上去拷输出回来贴，不如让 OpsAxiom
+替你去拿。**它用的是你自己机器上已有的钥匙，不另存密码、不上传任何凭证。**
+
+### 5.1 第一次：把设备告诉它
+
+```bash
+opsaxiom target add web-01          # 交互向导：连法(ssh/network/kubectl/http)、主机、凭证引用
+opsaxiom target import-ssh-config   # 或者：直接从你 ~/.ssh/config 批量导入（很多人早配好了）
+opsaxiom target doctor              # 体检：每台能不能连、凭证齐不齐、是不是要先连 VPN
+```
+
+`target add` 时凭证一项选的是"钥匙去哪找"（agent/ssh_config/kubeconfig/钥匙串），
+**清单里没有任何明文密码**。有密码类凭证（网络设备、API token）：
+`opsaxiom cred set core-sw-1`（值进系统钥匙串/加密文件，`cred list` 只显示名字）。
+
+### 5.2 授权它自动跑（按台、会过期）
+
+```bash
+opsaxiom target grant web-01        # 允许它在这台上自动执行只读命令（默认 30 天到期）
+opsaxiom target list                # 看每台授权还剩几天
+opsaxiom target revoke web-01       # 随时收回
+```
+
+### 5.3 排查时它怎么干
+
+授权过的目标它自动跑只读命令、结果进卷宗；没授权/连不上的，它退化成"粘贴块"
+让你在目标上贴命令拷回来——**能自动的都自动，剩下的贴一下**，不会全有或全无。
+要先连 VPN 的目标，它会说"先连上 VPN 再回车"，连上后接着跑，不用重来。
+
+## 第六章 · 个性化（贴你自己的页面和习惯，又不改坏通用 Skill）
+
+社区 Skill 是通用的，但排查时你总想开"你家"的大盘、按"你家"的习惯来。三个层级：
+
+| 你想要的 | 用什么 | 文件在哪 |
+|---|---|---|
+| 排查时随手开内部大盘/值班表 | **linkbook** 网页台账 | `~/.opsaxiom/linkbook.yaml` |
+| 给某个 Skill 填内部地址、贴一句提醒 | **overlay** 叠加层 | `~/.opsaxiom/overlays/<skill-id>.yaml` |
+| 真的改某个 Skill 的流程 | **fork** 派生 | `opsaxiom skill fork <id>` |
+
+这些都只在**你本机**，永远不会被推送到社区——分享报告时 `report --share`
+会自动把 📌 注记和内网地址剥掉。
+
+### 6.1 linkbook：网页台账（最常用）
+
+`~/.opsaxiom/linkbook.yaml` 里按类别挂内部链接，排查时自动带出：
+
+```yaml
+links:
+  middleware/mysql:
+    - name: MySQL 慢查询大盘
+      url: https://grafana.corp/d/mysql-slow
+```
+
+排查 mysql 慢查询时，卷宗末尾会显示"📌 你的相关页面：MySQL 慢查询大盘"。
+
+### 6.2 overlay：填 placeholder、贴注记
+
+`~/.opsaxiom/overlays/middleware.es.disk-watermark.yaml`：
+
+```yaml
+base: middleware.es.disk-watermark
+params: {es_endpoint: https://es-log.corp:9200}   # 填 Skill 留的内部地址占位符
+notes:
+  done_disk_full:
+    caution: 扩容要先走 CMDB 变更单               # 到这一步时提醒你
+```
+
+overlay **只能填参数、贴注记、预设答案**，不能改命令和判断逻辑——改了徽章就不作数了，
+所以加载器会拒绝。要改流程 → 用 fork。
+
+### 6.3 体检与派生
+
+```bash
+opsaxiom skill doctor               # overlay 引用了失效节点 / fork 落后基线，一目了然
+opsaxiom skill fork middleware.es.disk-watermark   # 真的要改流程时派生一个本地版
+```
+
 ## 常见问题
 
 - **它会不会自己乱改我系统？** 不会。默认导航档下写操作一律你亲手执行，它只给方案和回滚。
 - **回滚是不是每步都有？** 是。可回滚是本项目第一准则——任何变更步骤都配回滚方案，没有就不该出这一步。
 - **凭据/密码会被上传吗？** 不会。验证记录只含分桶信息（"rhel 8.x / 10-100 台"这种），
   绝不含主机名/IP/密码；记录本地签名，你决定推不推。
-- **跑不起来？** `opsaxiom doctor`。
+- **它能替我登录远端吗？会不会把我密码存起来？** 它复用你本机已有的钥匙（ssh-agent/ssh配置/
+  kubeconfig/系统钥匙串），清单里不存任何密码；值只进钥匙串/加密文件与内存，不上传。
+- **跑不起来？** `opsaxiom doctor`（系统）+ `opsaxiom target doctor`（设备）+ `opsaxiom skill doctor`（个性化）。
+

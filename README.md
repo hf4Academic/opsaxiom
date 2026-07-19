@@ -59,6 +59,11 @@
 - **人侧飞轮已打通**（docs/08、docs/10）：一键部署（`install.sh`/docker/离线包）+ `doctor` 自检；
   经验捕获三通道（`skill from-session`/`record`/`skill new`）把日常排查变 Skill 草稿；
   排查终点一键认证（30 秒签名沉淀）；**Skills Hub**（`hub pull` 三道安全门 / `hub push` / 静态站生成器）。
+- **远程接入**（docs/12，I 系列）：`target add/import/doctor` 接入你的设备（ssh/网络设备/k8s/http），
+  执行门统一把关（per-target 授权 TTL + 只读白名单 + 注入防护 + 审计），`cred set` 本地钥匙串存密码类凭证——
+  **凭证不出本机，清单只存引用**；`mixed_sweep` 混合取证（能自动的自动跑，不能的降级粘贴）。
+- **本地化 Skill**（docs/13，I 系列）：linkbook 个人网页台账、overlay 叠加层（填 placeholder/贴注记，
+  不碰通用树）、fork 派生——**个人层结构性不出门**（打包/CI 拒收，`report --share` 自动剥离 📌 与内网地址）。
 - **默认交互入口是 Terminal REPL，交互模型 v2（取证式诊断）**：裸敲 `opsaxiom` 进交互态，
   说一遍问题 → 并行多假设、一轮批量取证（只读命令自动跑/远端一次粘贴）→ 诊断卷宗
   （证实/排除/证据不足，每条带证据引用）→ 处置审批 → 复盘导出。像急诊医生，不像客服问卷

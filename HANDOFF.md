@@ -39,33 +39,41 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
 
 ## 当前状态（由最后工作的模型更新）
 
-- **更新时间**：2026-07-16（第十三轮 H 系列完成，发布收尾）
-- **更新者**：Fable 5（规划/评审/回滚沙箱）+ Opus 4.8（批量生成）
-- **阶段**：**第十三轮（H 系列：上线冲刺 200）完成——205 Skill / 205 sim_verified / 0 draft**
-- **第十三轮交付（H 系列）**：
-  - **规模**：141 → 205 Skill（+64），全部 sim_verified。分布：host 46 / network 38 /
-    middleware 31 / k8s 30 / aicomp 28 / obs 15 / sec 14 / proc 3。
-  - **批量流水线**（关键杠杆）：tools/authoring/gen_skill.py（spec→生成→校验→场景→晋级，
-    三层撞名防护）+ scenario_solver.py（前向走树自动合成 node_ctx）+ generic 解析器族。
-    spec 文件在 tools/authoring/specs/（16 个批次留档可复算）。
-  - **回滚沙箱补全（H-7）**：docs/02 四种回滚类型现全部有 sim 往返验证——新增
-    opsaxiom-svcstate（service_restore）/opsaxiom-fsnapshot（snapshot）/opsaxiom-txn
-    （transaction）三个 mock + run_sim 三种 real_action_kind；5 个存量 action draft
-    （fs-readonly/systemd-unit-failed/clock-drift/k8s-rollback/bgp-neighbor-down）
-    借此全部晋级。
-  - **诊断质量**：diagnose.py 加噪声地板 1.0（单 bigram 偶然重合不再浮出为假设）；
-    修复 H-4 撞名事故遗留（k8s.release.hpa-not-scaling 场景补回）。
-  - 语法库扩展：cisco show storm-control、huawei display storm-control/ospf interface
-    （均对照厂商 Command Reference）。docs/04 §5 全部批次已回填。
-  - 全量回归：**663 pytest 全绿 + 4 skipped（3 无 kubectl + 1 库内无 draft 可测）、
-    205 校验 0 ERROR**。
-- **发布状态**：registry（--no-draft）与网站已重建推送，CI 双绿，Pages 上线。
-- **第十四轮任务书已发（2026-07-19，I 系列：远程接入 + 本地化 Skill）**：
-  设计见 docs/12（接入与凭证）与 docs/13（linkbook/overlay/fork 三层）。
-  Fable 已交付 I-0：docs/03 schema（params source:local）+ tools/access.py
-  金标准（targets 三红线 + 12 条对抗测试）。安全红线与验收标准都写在任务书里。
-- **交接给**：**Opus 4.8 —— 从 TODO-opus.md 第十四轮开始（建议 I-8 热身 → I-1..I-3 主线）**
+- **更新时间**：2026-07-19（第十四轮 I 系列完成）
+- **更新者**：Opus 4.8（工程实现）· 设计为 Fable 5（docs/12/13，I-0 金标准）
+- **阶段**：**第十四轮（I 系列：远程接入 + 本地化 Skill）完成 11/12，交回 Fable 评审**
+- **第十四轮交付（I 系列）**：远程接入与本地化两条线全部落地，774 pytest 全绿。
+  - **接入线（I-0/1/2/3/5/7）**：四连接器（ssh/network/http，kubectl 由 kubeconfig 复用）
+    → **执行门 gate.py（远程命令唯一入口）**：目标存在→per-target 授权 TTL→只读白名单
+    →T-3 注入防护→凭证解析→审计落盘（凭证绝不入审计）。target CLI（add/import-ssh-config/
+    doctor，reach 分组诊断 VPN）。`mixed_sweep` 混合取证：本机+已授权远程自动跑，
+    未授权/不可达降级粘贴块。
+  - **凭证（I-6）**：cred.py（OS keyring 优先 + fernet 降级，值只进钥匙串/加密文件与内存，
+    list 只显名不显值）；access.resolve keyring 接线。三红线全程结构强制（access.py 金标准）。
+  - **本地化线（I-8/9/10/11）**：linkbook 网页台账（taxonomy 前缀聚合，卷宗 📌）；
+    overlay 加载器（**不碰树红线**：run/branch/when 递归拒绝，T-3 注入拦截，本地参数并入
+    +节点注记进卷宗）；fork 派生 + **个人层出门拦截**（打包/构建/CI 三保险拒 local）；
+    skill doctor（overlay 失配/fork 落后）+ `report --share` 剥离 📌 与内网 URL。
+  - 测试密度：每个模块配对抗测试（写命令拒/注入拒/未授权拒/凭证不入审计/overlay 改树拒/
+    fork 混入公共库拒/分享剥离）。新增 ~150 条。
+- **未完（1 项，记 TODO）**：**I-4 enroll 首次开通 + sudoers 白名单生成器**——需真实 sshd
+  做端到端验证（本环境无系统 sshd），"技能库即权限清单"的发布物。设计在 docs/12 §3.5 就绪。
+- **需 Fable 评审重点**：
+  1. **gate.py 是否真是唯一入口**——后续任何远程代码都必须过它（连接器不做安全判断）。
+  2. 混合取证的安全闭环：未授权远程是否真的退到粘贴而非降级执行（对抗已测，请抽查）。
+  3. overlay 红线边界：是否还有能绕过"不碰树"的注入面（params 值已 T-3，其余枚举值待核）。
+  4. cred.py 的"不存在(None) vs 无法解锁(CredError)"区分是否带来 UX 困惑。
+  5. network 连接器配置提示符兜底是否够严（enable/system-view 拦截是黑名单，偏被动）。
+- **给发起人的下一步**：验收两条线（docs/10 第五/六章走查）；I-4 待有真实 sshd 环境再做；
+  社区发布物（registry/网站）本轮未动，如需重新投影可再触发构建。
+
 ---
+
+## 历史状态存档（第十三轮，H 系列）
+
+- **阶段**：第十三轮（H 系列：上线冲刺 200）完成——205 Skill / 205 sim_verified / 0 draft。
+  规模 141→205（+64），四回滚类型 sim 往返补全，diagnose 噪声地板，registry/网站发布上线。
+- **更新时间**：2026-07-16。详见 git log（[H-0]..[H-7]、[H-push] 批次提交）。
 
 ## 历史状态存档（第十二轮，G 系列）
 
