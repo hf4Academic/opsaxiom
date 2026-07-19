@@ -94,8 +94,9 @@ class Credential:
         raise AccessError("凭证对象禁止序列化（R-A2）")
 
 
-def resolve(target: dict) -> Credential:
-    """凭证引用 → 凭证对象。P0 三种零配置来源；keyring 由 P1 的 cred.py 注入。"""
+def resolve(target: dict, master=None) -> Credential:
+    """凭证引用 → 凭证对象。P0 三种零配置来源；keyring 由 P1 的 cred.py 提供。
+    master：keyring 走降级加密文件时的解锁口令（OS keyring 时忽略）。"""
     auth = str(target.get("auth", "ssh_config"))
     if auth == "agent":
         sock = os.environ.get("SSH_AUTH_SOCK")
@@ -117,6 +118,12 @@ def resolve(target: dict) -> Credential:
             raise AccessError(f"auth: {auth} 指向的文件不存在")
         return Credential("file", path=str(p))
     if auth.startswith("keyring:"):
-        # P1（I-6）实现 cred.py 后在此接线；语法已合法，给出可行动的提示
-        raise AccessError(f"keyring 凭证需要先存入：opsaxiom cred set {auth[8:]}（P1，见 TODO I-6）")
+        import cred
+        try:
+            fields = cred.get_cred(auth[8:], master=master)
+        except cred.CredError as e:
+            raise AccessError(str(e)) from e
+        if not fields:
+            raise AccessError(f"keyring 里没有凭证 {auth[8:]}——先 opsaxiom cred set {auth[8:]}")
+        return Credential("keyring", **fields)
     raise AccessError(f"未知 auth 引用：{auth}")
