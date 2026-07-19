@@ -27,6 +27,7 @@ import runtime         # noqa: E402
 import evidence        # noqa: E402
 import sweep           # noqa: E402
 import linkbook        # noqa: E402
+import overlay         # noqa: E402
 from facts import FactStore, LOCAL  # noqa: E402
 
 _BADGE = {"draft": "⚪草稿", "sim_verified": "🔵已验证",
@@ -57,6 +58,7 @@ class Hypothesis:
         self.used_cmds = []           # 干跑消费过的命令（供证据引用回溯）
         self.missing = None           # 证据不足时：还差哪条命令
         self.pending = None           # 诊断确立后的待办：{"kind":"ask|action","node","prompt"}
+        self.overlay = None           # 个人叠加层（docs/13）；None=无
 
     @property
     def name(self):
@@ -82,7 +84,18 @@ class Incident:
     # ---- 陈述 → 候选假设 ----
     def add_hypotheses(self, skill_dicts):
         for s in skill_dicts:
-            self.hyps.append(Hypothesis(s, self.params))
+            h = Hypothesis(s, self.params)
+            # 叠加个人 overlay：本地参数并入（填 source:local 占位符），
+            # 节点注记留待卷宗展示。overlay 不碰树，只补值/贴注记（docs/13）。
+            try:
+                ov = overlay.load(s["metadata"]["id"])
+            except overlay.OverlayError:
+                ov = None                      # overlay 违规不阻塞排查，静默跳过（doctor 里报）
+            if ov:
+                h.overlay = ov
+                for k, v in overlay.local_params(ov).items():
+                    h.params.setdefault(k, v)
+            self.hyps.append(h)
         self._t("hypotheses", ids=[h.meta["id"] for h in self.hyps])
         return self
 
@@ -223,8 +236,17 @@ class Incident:
                 "status": h.status, "conclusion": h.conclusion,
                 "terminal": h.terminal, "missing": h.missing,
                 "pending": h.pending,
-                "evidence": self._evidence_for(h, now=now)})
+                "evidence": self._evidence_for(h, now=now),
+                "overlay_note": self._overlay_note(h)})
         return buckets
+
+    @staticmethod
+    def _overlay_note(h):
+        """假设终点节点上的个人注记（📌 展示行），无则空串。"""
+        if not h.overlay or not h.terminal:
+            return ""
+        node_id = h.terminal.split(":", 1)[-1] if ":" in h.terminal else h.terminal
+        return overlay.render_note(overlay.note_for(h.overlay, node_id))
 
     def render_dossier(self, now=None):
         d = self.dossier(now=now)
@@ -242,6 +264,9 @@ class Incident:
                     out.append(f"       → 待处置: {it['pending']['prompt']}")
                 if it["missing"]:
                     out.append(f"       还差: {it['missing']}")
+                if it.get("overlay_note"):
+                    for ln in it["overlay_note"].splitlines():
+                        out.append(f"       {ln}")
         mark, label = "✔", "已证实"
         _ev(d[CONFIRMED])
         mark, label = "✘", "已排除"
