@@ -151,7 +151,11 @@ feedback:
 本节是规范的一部分**——新写的 Skill 应按此准备，校验器升级后旧 Skill 统一迁移。
 
 ### 7.1 变量声明（裁决 R-1：采纳）
-- `metadata.params`: `[{name, source: alert|user|derived, desc}]` —— Skill 入参声明。
+- `metadata.params`: `[{name, source: alert|user|derived|local, desc}]` —— Skill 入参声明。
+  `local` = 值由使用者本地提供（overlay/本地配置，见 docs/13），如内部大盘地址、
+  内网镜像域名。渲染进命令前与其它来源同样过 T-3 注入防护（语法树 + shell 元字符拒绝）。
+  声明 `source: local` 的参数缺值时：该 check 降级为导航档粘贴块并提示补 overlay，
+  不阻塞整个 Skill。
 - `ask` 节点新增必填 `binds: <varname>`（无产出的 ask 允许 `binds: null`）。
 - 变量合法来源 = `facts ∪ discovery.<id> ∪ params ∪ ask.binds ∪ builtin{sid}`。
 - 迁移完成后 **S9 升为 ERROR**。
