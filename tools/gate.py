@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -46,13 +47,39 @@ def is_authorized(target_name):
     return sweep.is_trusted(target_name)
 
 
-def _readonly_ok(connector, cmd):
+# network 只读动词（首词）——配置/提权类一律不放行，即使前缀碰巧匹配
+_NET_READONLY_LEAD = {"show", "display", "help", "get"}
+_NET_FORBIDDEN = re.compile(
+    r"\b(enable|configure|conf t|system-view|commit|copy|write|erase|delete|"
+    r"reload|shutdown|no |undo |set |edit|request|clear)\b", re.IGNORECASE)
+
+
+def _network_readonly(platform, cmd):
+    """network 只读判：首词是只读动词 + 语法库前缀白名单 + 无配置/提权词。"""
+    lead = cmd.strip().split()[0].lower() if cmd.strip() else ""
+    if lead not in _NET_READONLY_LEAD:
+        return False
+    if _NET_FORBIDDEN.search(cmd):
+        return False
+    import syntax_check
+    # 前缀白名单（S6 同源）：非 ERROR 即匹配了已知合法只读前缀
+    return not syntax_check.check_command(platform, cmd)
+
+
+def _http_readonly(method):
+    """http 只读判：方法必须是 GET。"""
+    return str(method).upper() == "GET"
+
+
+def _readonly_ok(connector, cmd, target=None):
     """按 connector 类型判只读。ssh/kubectl 复用 _is_readonly（同一套白名单）。"""
     if connector in ("ssh", "kubectl"):
         return _is_readonly(cmd)
-    if connector in ("network", "http"):
-        # I-5 接线；在此之前这两类不放行，避免出现"未过白名单就执行"
-        raise GateError(f"connector={connector} 的只读闸门尚未接线（见 TODO I-5）")
+    if connector == "network":
+        platform = (target or {}).get("platform", "cisco_ios")
+        return _network_readonly(platform, cmd)
+    if connector == "http":
+        return _http_readonly(cmd)            # 这里 cmd 实为 HTTP 方法
     raise GateError(f"未知 connector：{connector}")
 
 
@@ -91,9 +118,10 @@ def run_remote(target_name, cmd, *, params=None, targets=None,
     # 2. 授权
     if not is_authorized(target_name):
         deny(f"目标 {target_name} 未授权自动执行——先 opsaxiom target grant {target_name}")
-    # 3. 只读白名单
+    # 3. 只读白名单（http 传方法，其余传命令）
     try:
-        ok = _readonly_ok(conn, cmd)
+        ok = _readonly_ok(conn, (params or {}).get("method", "GET") if conn == "http" else cmd,
+                          target=t)
     except GateError as e:
         deny(str(e))
     if not ok:
@@ -122,4 +150,10 @@ def _default_connector(connector):
     if connector == "ssh":
         from connectors import ssh_conn
         return ssh_conn.exec_readonly
-    raise GateError(f"connector={connector} 尚无真实实现（见 TODO I-5）")
+    if connector == "network":
+        from connectors import network_conn
+        return network_conn.exec_readonly
+    if connector == "http":
+        from connectors import http_conn
+        return http_conn.get_readonly
+    raise GateError(f"connector={connector} 尚无真实实现")

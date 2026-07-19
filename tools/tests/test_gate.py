@@ -85,13 +85,3 @@ def test_denials_are_audited(tmp_path, monkeypatch):
         gate.run_remote("web-01", "rm -rf /", connector_fn=fn, now="T")
     rec = json.loads((tmp_path / "audit" / "remote.jsonl").read_text().splitlines()[-1])
     assert rec["decision"] == "deny"                 # 被拦的写命令也留痕（安全事件）
-
-
-def test_network_connector_not_wired_yet(tmp_path, monkeypatch):
-    monkeypatch.setenv("OPSAXIOM_HOME", str(tmp_path))
-    (tmp_path / "targets.yaml").write_text(yaml.safe_dump({"targets": {
-        "sw": {"connector": "network", "host": "10.1.1.1", "auth": "keyring:sw"}}},
-        allow_unicode=True), encoding="utf-8")
-    (tmp_path / "trust.yaml").write_text(yaml.safe_dump({"auto_exec": ["sw"]}))
-    with pytest.raises(gate.GateError, match="I-5"):
-        gate.run_remote("sw", "display version")
