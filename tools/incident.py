@@ -26,6 +26,7 @@ import exprlang        # noqa: E402
 import runtime         # noqa: E402
 import evidence        # noqa: E402
 import sweep           # noqa: E402
+import linkbook        # noqa: E402
 from facts import FactStore, LOCAL  # noqa: E402
 
 _BADGE = {"draft": "⚪草稿", "sim_verified": "🔵已验证",
@@ -250,7 +251,14 @@ class Incident:
         out.append("──────────────────────────────────────────")
         if not d[CONFIRMED]:
             out.append("  未证实任何假设。见下方移交卷宗，可转人工/强模型接手。")
+        line = linkbook.render_line(self._taxonomies())
+        if line:
+            out.append(line)
         return "\n".join(out)
+
+    def _taxonomies(self):
+        """本次 incident 涉及的所有 taxonomy（供 linkbook 聚合，个人展示层）。"""
+        return [h.meta.get("taxonomy", "") for h in self.hyps if h.meta.get("taxonomy")]
 
     def next_action(self):
         """若有假设收敛到 action，返回 (skill_path, node_id) 供 runtime 接管处置。"""

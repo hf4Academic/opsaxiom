@@ -1,0 +1,16 @@
+# 个人排查网页台账示例（docs/13 §1）
+# 放到 ~/.opsaxiom/linkbook.yaml 即生效。按 taxonomy 前缀挂你家的内部网页，
+# 排查时自动带出"📌 你的相关页面"。纯本地、纯展示——不进决策树、不进命令、
+# 不会被推送到社区（--share 导出时自动剥离）。
+links:
+  middleware/mysql:                 # 命中该前缀的所有 Skill / incident
+    - name: MySQL 慢查询大盘
+      url: https://grafana.corp/d/mysql-slow
+    - name: 数据库值班表
+      url: https://wiki.corp/db-oncall
+  k8s:                              # 整个 k8s 域
+    - name: 集群总览
+      url: https://grafana.corp/d/k8s-overview
+  "*":                             # 全局：任何排查都显示
+    - name: 事件通报群指引
+      url: https://wiki.corp/incident-howto
