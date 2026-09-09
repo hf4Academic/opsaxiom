@@ -372,3 +372,109 @@ hardware_exit done 写法），G-3 保持纯 Diagnostic，得以 sim_verified。
   systemd-unit-failed(restart)、clock-drift(timesync restart)、
   k8s.release.rollback(kubectl rollout undo transaction)、bgp.neighbor-down(配置类)。
   待 Fable 决定：是否为 restart/transaction 类回滚补 mock 回放器（新回滚模式=Fable 设计，B13）。
+
+## B 轮收尾（Opus，第十七轮，待 Fable 评审）
+
+**v2 档位真机两档全验证通过**（白名单档/root 档/没通道不给假 root 三场景，见 HANDOFF
+第十七轮），验证途中暴露并修复 8 项。以下是要点与需 Fable 复核的判断：
+
+1. **失败探针转贴回的信任边界**：自动执行失败/超时的探针按 cmd 并入手动桶走 nonce
+   贴回——错误输出（如部分超时后远端已产生的stdout 残段）不会入事实库（连接器
+   异常路径直接 raise，无 stdout），但**贴回内容本身**依然是"人在真机跑的"同一
+   信任级别，nonce 防伪造边界不变。请复核"失败转贴回"是否引入把别的命令输出
+   贴错位置的新混淆面（现状：贴回 UI 每条单独显示命令行，OnTrack）。
+2. **SSHConnectError 边界**：ssh_conn 用 `connected` 标志位区分 connect 前/后
+   失败。banner reset 恰好发生在 connect 成功后、exec 前——归"连接失败"是刻意的
+   （ hadn't started executing）。若 Fable 认为应以 exec_command 调用为界，改一行。
+3. **fail-fast 条件**：全部探针失败 且 全部为连接级失败 且 manual 桶为空 → 短路。
+   连接级判定靠错误文本含"连接"——脆弱（异常消息改文案会失灵），待 Fable 定夺
+   是否升级为结构化 status（error 报告加 `err_kind: connect|timeout|exec`）。
+4. **paramiko 全局日志静音**（连接器 import 即 CRITICAL）：影响面是"任何 import
+   ssh_conn 的进程"——如果未来需要在排障时看 paramiko 内部日志，需要临时开关。
+5. **registry 同步纪律**（流程教训，建议固化）：修 skill 探针必须同时改仓库存档
+   与 ~/.opsaxiom/hub/registry（独立 git 仓库）两份——本轮 inode-exhausted 上轮
+   漏修 + registry 未同步，真机暴露。是否在 docs/07 生成规范里立条？
+
+## B 轮全量修复清单（对账）
+
+df -i --output 互斥（仓库+registry 双修，inode-exhausted 是上轮漏网）；批量路径
+白名单授权问答；提示语按目标去重；socket.timeout 空 str 兜底（连接器/审计/sweep
+三处）；失败探针转贴回 + 连接级全灭 fail-fast；连接器异常 decision=error 审计；
+paramiko traceback 静音；SSHConnectError/SSHError 分类；弃用告警入口过滤；
+target list os 列 + grant/revoke picker 过滤。全部带测试，789 passed。
+
+## 十七轮 Fable 返工对账（Opus，待 Fable 复核）
+
+Fable 评审裁定"暂缓合并"附 3 返工 + 2 P2 补账，已全部执行（分支待合并）：
+- **B-1（P0，已修）**：enroll 渲染 sudoers 把 (bin, prefix) 降成裸名 → 前缀全丢
+  （`sudo -n systemctl restart nginx` 物理可达）。修复：gen_sudoers 复合型二进制
+  （systemctl/journalctl/ip 等 _COMPOSITE_LEAD）只按已登记子命令/flag 前缀发条目
+  （`bin p *` + `bin p` 双形态，sudoers fnmatch 语义），裸名仅限单用途二进制；
+  复合型裸探针零条目 fail-closed；enroll/target_cli/gate._wl_member 全链路
+  (bin,prefix) 同源（客户端成员判定 = 远端 sudoers，互证测试
+  test_wl_member_prefix_mirror_matches_sudoers + 裸 systemctl 物理不在场回归）。
+- **裁定 3（P1，已修）**：err_kind 结构化（connect/timeout/exec 按异常类，
+  gate.err_kind 弃"错误文本含'连接'"）——gate/sweep 报告带 err_kind，
+  repl fail-fast 按【目标×err_kind 聚合】判定死目标（全部 connect 才短路，
+  活目标照常贴回）。对抗测试：rc 级失败 err 含"连接"→ err_kind=exec 不短路；
+  双目标 web-01 全灭（短路）+ web-02 rc 级含"连接"（照常贴回入库）。
+- **docs/07 T 补账（P2，已落笔）**：T-3（F-16 元字符）/T-4（F-17 出站文本）
+  八轮裁决欠账 + 新 T-5（错误分类结构化）/T-6（registry 同步纪律，回应"是否立条"）。
+- **发起人裁定（cat/grep）**：白名单语义=写侧焊死、读侧全盘（sudo -n cat 可读
+  root 文件属接受范围），cat/grep 保留不移——白名单的价值在防写不在防读。
+- **P2 未做**：_DENY 写动词补 systemctl/ip 子命令（黑名单补刀，白名单+前缀门后
+  收益边际，Fable 认可延后）。
+
+## 十七轮二轮返工对账（Fable 复核 F-19~F-23 后，Opus 执行，待 Fable 复核）
+
+Fable 复核 17-RW（commit 0496d02）裁定"暂缓合并"，5 项返工已全部执行：
+- **F-19（P0，已修，语义升级 v3）**：flag 前缀条目结构性禁止——flag 与命令词
+  正交，`systemctl --failed *` 挡不住 `--failed restart`。复合型二进制只认
+  gen_sudoers._RO_COMPOSITE_SUBCMDS 登记的【只读子命令】作前缀
+  （systemctl is-active/status/show；timedatectl status/show；networkctl
+  status/list；nvidia-smi dmon/topo），flag/裸名/名单外语义全部 fail-closed。
+  代价（发起人确认）：journalctl -u（5 skill）/systemctl --failed（1）/
+  ip neigh（arp-table-full 部分）/nvidia-smi flag 型（~24 条）转贴回或升 root 档。
+- **F-23（P1，已修）**：numactl/taskset/chrt 等"策略+任意命令"执行器并入
+  _INTERPRETERS 硬拒；sysctl/nvidia-smi/smartctl/chronyc/coredumpctl 等裸名
+  写面入 _DENY_BINS（sysctl -w/GPU reset/删核转储不再物理可达）。nvidia-smi
+  归复合型只放行 dmon/topo 纯观察子命令，query 形态 fail-closed。
+- **F-18（P1，已修）**：-u skip 表删除（连带 sudo 变体 skip 一并撤）；_wl_member
+  重写为 (target 精确二段) 判定 + 消费 extract 产物（不再手写镜像），
+  startswith 宽松 fallback 删除；对称性测试双向断言
+  （客户端 True ⟺ sudoers fnmatch 命中）。
+- **F-20（P1，已修）**：test_b1_write_subcommand_physically_absent 重写——按
+  段解析 spec（基名+第二段白名单），渲染带 bin_paths + 预览双形态；新增
+  test_b1_gate_has_teeth 把 B-1 缺陷条目掺回渲染输入验证断言必炸。
+- **F-21（P1，已修）**：repl failed_cmds 键从 cmd 单键改 (target, cmd) 二元组，
+  already 集合循环内收敛（done.add）；测试改三件套（贴回盘问次数=1/入库
+  target=web-02/貼回调用清单精确断言），恒真断言删除。
+- **F-22（P2，已修）**：err_kind 死条目清除（socket.timeout 类名为 timeout、
+  NetworkDownError 无定义者）；network 统一归 exec 的"有意保守"口径写入
+  err_kind docstring 与 docs/07 T-5。
+- **F-24/F-25/F-27（P2，Fable 二轮，已随手修）**：测试名单改 gen_sudoers 派生
+  （F-24）；对称性近似函数补"裸名条目=任意参数"支路（sudoers(5) 手册语义，
+  F-25）；flock/nsenter/unshare/setpriv/capsh/machinectl 入 _INTERPRETERS
+  防御纵深（F-27）。近似函数教训补入 T-6。
+- **F-26（P2，发起人裁定收窄，已执行）**：mount/conntrack/kafka-topics.sh 入
+  _DENY_BINS（2026-09-09）——裸名条目=任意参数含写动作（挂任意盘/删状态表/
+  写 Kafka），物理面关闭；自动路径不变（本就被客户端拦）；相关 skill 探针
+  白名单档转贴回。回归测试 test_f26_write_face_bins_never_whitelisted。
+- 真机回归清单（对应 HANDOFF 待办①）新增一条：`sudo -n systemctl --failed
+  restart nginx` 须被远端拒（F-19 专属探针）。
+
+## 十七轮真机回归暴露（2026-09-09，高等云肆重开通实测）
+
+- **F-28（P1，已修）**：运行时执行门只读名单第三镜像分叉。真机白名单档批量
+  取证实曝：`iotop -b … \|\| pidstat` 被执行门以"写/非只读命令"误拒——路由层
+  `_wl_member` 吃 registry extract 产物（同源 ✓），执行门 `_readonly_ok` 却
+  复用 sim/run_sim._ALLOW_LEAD 手写动词表（15 个 registry 收录命令缺席：
+  iotop/numastat/getent/tail/top/getenforce/ibstat/perfquery/squeue/
+  nstat/slabtop/pgrep/timedatectl/systemd-detect-virt/kafka-broker-api-versions.sh）。
+  修复守 T-6：gen_sudoers 新增 lead_tokens（形态解析与硬拒过滤分离），
+  gate 新增 _runtime_ro_leads() = registry 白名单 ∪ sim._ALLOW_LEAD 派生
+  （不手抄），_readonly_ok 改吃派生名单；kubectl/mount 语义特判与 _DENY
+  写词照旧。回归：test_runtime_gate_allows_registry_whitelisted_probes +
+  test_runtime_ro_leads_consumes_registry_not_mirror（并集联动断言）。
+  教训：T-6 的"镜像"范畴从测试助手扩到【任何消费方之外的名单拷贝】——
+  运行时执行门自己的手写动词表同样是镜像。
