@@ -101,22 +101,23 @@ class Repl:
         verified = sum(1 for s in self.idx if s["maturity"] != "draft")
         print(f"OpsAxiom v0.1 · {len(self.idx)} 个 Skill（{verified} 已验证）")
         print("欢迎使用 OpsAxiom，您可以通过我：")
-        print("1. 诊断运维问题：")
+        print("1. 问题诊断：")
         print("     <直接描述症状>  匹配 skills 并执行")
         print("     run <id>         执行指定 skill")
-        print("2. 浏览 skills 资产：")
+        print("2. 技能资产：")
         print("     list [域]        查看全部 skills，可后缀指定域")
         print("     search <关键词>   搜索 skills")
         print("     info <id>        查看指定 skill 详情")
         print("     sync             手动同步社区 Skill（系统 24h 自动）")
-        print("3. 配置参数信息：")
+        print("3. 配置设置：")
         print("     doctor           环境自检")
+        print("     update           自更新：代码→依赖→Skill 库→自检")
         print("     overlay <id>     为指定 skill 生成个人叠加层")
         print("     model            配置大模型")
         print("     target           接入设备管理")
         print("     cred             本地凭证管理")
         print("     auth             GitHub 个人 token（社区贡献用）")
-        print("4. 贡献社区资产：")
+        print("4. 社区贡献：")
         print("     sug              异常提报（向社区提 issue）")
         print("     new              从零创建 skill 草稿")
         print("     fork             从已有 skill 派生修改")
@@ -969,17 +970,66 @@ class Repl:
         self.last_incident_swept = True
 
     def _offer_treatment(self, inc):
-        for h in inc.hyps:
-            if h.status == I.CONFIRMED and h.pending:
-                print(f"  → 处置：run {h.meta['id']}"
-                      f"（进入导航档执行变更，变更简报/审批门/verify 不变）")
-                return
-        if all(h.status != I.CONFIRMED for h in inc.hyps):
-            print("  未证实任何假设。输入 report 导出移交卷宗，转人工/强模型接手。")
-            if self.model_cfg is not None:           # escalate 助理：只荐库内 id（R8/R10）
-                sid = llm.suggest_skill(inc.handover(), self.idx, config=self.model_cfg)
-                if sid:
-                    print(f"  → 模型建议再看：run {sid}（库内 Skill，徽章以库为准）")
+        """回流点②（发起人口径 2026-09-09）：可处置假设全部列出让用户选——
+        默认项（第一个）直接回车执行，或指定序号；续接路径透传 inc.store 进
+        v1（Session facts 槽，TTL 内事实优先复用不重跑）。普通 run <id> 仍走
+        原逻辑重新收集，不受影响。"""
+        pending = [h for h in inc.hyps
+                   if h.status == I.CONFIRMED and h.pending]
+        if not pending:
+            if all(h.status != I.CONFIRMED for h in inc.hyps):
+                print("  未证实任何假设。输入 report 导出移交卷宗，转人工/强模型接手。")
+                if self.model_cfg is not None:       # escalate 助理：只荐库内 id（R8/R10）
+                    sid = llm.suggest_skill(inc.handover(), self.idx, config=self.model_cfg)
+                    if sid:
+                        print(f"  → 模型建议再看：run {sid}（库内 Skill，徽章以库为准）")
+            return
+        # 列出全部可处置假设，用户选一个接续进 v1（证据随 store 交接）
+        print("  可处置的诊断：")
+        for i, h in enumerate(pending, 1):
+            print(f"  {i}) {h.meta['name']}  ({h.meta['id']})")
+            print(f"     {h.pending['prompt'][:80]}")
+        label = "回车执行第 1 项，或输入序号选择（q 跳过）: "
+        try:
+            sel = input(f"  {label}").strip()
+        except (EOFError, KeyboardInterrupt):
+            sel = "q"
+        if sel.lower() in ("q", "q!", "q！", "n", "no", "否", "skip", "跳过"):
+            print("  已跳过处置。可随时 run <id> 手动接续。")
+            return
+        pick = 1
+        if sel.isdigit() and 1 <= int(sel) <= len(pending):
+            pick = int(sel)
+        h = pending[pick - 1]
+        self._run_treatment(h, inc)
+
+    def _run_treatment(self, h, inc):
+        """续接进 v1 处置：复用 batch 已采集证据（facts + target 原样透传）。
+        与普通 run <id> 的差别只在事实库持有——导航档语义（方案/简报/审批门/
+        verify）完全不变。"""
+        p, s = _find_skill(h.meta["id"])
+        if not p:
+            print(f"  没有这个 Skill：{h.meta['id']}")
+            return
+        io = runtime.IO(answers=None, echo=True)
+        def _routed_remote(cmd, pr=None):
+            try:
+                return gate.run_remote(self.remote_target_name, cmd, params=pr)
+            except gate.GateRemoteNotAllowed as e:
+                raise runtime.RemoteNotAllowed(str(e)) from e
+        remote_runner = _routed_remote if self.target_mode == "remote" else None
+        sess = runtime.Session(p, params=h.params, mode="guided", io=io,
+                               sid=h.meta["id"].replace(".", "_") + "-repl",
+                               remote_runner=remote_runner,
+                               facts=inc.store, facts_target=inc.target)
+        print(f"\n进入：{h.meta['name']}（导航档，已带 {len(inc.store.evidence())} 条已采集证据）")
+        try:
+            res = sess.run()
+        except KeyboardInterrupt:
+            print("\n  ⏸ 已中断本次处置（进度已存）。输入 resume 可续跑。")
+            return
+        if res["outcome"] == "quit":
+            print("  已退出本次处置（进度已存，输入 resume 续跑）。")
 
     # ---------- 远程取证 ----------
     _wl_notice_shown = None          # 白名单档提示每目标只打一次（execute_mixed 每探针查授权）
@@ -1133,9 +1183,13 @@ class Repl:
         sub = ap.add_subparsers(dest="cmd")
         for mod, fn in (("doctor", "add_doctor"), ("capture_cli", "add_capture"),
                         ("hub_cli", "add_hub"), ("model_cli", "add_model"),
-                        ("target_cli", "add_target")):
+                        ("target_cli", "add_target"), ("update", "add_update")):
             try:
                 m = __import__(mod)
+                # REPL 内自检的收尾语按场景分岔（doctor/update 收到 in_repl 才换话术）
+                if mod in ("doctor", "update"):
+                    getattr(m, fn)(sub, in_repl=True)
+                    continue
                 getattr(m, fn)(sub)
             except Exception:
                 pass
@@ -1207,7 +1261,7 @@ class Repl:
             self._sweep_incident(); return
         if head == "report":
             self._report(); return
-        if head in ("doctor", "hub", "record", "skill", "model", "target"):
+        if head in ("doctor", "hub", "record", "skill", "model", "target", "update"):
             self._delegate(parts)
             if head == "model":                     # 配置可能变了，热重载
                 try:

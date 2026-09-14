@@ -478,3 +478,138 @@ Fable 复核 17-RW（commit 0496d02）裁定"暂缓合并"，5 项返工已全�
   test_runtime_ro_leads_consumes_registry_not_mirror（并集联动断言）。
   教训：T-6 的"镜像"范畴从测试助手扩到【任何消费方之外的名单拷贝】——
   运行时执行门自己的手写动词表同样是镜像。
+
+## 回流点②收官（Opus，2026-09-09，发起人口径落地，待 Fable 复核）
+
+批量取证→确认假设→续接 v1 处置的证据交接落地，交互口径=发起人 2026-09-09 拍板：
+
+- **repl._offer_treatment 重写（P0）**：可处置（CONFIRMED+pending）假设**全部列出**
+  让用户选——回车=默认第 1 项，序号=指定项，q/否=跳过并提示可手动 run <id>。
+  修复原实现 return-早退只提第一条的静默缺陷（原 repl.py:972）。
+  回归 4 件：全量列出断言/序号选择/q 跳过/Session 持库断言（test_repl.py）。
+- **repl._run_treatment 新增（P0）**：查 skill → 构造 Session 时 `facts=inc.store,
+  facts_target=inc.target` 原样透传（与普通 run <id> 的唯一差别是事实库持有；
+  导航档语义——方案/简报/审批门/verify——完全不变）。
+- **runtime.Session facts 槽（P0）**：新增 `facts`/`facts_target` 槽 +
+  `_facts_hit`（走 FactStore 公共 API get_parsed；库异常不阻塞，退常规采集）+
+  `_absorb_parsed`（镜像 _parse_into_ctx 并入规则，但跳过再解析）。
+  `_do_check` 采集前先查库：命中→复用产物灌 ctx（audit 带 reused=true），
+  过期→诚实重采（宁可重采不给旧值）。
+  回归 2 件：TTL 内命中跳过粘贴（paste 被调用即炸）+ TTL 过期不复用（test_runtime.py）。
+- **普通 `run <id>` 路径不变**：不带 store，行为与之前一致（重新收集）。
+- 测试：**818 passed / 5 skipped**（本轮 +4）。
+
+## #12 opsaxiom update 落地（Opus，2026-09-09，待 Fable 复核）
+
+- **tools/update.py 新增**：四步时序 ① git pull --ff-only（非 git 检出面/
+  未配远程 → 干净跳过 rc=0；真失败红停并列手动处理提示）② 依赖哈希检测
+  （tools/requirements.txt sha256 vs .venv/deps.sha256，变了才 pip 重装并落
+  新哈希；pip 失败🟡不阻断，doctor 报影响面）③ hub sync（离线🟡降级提示）
+  ④ doctor 收尾（必需项红 → 更新退出码非 0）。
+- **接线**：tools/bin/opsaxiom 子命令注册（try-import 风格同邻）；repl
+  _delegate 分发 + _welcome 菜单【3. 配置设置】doctor 之下加 update 行
+  （发起人补充口径 2026-09-09）。
+- **实机验证**：本仓库两连跑——首跑"代码已是最新 / 依赖有更新，重装 / 库已同步
+  205 / doctor 绿 rc=0"；二跑确认哈希落盘生效（"依赖未变化，跳过重装"）。
+- **测试 +12**（tools/tests/test_update.py）：pull 三支路（非 git 跳过/未配远程
+  跳过/真失败透传 rc）、哈希往返与缺失文件、时序失败即停（git 红停不触 hub）、
+  pip 失败不阻断（hub 照常同步 + doctor 照常收尾）、hub 离线降级、真 git 仓库
+  端到端绿。
+- 设计取舍：更新=本地 git pull（用户面向"更新到最新"），不发明升级协议；
+  重装检测按 requirements 哈希（诚实：变没变文件的字节说了算，不猜提交号）。
+
+## #13 气隙离线包落地（Opus，2026-09-10，真机/真气隙验证，待 Fable 复核）
+
+- **pack-offline.sh 新增**（有网机打包）：仓库全量快照（不含 .venv/.git/本地产物）
+  + `vendor/wheels/linux_x86_64/`（pip download --platform manylinux2014_x86_64，
+  cp39，23 wheel ≈10M）+ registry 快照（205 Skill）+ 可选 `--with-model`（默认不打，
+  发起人裁定保持轻量）。产物尾部打印目标机安装操作 + Python ≥3.9 前置自查提示。
+- **install.sh --offline 三处补实**：① Python <3.9 红停（wheels 按 3.9+ 收集，
+  上游停发 3.8 编译 wheel；提示改用 python3.9+）② 非 Linux 红停（包只含
+  linux_x86_64，发起人裁定 2026-09-10 单平台——Mac 开发机在线装）③ registry
+  快照接入改走 `opsaxiom hub init`（原内联 python -c 有 SyntaxError 被吞，
+  真气隙实测暴露后修复）+ 离线模式跳过在线 hub sync。
+- **平台裁定的变更**：最初方案"两平台含 macos_arm64"，验证中发现本机是 Intel
+  Mac（此前口径假设 Apple Silicon），发起人改裁定：**离线包只做 linux_x86_64**
+  （气隙目标机=Linux 服务器），Mac 在线装。
+- **验证闭环（python:3.9-slim 容器，`--network none` 物理断网）**：
+  install_rc=0，依赖全走包内 wheels（Looking in links: vendor/wheels/linux_x86_64），
+  registry 快照就位，doctor 必需项全绿（黄项仅连接器），`hub search disk`
+  离线可查（sim_verified 徽章照常）。红停分支实测：Py3.8 → 版本红停；
+  macOS → 平台不适用红停。
+- 文档：docs/10 离线安装三步 + 前置自查写入第一章安装表；.gitignore 加
+  pack-output/（发布物不进 git）。
+
+## 真机白名单档两档回归（Opus，2026-09-10，高等云肆，全部通过）
+
+对应十七轮返工后的真机回归清单（HANDOFF 待办①），机器 223.193.41.38（Port 32147）。
+
+- **物理面（不动 OpsAxiom，纯远端验证）**：
+  - `visudo -c`：/etc/sudoers.d/opsaxiom-ro parsed OK。
+  - `sudo -ln -U opsaxiom-ro` 实际清单与 gen_sudoers v3 预期逐条一致：
+    systemctl/timedatectl 各只读子命令双形态（`bin p *` + `bin p`）、
+    零复合型裸名、零 flag 前缀条目、journalctl/find/mount 物理不在场。
+  - **F-19 负探针被拒**：`sudo -u opsaxiom-ro sudo -n systemctl --failed
+    restart nginx` → "sudo: a password is required"（无 NOPASSWD 匹配）；
+    journalctl -u / find 同拒；正探针 `systemctl is-active sshd` → active 放行。
+- **运行面（真实 mixed_sweep，六探针同源对账）**：
+  - **白名单档**（target revoke 后真跑）：df×3 + dmesg 4 条自动执行
+    （审计 tier=whitelist / exec_as=opsaxiom-ro / via_sudo=True）；
+    for-find 与 mount 2 条落 manual 桶（sudo_routed 判定=False，转贴回）——
+    名单内自动 / 名单外贴回的分流与设计完全一致。
+  - **root 档**（target grant 后真跑）：6 探针全 executed 零手工，
+    审计 tier=root / exec_as=root / via_sudo=False。
+  - revoke→grant 状态机往返真人操作走通；`target list` 档位标签
+    （未授权·白名单 / 剩 N 天·白名单）与实际档位一致。
+- **附带观察（非阻塞）**：
+  - grant 后 `target list` 的"·白名单"后缀在 root 档仍显示——标签语义是
+    "该机有白名单"（机器属性）非"当前档位"，初看易误读（⚪，可改进文案）。
+  - 一次性观察到 df -B1 探针 error 后自愈（重跑 ok，err 未留痕）——
+    疑似网络瞬断，err_kind 分类路径已在 F-21/裁定3 覆盖，未复现，不立案。
+- **销项**：真机白名单回归清单全部完成（HANDOFF 待办① 可销）。
+
+## Fable 评审三批复核（Opus，2026-09-10，#13 打回返工 + #12 返工）
+
+Fable 对抗评审结论：回流点②与 #12 可定案（带小返工），#13 打回——离线装完后
+REPL 主路径（症状匹配）无 Skill 可用。以下按返工点逐条落地，全部实测验证。
+
+**🔴1 registry 实体复制（#13 核心）**：install.sh --offline 弃"hub init 只写指针"，
+改为把 vendor/registry **cp -R 到 $OPS_HOME/hub/registry**（运行时唯一技能源），
+config 指针同步走 hub init（供 hub search/pull 用）。气隙 E2E 升级断言：
+装完 `hub/registry/skills`=205 个、`opsaxiom diagnose "磁盘满了"` 出候选、
+`opsaxiom list host` 非零——3.10 与 3.12 两个容器实测全过。
+
+**🔴2 Py 版本口径落地为 3.9~3.12（发起人裁定"多版本收 wheel"）**：pack-offline.sh
+按 PYVERS="3.9 3.10 3.11 3.12" 各跑一遍 pip download（cffi 在 cp39/cp310+ 解析
+出版本不同，不能复用单份），纯 py/abi3 wheel pip 自动跳过已下载的（实测 42 个
+wheel 并存一桶，25MB）。install.sh 红停口径同步：<3.9 或 ≥3.13 红停（3.8 与
+3.13 容器实测红停文案）；docs/10、pack-offline.sh 尾部提示三处口径一致改
+"3.9~3.12"。错误救命提示同时修正：`python3.x ./install.sh` 是错的（bash 脚本），
+改为 PATH 前置写法。
+
+**🟡3 --with-model 接线**：install.sh --offline 把 vendor/model/*.gguf cp 到
+$OPS_HOME/models/（llm.builtin_model_path 默认查找路径），model use builtin 即用。
+
+**🟡8 docs/10 第一章标题回补**（#c1bbee6 误删，章序列恢复）。
+
+**🟡3 恒真断言重写**：test_order_and_deps_skip 原为 `X or True` 恒真且自我剥除
+时序——重写为 `calls == ["git","deps","hub","doctor"]` 全序断言 + 新增
+test_order_with_deps_pip（pip 支路 `["git","pip","hub","doctor"]`）。
+
+**🟡4 hub sync 失败诚实化**：hubtool.hub_sync 弃 check=False 静默吞失败——
+git pull rc!=0 或网络不可达关键词 → raise RuntimeError，update 侧 🟡 降级文案
+（此前断网也报"已同步 205 个"）。hub_sync raise 行为实测验证（六轮回归直击），
+未加假-registry 单测；hub_cli sync 分支已补 try/except（复核 🟡B）。
+
+**🟡5 git pull 网络失败降级档**：update._git_pull 加网络类报错分支
+（Could not resolve host / Connection timed out / unable to access / 进程异常）
+→ rc=0 "（网络不可达：跳过代码更新）"继续后续步骤；conflict 等真失败仍红停。
+与 #13 的同机场景不再打架。测试 3 条（网络降级/超时异常降级/conflict 红停）。
+
+**⚪⚠7 测试计数修正（T-2 纪律）**：回流点②实际 822/+6（原写 818/+4 为照抄
+未重跑）。本轮全量实跑 **838 passed / 5 skipped**（834 + update 新增 5 - 占位 1）。
+
+**未采纳**：Fable ⚪"macOS 平台红停上提两行"——维持现状（'平台检查放 venv 创建
+后属代码组织 问题，红停文案已明确'，改动收益小于回归成本），待后续轮顺手。
+**打包实测**：42 wheel 24M / tar 25M（原 23 wheel 11M）；3.10/3.12 气隙容器
+install_rc=0 + hub/registry=205 + diagnose 出候选 + doctor 绿；3.8/3.13 红停。

@@ -39,18 +39,57 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
 
 ## 当前状态（由最后工作的模型更新）
 
-- **更新时间**：2026-09-09（十七轮真机回归通过 + F-28，两档全验证）
+- **更新时间**：2026-09-10（Fable 评审三批复核完成：#13 打回项全部返工实测，#12 小返工落地）
 - **更新者**：Opus 4.8（工程实现）
-- **阶段**：**真机两档回归通过（高等云肆 223.193.41.38:32147，Ubuntu 实机）**：
-  ① v3 白名单重开通 31 条落盘/visudo 通过/写面零在场；② sudoers 全绝对路径、
-  systemctl 仅 is-active/show/status 只读形态；③ 对抗探针（systemctl --failed
-  restart / mount / sysctl -w / journalctl -u / numactl -H）ro 账号下全部
-  rc=1 拒绝，正向 is-active/df rc=0；④ 白名单档批量取证正确分流（mount 贴回=
-  F-26 生效）；⑤ grant 后 root 档全自动（audit tier=root/exec_as=root）。
+- **本轮交付（评审返工批，REVIEW-QUEUE"Fable 评审三批复核"段有完整证据）**：
+  - **🔴 registry 实体复制**：install.sh --offline 把 vendor/registry cp 到
+    $OPS_HOME/hub/registry（运行时唯一技能源；原 hub init 只写指针 → 装完 REPL
+    主路径无 Skill，Fable 打回主因）。气隙 E2E 升级断言：装完 diagnose 出候选/list
+    非零——python:3.10 与 3.12 容器（--network none）实测全过。
+  - **🔴 Py 口径 3.9~3.12**（发起人裁定"多版本收 wheel"）：pack-offline.sh 按四
+    版本各收编译型 wheel（42 wheel 25MB，纯 py/abi3 pip 自动跳过已下载）；
+    install.sh <3.9 / ≥3.13 红停（3.8/3.13 容器实测）；三处文档口径一致。
+    错误救命提示修正（原 `python3.9 ./install.sh` 是 bash 误用 → PATH 前置写法）。
+  - **🟡 #12 三件**：恒真断言重写为真时序断言（+pip 支路）；hub_sync 弃 check=False
+    静默失败，真失败 raise → update 🟡 降级；git pull 网络类报错降级继续、
+    真失败仍红停（气隙机 update 与离线包不再打架）。--with-model 接线到
+    $OPS_HOME/models。docs/10 第一章标题回补。
+  - **⚠ T-2 计数修正**：回流点②实际 822/+6（原写 818/+4 系照抄未重跑）；本轮
+    全量实跑 **838 passed / 5 skipped**。
+- **上上一轮（真机回归，commit 84d219c）**：
+  - 高等云肆（223.193.41.38）物理面 + 运行面全过：visudo parsed OK；
+    `sudo -ln` 与 gen_sudoers v3 预期逐条一致（复合型只读子命令双形态、
+    零裸名、零 flag 前缀、journalctl/find/mount 不在场）；
+    **F-19 负探针被拒**（`systemctl --failed restart nginx` → password required），
+    正探针 is-active 放行。
+  - 运行面 revoke→白名单档（4 自动 tier=whitelist/via_sudo=True，2 名单外落
+    manual）；grant→root 档（6/6 全自动 tier=root）——两档分流与审计逐条对账。
+- **更早（#13 一轮 + #12，存档；#13 已在本轮返工，见顶部）**：
+  - **pack-offline.sh 新增**：仓库快照 + vendor/wheels + registry 快照
+    + 可选 --with-model（+469MB，默认不打）。尾部打印目标机安装操作与
+    Python 前置自查（打包机侧提示，发起人要求）。
+  - **install.sh --offline 补实**：非 Linux 红停；离线模式跳过在线 hub sync。
+  - 首轮真气隙验证（python:3.9-slim 容器 + --network none）过，但验证面止于
+    hub CLI/doctor——REPL 主路径缺口由 Fable 评审指出，本轮返工补实。
+- **上一轮（#12 opsaxiom update）交付**：
+  - **tools/update.py**：四步时序 ① git pull --ff-only（非 git/未配远程→跳过不阻断；
+    真失败红停）② requirements 哈希检测（.venv/deps.sha256，变了才 pip 重装；
+    pip 失败🟡不阻断）③ hub sync（离线🟡降级）④ doctor 收尾（必需项红→更新判失败）。
+  - 接线：tools/bin/opsaxiom 注册、repl._delegate 分发、菜单【3. 配置设置】doctor 下。
+  - 实机验证两连跑（首跑重装+落哈希，二跑跳过）；测试 +12。
+- **上一轮（回流点②收官）交付**：
+  - **repl._offer_treatment 重写**：可处置假设全部列出让用户选（回车=第 1 项/
+    序号/q 跳过），修复原 return-早退只提第一条的静默缺陷。
+  - **repl._run_treatment 新增**：确认假设续接 v1 时 `facts=inc.store,
+    facts_target=inc.target` 透传；导航档语义不变。
+  - **runtime.Session facts 槽**：`_facts_hit` 走 get_parsed 公共 API +
+    `_absorb_parsed` 镜像并入；命中复用（reused=true 入审计）、过期诚实重采。
+  - 普通 `run <id>` 不带 store，路径不变。
+  - **818 passed / 5 skipped**（该轮计数）。
   过程中真机暴露 **F-28**（执行门 _readonly_ok 复用 sim 手写 _ALLOW_LEAD，
   与 registry 名单差 15 命令 → 白名单档 iotop 等被误拒），已修（5704be6，
   gate._runtime_ro_leads = registry ∪ sim 派生，守 T-6），修复后 iotop 探针
-  executed、贴回 2→1 条。814 passed / 5 skipped。
+  executed、贴回 2→1 条。818 passed / 5 skipped。
 - **二轮返工交付（对应 REVIEW-QUEUE"十七轮二轮返工对账"，Fable 复核结论）**：
   - **F-19（P0）白名单 v3**：flag 前缀条目结构性禁止（flag 与命令词正交，
     `--failed *` 挡不住 `--failed restart`）。复合型只认只读子命令白名单
@@ -66,8 +105,8 @@ Fable 设计/评审 → 更新 TODO-opus.md → 【人切换到 Opus 4.8】
     target/贴回调用清单），恒真断言清除。
   - **F-22 err_kind 死条目清除 + network 保守口径注记**（docstring + T-5）。
   - 测试：**813 passed / 5 skipped**（新增牙口锁定与对称性双向断言）。
-- **下一步**：合并 rework-b1-err-kind → main 并 push（回归全对上，条件已满足）。
-  待办（发起人）：#12 opsaxiom update 子命令、#13 气隙离线包。
+- **下一步**：push main（github 不可达， hiccup 连三笔提交待推）→ Fable 复核
+  （回流点②批 + #12 update，REVIEW-QUEUE 末两节）。待办（发起人）：#13 气隙离线包。
 - **十七轮一轮返工交付（已被二轮返工覆盖，存档）**：
   - **B-1（P0）sudoers 前缀闸**：enroll 渲染时 (bin,prefix) 被降成裸名 → 复合型
     二进制（systemctl 等）任意子命令 root 可达。修复四件套：gen_sudoers 复合型
