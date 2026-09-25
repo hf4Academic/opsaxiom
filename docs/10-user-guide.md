@@ -13,7 +13,7 @@
 用      opsaxiom                # ← 就这一个词！进入交互态，敲字说问题即可
           axiom> 磁盘满了但df有空间     # 直接说问题，列出候选
           axiom> 1                      # 输序号，进入逐步排查
-          axiom> help / list / info <id> / resume / doctor / quit
+          axiom> help / list / info <id> / doctor / quit
 沉淀    排查完顺手答一句认证；没走skill就 record；老经验用 skill new
 拿/发   axiom> hub search 磁盘   → hub pull <id>   ；发布 hub push <id>
 体检    opsaxiom doctor         # 红=必修 黄=可用但受限
@@ -102,7 +102,7 @@ axiom> 磁盘满了但 df 显示还有空间 mount=/data
 
 徽章表示验证程度：⚪草稿 · 🔵已验证(仿真) · 🟢实地 · 🟡认证。
 判读全是机器按解析器字段算的，不是模型"看一眼觉得"——**证据不足它就明说还差哪条命令，
-绝不猜着往下走**。若一个都没证实，输 `report` 导出移交卷宗，转人工/强模型接手。
+绝不猜着往下走**。若一个都没证实，输 `report` 可导出卷宗。
 
 > 想一步步自己走老式逐节点排查？输候选序号（如 `1`）仍会进入逐步导航档——保留作兜底。
 
@@ -122,8 +122,8 @@ axiom> 磁盘满了但 df 显示还有空间 mount=/data
   1) 确认，我亲自执行  2) 跳过此步  3) 升级人工  4) 退出会话
 ```
 
-写操作**永远由你亲手执行**，它不代按。选 4 退出后，在 `axiom>` 提示符输 `resume`
-就能从中断处接着来。
+写操作**永远由你亲手执行**，它不代按。任何时候 Ctrl-C 都会取消本轮操作、
+回到命令输入。
 
 **4) 查完，顺手把这次经历沉淀下来（见第三章）。**
 
@@ -269,8 +269,8 @@ opsaxiom target revoke web-01       # 随时收回 → 退回白名单档（名�
 | 给某个 Skill 填内部地址、贴一句提醒 | **overlay** 叠加层 | `~/.opsaxiom/overlays/<skill-id>.yaml` |
 | 真的改某个 Skill 的流程 | **fork** 派生 | `opsaxiom skill fork <id>` |
 
-这些都只在**你本机**，永远不会被推送到社区——分享报告时 `report --share`
-会自动把 📌 注记和内网地址剥掉。
+这些都只在**你本机**，永远不会被推送到社区——分享报告时 `report` 会先问是否脱敏
+（答 y），自动把 📌 注记和内网地址剥掉。
 
 ### 6.1 linkbook：网页台账（最常用）
 

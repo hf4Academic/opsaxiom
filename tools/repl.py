@@ -4,7 +4,7 @@ Terminal REPL —— OpsAxiom 默认交互入口（W-1，docs/08 §4.2a）。
 心智模型：像跟老师傅说话，不像查手册。裸敲 `opsaxiom` 就进来，敲字（说人话）就有反应。
 - 非命令输入 = 症状 → diagnose top-3（自然语言是一等公民）
 - 纯数字 = 选上次候选 → 原地进导航档（复用 runtime.Session，同进程）
-- 少量内置词（可选，不学也能用）：help/list/info/run/doctor/hub/record/resume/quit
+- 少量内置词（可选，不学也能用）：help/list/info/run/doctor/hub/record/quit
 - Ctrl-C 中断当前 Skill 回提示符；空闲再 Ctrl-C/quit 退出。无 TTY 不进 REPL。
 
 REPL 不复制任何业务逻辑：diagnose/run/attest 全走既有模块。
@@ -34,6 +34,12 @@ import run_sim         # noqa: E402  复用 _is_readonly
 
 _BADGE = {"draft": "⚪草稿", "sim_verified": "🔵已验证",
           "field_verified": "🟢实地", "certified": "🟡认证"}
+
+# report 头部"- 结论"的系统提示（#39）：一句人话、限字数；输出过 redact 再进报告
+_REPORT_CONCLUSION_SYS = (
+    "你是运维诊断助手。输入是一轮批量排查的判读结果（JSON）。"
+    "请用不超过80字、面向一线运维的口吻概括：这轮查出的结论是什么、下一步建议。"
+    "不要罗列所有假设，只讲最重要的判断。直接输出正文，不要前后缀。")
 _BUILTINS = {"help", "?", "list", "info", "run", "doctor", "hub", "record",
              "skill", "resume", "quit", "exit", "q", "sweep", "report", "model",
              "sug", "auth", "overlay", "new", "edit",
@@ -268,13 +274,10 @@ class Repl:
                 except gate.GateRemoteNotAllowed as e:
                     raise runtime.RemoteNotAllowed(str(e)) from e
             remote_runner = _routed_remote
-            mode_label = "远程执行模式（自动在目标上跑命令）"
         elif self.target_mode == "manual":
             remote_runner = None
-            mode_label = "指引模式（我只出分析结论和方案，动手由你亲自来）"
         else:
             remote_runner = None
-            mode_label = "指引模式（我只出分析结论和方案，动手由你亲自来）"
 
         sess = runtime.Session(p, params=params, mode="guided", io=io, sid=session_id,
                                remote_runner=remote_runner)
@@ -284,17 +287,17 @@ class Repl:
             if not start:
                 print("  没有可续跑的进度。")
                 return
-        print(f"\n进入：{s['metadata']['name']}（{mode_label}）")
+        print(f"\n进入：{s['metadata']['name']}")
         try:
             res = sess.run(start=start)
         except KeyboardInterrupt:
-            print("\n  ⏸ 已中断本次诊断（进度已存）。输入 resume 可继续，或继续描述别的问题。")
+            print("\n  ✋ 已取消，请输入新的指令。")
             return
         finally:
             if self.target_mode == "remote":
                 ssh_conn.close_all()                   # 本轮复用连接收尾（A）
         if res["outcome"] == "quit":
-            print("  已退出本次诊断（进度已存，输入 resume 继续）。")
+            print("  已退出本次诊断。")
 
     def _resume_pick(self):
         sd = _home() / "sessions"
@@ -992,7 +995,15 @@ class Repl:
         return params
 
     def _sweep_incident(self):
-        """批量取证：远程模式走 execute_mixed + gate，本机/手动保留现有逐条逻辑。"""
+        """批量取证（v2 主线）：已陈诉未取证时，回车/输入 sweep 进入。
+        Ctrl-C = 取消本轮取证（已执行条目已入库不回滚），回提示符。"""
+        try:
+            self._sweep_incident_inner()
+        except KeyboardInterrupt:
+            print("\n  ✋ 已取消，请输入新的指令。")
+
+    def _sweep_incident_inner(self):
+        """批量取证本体：远程模式走 execute_mixed + gate，本机/手动保留现有逐条逻辑。"""
         inc = self.last_incident
         if not inc:
             print("  先描述一个问题，我才好取证。")
@@ -1126,7 +1137,7 @@ class Repl:
                    if h.status == I.CONFIRMED and h.pending]
         if not pending:
             if all(h.status != I.CONFIRMED for h in inc.hyps):
-                print("  未证实任何假设。输入 report 导出移交卷宗，转人工/强模型接手。")
+                print("  未证实任何假设。输入 report 可导出卷宗。")
                 if self.model_cfg is not None:       # escalate 助理：只荐库内 id（R8/R10）
                     sid = llm.suggest_skill(inc.handover(), self.idx, config=self.model_cfg)
                     if sid:
@@ -1170,7 +1181,7 @@ class Repl:
                      if h.status == I.CONFIRMED
                      and (h.terminal or "").startswith("done:")]
         if not ans:
-            print("  好。结论与证据都在上方卷宗，可随时 report 导出移交。")
+            print("  好。结论与证据都在上方卷宗。输入 report 可导出卷宗。")
             return
         if ans.lower() not in ("y", "yes", "是"):
             print("  已记录你的反馈。")
@@ -1244,17 +1255,17 @@ class Repl:
                                sid=h.meta["id"].replace(".", "_") + "-repl",
                                remote_runner=remote_runner,
                                facts=inc.store, facts_target=inc.target)
-        print(f"\n进入：{h.meta['name']}（导航档，已带 {len(inc.store.evidence())} 条已采集证据）")
+        print(f"\n进入：{h.meta['name']}")
         try:
             res = sess.run()
         except KeyboardInterrupt:
-            print("\n  ⏸ 已中断本次处置（进度已存）。输入 resume 可继续。")
+            print("\n  ✋ 已取消，请输入新的指令。")
             return
         finally:
             if self.target_mode == "remote":
                 ssh_conn.close_all()                   # 本轮复用连接收尾（A）
         if res["outcome"] == "quit":
-            print("  已退出本次处置（进度已存，输入 resume 继续）。")
+            print("  已退出本次处置。")
 
     # ---------- 远程取证 ----------
     _wl_notice_shown = None          # 白名单档提示每目标只打一次（execute_mixed 每探针查授权）
@@ -1388,12 +1399,18 @@ class Repl:
             pass
 
     def _sweep_remote(self, inc):
-        """远程取证流程：
+        """远程取证流程（Ctrl-C = 取消本轮，已执行条目已入库不回滚）：
         1. 调 mixed_sweep（本机探针走 bash，远程已授权走 gate，未授权进 manual）
         2. 展示已自动执行的结果（逐条 ✅）
         3. 对 manual 桶里的探针逐条交互（保持与现有手动模式一致的体验）
         4. 干跑 + 卷宗
         """
+        try:
+            self._sweep_remote_inner(inc)
+        except KeyboardInterrupt:
+            print("\n  ✋ 已取消，请输入新的指令。")
+
+    def _sweep_remote_inner(self, inc):
         # 补参数：两段式之②（#33）定向抽取 → 不足部分 _collect_params 问询兜底
         skills = [h.skill for h in inc.hyps]
         self._llm_targeted_intake(inc.symptom, skills, inc.params)
@@ -1466,6 +1483,7 @@ class Repl:
                 stdout = self._read_until_end()
                 if stdout.strip():
                     sweep._store_result(inc.store, p, stdout)
+            inc._t("manual_paste", n=len(manual_items))   # 时间线：转人工完成（#39）
 
         # 干跑 + 卷宗
         inc.dry_run()
@@ -1477,13 +1495,59 @@ class Repl:
         if self.target_mode == "remote":
             ssh_conn.close_all()                       # 本轮复用连接收尾（A）
 
-    def _report(self, share=False):
+    def _report(self):
         if not self.last_incident:
-            print("  还没有可导出的排查。先描述问题并 sweep。")
+            print("  当前无可导出的卷宗。请先描述问题并完成批量排查后，再输入 report 导出。")
             return
+        inc = self.last_incident
+        # 空壳守门（#39）：没取证就 report，三桶全空，导出没有内容
+        if not any(inc.hyps):
+            print("  当前无可导出的卷宗。请先描述问题并完成批量排查后，再输入 report 导出。")
+            return
+        d = inc.dossier()
+        if not any(d[b] for b in ("confirmed", "refuted", "insufficient")):
+            print("  当前无可导出的卷宗。请先描述问题并完成批量排查后，再输入 report 导出。")
+            return
+        try:
+            ans = input("  是否脱敏导出（剥离个人注记/内网地址）？ [y/N]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            ans = ""
+        share = ans.lower() in ("y", "yes", "是")
         if share:
-            print("  （--share：已剥离个人 overlay 注记与内网地址，可放心贴工单/发社区）")
-        print(self.last_incident.export_report(share=share))
+            print("  （已剥离个人注记与内网地址，可放心贴工单/发社区）")
+        # "- 结论"：展示层现场调模型（capt 限字数）；未接模型/超时/降级 → 整行不出现。
+        # 模块层不碰 llm（export_report 只收现成字符串），测试不被模型调用缠住。
+        conclusion = self._llm_report_conclusion(inc)
+        print(inc.export_report(share=share, conclusion=conclusion))
+
+    def _llm_report_conclusion(self, inc):
+        """模型对这轮诊断的 ≤80 字总结（#39 头部"- 结论"）。model 未接/任何异常
+        → 空串（整行不出现，不留半截）。返回前过 redact（与 narrate 同规）。"""
+        if self.model_cfg is None:
+            return ""
+        d = inc.dossier()
+        rows = []
+        for bucket in ("confirmed", "refuted", "insufficient"):
+            for it in d.get(bucket, []):
+                ev = it["evidence"][0] if it["evidence"] else None
+                rows.append({"bucket": bucket, "name": it["name"],
+                             "conclusion": it["conclusion"] or "",
+                             "evidence": (f"{ev['field']}={ev['value']}" if ev else "")})
+        if not rows:
+            return ""
+        import json as _json
+        import redact as _redact
+        prompt = _redact.redact(
+            "症状：" + (inc.symptom or "") + "\n" +
+            "请用不超过80字概括这轮诊断的结论与下一步建议，不要罗列全部细节。"
+            + _json.dumps(rows, ensure_ascii=False))
+        try:
+            out = llm.backend_call(self.model_cfg, prompt, _REPORT_CONCLUSION_SYS)
+        except Exception:
+            return ""
+        if out and out.strip():
+            return " ".join(out.strip().split())[:160]
+        return ""
 
     def _delegate(self, parts):
         """hub/record/skill/doctor 交给既有 CLI 模块处理（复用，不复制）。"""

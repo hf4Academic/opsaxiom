@@ -59,8 +59,7 @@ axiom> quit
 
 规矩：**写操作永远由你亲手执行**（指引模式），它只给方案、变更影响说明和回滚命令；
 诊断阶段只跑只读命令；判读全由机器按解析器字段算，证据不足就明说还差什么。
-远端设备则给你一整块命令一次贴回。
-中途 Ctrl-C 暂停（进度已存），`resume` 继续；输候选序号可回到老式逐步排查（兜底）。
+远端设备则给你一整块命令一次贴回。中途 Ctrl-C 随时取消本轮操作。
 
 **3) 脚本/自动化用子命令**：
 
@@ -106,7 +105,7 @@ echo '{"alerts":[{"labels":{"alertname":"GPU 掉卡 XID 79"}}]}' | opsaxiom-webh
   告警 → 匹配 Skill → 推钉钉/飞书卡片（只推荐不代执行）。
 - **运行时 CLI**：`opsaxiom` 裸敲进交互态，说一遍问题 → 并行多假设、一轮批量诊断
   （只读命令自动跑/远端一次粘贴）→ 诊断卷宗 → 处置审批 → 复盘导出。
-  支持 `--resume` 断点继续、变更节点 skip/升级/退出多选。
+  支持 `--resume` 断点续跑（CLI 层保留）、变更节点 skip/升级/退出多选。
 - **远程接入**（docs/12）：`target` 交互菜单管理设备（list/add/grant/revoke/delete/
   import-ssh-config/doctor，缺参数自动引导；add 向导含端口/VPN 标签），ssh/网络设备/k8s/http 四连接器。
   **add 一站式开通**：本机密钥检测/生成 → 密码一次上门 → 公钥双装 → ro 账号+sudoers 只读白名单，
@@ -114,7 +113,7 @@ echo '{"alerts":[{"labels":{"alertname":"GPU 掉卡 XID 79"}}]}' | opsaxiom-webh
   注入防护 + 审计），探针自动远程执行，名单外/未授权/不可达的降级为逐条粘贴人工贴回；
   `cred set` 本地钥匙串存密码类凭证——**凭证不出本机，清单只存引用**。
 - **本地化 Skill**（docs/13）：linkbook 个人网页台账、overlay 叠加层（填 placeholder/贴注记，
-  不碰通用树）、fork 派生——**个人层结构性不出门**（打包/CI 拒收，`report --share` 自动剥离 📌 与内网地址）。
+  不碰通用树）、fork 派生——**个人层结构性不出门**（打包/CI 拒收，`report` 脱敏导出自动剥离 📌 与内网地址）。
 - **可选接模型**（只做理解/叙事/建议，永不出命令、不判分支）：
   本机小模型(Qwen2.5-0.5B)（`opsaxiom model pull` 本机离线跑，开箱备用）/ Ollama / OpenAI 兼容
   远程 API / **Pi Agent Harness 多 provider 网关**，`opsaxiom model` 一条命令切换，
